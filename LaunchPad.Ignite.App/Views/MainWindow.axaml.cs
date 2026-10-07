@@ -1,6 +1,9 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
+using LaunchPad.Ignite.App.ViewModels;
+using LaunchPad.Ignite.Core.Completion;
 using SharpHook;
 using SharpHook.Data;
 using System;
@@ -28,7 +31,7 @@ public partial class MainWindow : Window
         _globalHook.KeyPressed += GlobalHook_KeyPressed;
         _globalHook.KeyReleased += GlobalHook_KeyReleased;
         Deactivated += MainWindow_Deactivated;
-        KeyDown += MainWindow_KeyDown;
+        AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
         Opened += MainWindow_Opened;
         Closed += MainWindow_Closed;
     }
@@ -43,6 +46,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_Opened(object? sender, EventArgs e)
     {
+        Dispatcher.UIThread.Post(() =>
+        {
+            Activate();
+            _commandBox.Focus();
+        }, DispatcherPriority.Input);
+
         if (_hotKeyTask is not null)
         {
             return;
@@ -125,10 +134,70 @@ public partial class MainWindow : Window
 
     private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
         if (e.Key == Key.Escape)
         {
+            viewModel.HandleInputKey(CommandInputKey.Escape);
             Hide();
             e.Handled = true;
+            return;
+        }
+
+        if (!_commandBox.IsFocused)
+        {
+            return;
+        }
+
+        CommandInputKey? inputKey = null;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            inputKey = e.Key switch
+            {
+                Key.A when viewModel.IsChecklistActive => CommandInputKey.SelectAll,
+                Key.D when viewModel.IsChecklistActive => CommandInputKey.DeselectAll,
+                Key.Back => CommandInputKey.Clear,
+                _ => null
+            };
+        }
+        else
+        {
+            inputKey = e.Key switch
+            {
+                Key.Tab when viewModel.CanComplete => CommandInputKey.Tab,
+                Key.Enter => CommandInputKey.Enter,
+                Key.Space when viewModel.IsChecklistActive => CommandInputKey.Space,
+                Key.Up when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Up,
+                Key.Down when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Down,
+                _ => null
+            };
+        }
+
+        if (inputKey is not null)
+        {
+            var previousText = viewModel.CommandText;
+            viewModel.HandleInputKey(inputKey.Value);
+            e.Handled = true;
+
+            if (!string.Equals(previousText, viewModel.CommandText, StringComparison.Ordinal))
+            {
+                var updatedText = viewModel.CommandText;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_commandBox.IsFocused)
+                    {
+                        if (!string.Equals(_commandBox.Text, updatedText, StringComparison.Ordinal))
+                        {
+                            _commandBox.Text = updatedText;
+                        }
+
+                        _commandBox.CaretIndex = updatedText.Length;
+                    }
+                }, DispatcherPriority.Background);
+            }
         }
     }
 

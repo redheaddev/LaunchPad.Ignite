@@ -26,6 +26,18 @@
             <Setter Property="MinWidth" Value="30" />
             <Setter Property="MinHeight" Value="30" />
         </Style>
+        <Style Selector="Border.completion-item.highlighted">
+            <Setter Property="Background" Value="#FF1E3A5F" />
+        </Style>
+        <Style Selector="Border.completion-item TextBlock">
+            <Setter Property="Foreground" Value="#FF94A3B8" />
+        </Style>
+        <Style Selector="TextBlock.completion-item-text.highlighted">
+            <Setter Property="Foreground" Value="#FFE2E8F0" />
+        </Style>
+        <Style Selector="TextBlock.completion-item-text.checked">
+            <Setter Property="Foreground" Value="#FF67E8F9" />
+        </Style>
     </Window.Styles>
 
     <Border Background="#F2111827"
@@ -56,18 +68,51 @@
 
             <Border Grid.Row="1" Background="#FF020617" BorderBrush="#FF334155"
                     BorderThickness="1" CornerRadius="10" Padding="12,8">
-                <TextBox x:Name="CommandBox" Text="{Binding CommandText}"
-                         PlaceholderText="Enter a command"
-                         FontFamily="Cascadia Mono, Consolas"
-                         FontSize="22" Foreground="#FFE2E8F0"
-                         Background="Transparent" BorderThickness="0"
-                         CaretBrush="#FF67E8F9" />
+                <Grid ClipToBounds="True" ColumnDefinitions="12,*">
+                    <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandText}"
+                             FontFamily="Cascadia Mono, Consolas"
+                             FontSize="22" Foreground="Transparent"
+                             Background="Transparent" BorderThickness="0" Padding="12,0,0,0"
+                             VerticalContentAlignment="Center"
+                             CaretBrush="#FF67E8F9" />
+                    <TextBlock Grid.Column="1" Text="Enter a command" IsVisible="{Binding IsCommandTextEmpty}"
+                               IsHitTestVisible="False" VerticalAlignment="Center"
+                               FontFamily="Cascadia Mono, Consolas" FontSize="22"
+                               Foreground="#FF64748B" />
+                    <TextBlock Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
+                               FontFamily="Cascadia Mono, Consolas" FontSize="22"
+                               TextWrapping="NoWrap">
+                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="#FFE2E8F0"/><Run Text="{Binding CompletionGhostText}" Foreground="#FF64748B"/></TextBlock.Inlines>
+                    </TextBlock>
+                </Grid>
             </Border>
 
             <Grid Grid.Row="2" Margin="3,12,3,0">
-                <TextBlock Text="Start typing to see commands"
-                           Foreground="#FF64748B" FontSize="13"
-                           VerticalAlignment="Top" />
+                <Grid RowDefinitions="Auto,*,Auto">
+                    <TextBlock Text="{Binding UsageText}"
+                               IsVisible="{Binding HasUsageText}"
+                               Foreground="#FF64748B" FontFamily="Cascadia Mono, Consolas"
+                               FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"
+                               Margin="0,0,0,8" />
+                    <ItemsControl Grid.Row="1" ItemsSource="{Binding CompletionItems}"
+                                  IsVisible="{Binding HasCompletionOptions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
+                                        Classes.highlighted="{Binding IsHighlighted}">
+                                    <TextBlock Classes="completion-item-text"
+                                               Classes.highlighted="{Binding IsHighlighted}"
+                                               Classes.checked="{Binding IsSelected}"
+                                               Text="{Binding DisplayText}"
+                                               FontFamily="Cascadia Mono, Consolas" FontSize="13" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Grid.Row="2" Text="{Binding StatusMessage}"
+                               Foreground="#FF64748B" FontSize="12"
+                               VerticalAlignment="Bottom" />
+                </Grid>
             </Grid>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0">

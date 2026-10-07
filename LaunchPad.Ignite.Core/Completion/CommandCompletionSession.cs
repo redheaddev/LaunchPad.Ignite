@@ -1,0 +1,349 @@
+using LaunchPad.Ignite.Core.Lists;
+using LaunchPad.Ignite.Core.Schema;
+
+namespace LaunchPad.Ignite.Core.Completion;
+
+public sealed class CommandCompletionSession
+{
+    private readonly CommandCatalog _catalog;
+    private readonly IArgumentValueProvider _valueProvider;
+    private readonly CommandCompletionResolver _resolver;
+    private string _inputText = string.Empty;
+    private CompletionResolution _resolution;
+    private List<string> _selectedValues = [];
+    private string _listFilter = string.Empty;
+    private string? _preferredHighlightValue;
+    private int _highlightedIndex;
+
+    public CommandCompletionSession(CommandCatalog catalog, IArgumentValueProvider valueProvider)
+    {
+        _catalog = catalog;
+        _valueProvider = valueProvider;
+        _resolver = new CommandCompletionResolver(catalog, valueProvider);
+        _resolution = _resolver.Resolve(_inputText);
+        State = BuildState();
+    }
+
+    public CommandCompletionState State { get; private set; }
+
+    public CommandCompletionState UpdateInputText(string inputText)
+    {
+        if (string.Equals(_inputText, inputText, StringComparison.Ordinal))
+        {
+            return State;
+        }
+
+        _inputText = inputText;
+        _preferredHighlightValue = null;
+        Recalculate(resetSelection: true);
+        return State;
+    }
+
+    public CommandCompletionState HandleKey(CommandInputKey key)
+    {
+        switch (key)
+        {
+            case CommandInputKey.Tab:
+                AcceptOrToggle();
+                break;
+            case CommandInputKey.Space:
+                ExitChecklist();
+                break;
+            case CommandInputKey.Up:
+                MoveHighlight(-1);
+                break;
+            case CommandInputKey.Down:
+                MoveHighlight(1);
+                break;
+            case CommandInputKey.SelectAll:
+                SelectAll();
+                break;
+            case CommandInputKey.DeselectAll:
+                DeselectAll();
+                break;
+            case CommandInputKey.Escape:
+            case CommandInputKey.Clear:
+                _inputText = string.Empty;
+                _preferredHighlightValue = null;
+                Recalculate(resetSelection: true);
+                break;
+            case CommandInputKey.Enter:
+                break;
+        }
+
+        return State;
+    }
+
+    private void AcceptOrToggle()
+    {
+        if (_resolution.AwaitingSeparator)
+        {
+            _inputText += ' ';
+            _preferredHighlightValue = null;
+            Recalculate(resetSelection: true);
+            return;
+        }
+
+        var items = GetVisibleItems();
+        if (items.Count == 0 || _highlightedIndex < 0 || _highlightedIndex >= items.Count)
+        {
+            return;
+        }
+
+        var selectedItem = items[_highlightedIndex].Value;
+        if (_resolution.IsChecklist)
+        {
+            if (_resolution.ListMode == ListSelectionMode.Minimal)
+            {
+                if (!_selectedValues.Contains(selectedItem, StringComparer.OrdinalIgnoreCase))
+                {
+                    _selectedValues.Add(selectedItem);
+                }
+
+                _preferredHighlightValue = GetVisibleListValues()
+                    .FirstOrDefault(value => !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase));
+            }
+            else
+            {
+                var selectedIndex = _selectedValues.FindIndex(value =>
+                    string.Equals(value, selectedItem, StringComparison.OrdinalIgnoreCase));
+                if (selectedIndex >= 0)
+                {
+                    _selectedValues.RemoveAt(selectedIndex);
+                }
+                else
+                {
+                    _selectedValues.Add(selectedItem);
+                }
+
+                _preferredHighlightValue = selectedItem;
+            }
+
+            ReplaceCurrentArgument(string.Join(',', _selectedValues));
+            Recalculate(resetSelection: false);
+            return;
+        }
+
+        var appendSpace = ShouldAppendSpace(selectedItem);
+        _inputText = _inputText[.._resolution.TokenStart] + selectedItem + (appendSpace ? " " : string.Empty);
+        _preferredHighlightValue = null;
+        Recalculate(resetSelection: true);
+    }
+
+    private bool ShouldAppendSpace(string candidate)
+    {
+        if (_resolution.Kind == CompletionKind.Argument)
+        {
+            return _resolution.AppendSpaceOnAccept;
+        }
+
+        if (_resolution.Kind == CompletionKind.Command
+            && _catalog.TryGetCommand(candidate, out var command))
+        {
+            if (_catalog.TryGetDefaultAction(command, out var defaultAction))
+            {
+                return defaultAction.Arguments.Any(argument => !argument.Optional);
+            }
+
+            return command.Actions.Count > 0;
+        }
+
+        if (_resolution.Kind == CompletionKind.Action
+            && _catalog.Commands.SelectMany(command => command.Actions).FirstOrDefault(action =>
+                string.Equals(action.Name, candidate, StringComparison.OrdinalIgnoreCase)) is { } action)
+        {
+            return action.Arguments.Any(argument => !argument.Optional);
+        }
+
+        return false;
+    }
+
+    private void ExitChecklist()
+    {
+        if (!_resolution.IsChecklist || _selectedValues.Count == 0 || !_resolution.HasNextArgument)
+        {
+            return;
+        }
+
+        if (!_inputText.EndsWith(' '))
+        {
+            _inputText += ' ';
+        }
+
+        _preferredHighlightValue = null;
+        Recalculate(resetSelection: true);
+    }
+
+    private void MoveHighlight(int offset)
+    {
+        var items = GetVisibleItems();
+        if (items.Count == 0)
+        {
+            _highlightedIndex = -1;
+        }
+        else
+        {
+            _highlightedIndex = (_highlightedIndex + offset + items.Count) % items.Count;
+        }
+
+        State = BuildState();
+    }
+
+    private void SelectAll()
+    {
+        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Minimal)
+        {
+            return;
+        }
+
+        _selectedValues = _valueProvider.GetValues(_resolution.Argument!.Ref!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        ReplaceCurrentArgument(string.Join(',', _selectedValues));
+        Recalculate(resetSelection: false);
+    }
+
+    private void DeselectAll()
+    {
+        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Minimal)
+        {
+            return;
+        }
+
+        _selectedValues.Clear();
+        ReplaceCurrentArgument(string.Empty);
+        Recalculate(resetSelection: false);
+    }
+
+    private void ReplaceCurrentArgument(string value)
+    {
+        _inputText = _inputText[.._resolution.TokenStart] + value;
+    }
+
+    private void Recalculate(bool resetSelection)
+    {
+        _resolution = _resolver.Resolve(_inputText);
+        if (resetSelection || !_resolution.IsChecklist)
+        {
+            _selectedValues = [];
+            _listFilter = string.Empty;
+            _highlightedIndex = 0;
+        }
+
+        if (_resolution.IsChecklist)
+        {
+            ReadListInput();
+        }
+
+        var visibleValues = _resolution.IsChecklist
+            ? GetVisibleListValues()
+            : _resolution.Candidates.ToList();
+        if (_preferredHighlightValue is not null)
+        {
+            var preferredIndex = visibleValues.FindIndex(value =>
+                string.Equals(value, _preferredHighlightValue, StringComparison.OrdinalIgnoreCase));
+            if (preferredIndex >= 0)
+            {
+                _highlightedIndex = preferredIndex;
+            }
+        }
+
+        if (visibleValues.Count == 0)
+        {
+            _highlightedIndex = -1;
+        }
+        else if (_highlightedIndex < 0 || _highlightedIndex >= visibleValues.Count)
+        {
+            _highlightedIndex = 0;
+        }
+
+        State = BuildState();
+    }
+
+    private void ReadListInput()
+    {
+        var token = _resolution.Prefix;
+        var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
+        var parts = token.Split(',');
+        _selectedValues = [];
+        _listFilter = string.Empty;
+
+        var partsToRead = parts.Length;
+        if (parts.Length > 0 && parts[^1].Length == 0)
+        {
+            partsToRead--;
+        }
+
+        for (var index = 0; index < partsToRead; index++)
+        {
+            var value = parts[index];
+            var isLastPart = index == parts.Length - 1;
+            if (values.Contains(value, StringComparer.OrdinalIgnoreCase))
+            {
+                _selectedValues.Add(value);
+            }
+            else if (isLastPart)
+            {
+                _listFilter = value;
+            }
+            else
+            {
+                _listFilter = string.Join(',', parts.Skip(index));
+                break;
+            }
+        }
+
+        if (partsToRead < parts.Length && parts[^1].Length == 0)
+        {
+            _listFilter = string.Empty;
+        }
+    }
+
+    private List<string> GetVisibleListValues()
+    {
+        if (!_resolution.IsChecklist)
+        {
+            return [];
+        }
+
+        var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
+        return values
+            .Where(value => value.StartsWith(_listFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(value => _resolution.ListMode != ListSelectionMode.Minimal
+                || !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private List<CompletionItem> GetVisibleItems()
+    {
+        if (_resolution.IsChecklist)
+        {
+            return GetVisibleListValues()
+                .Select((value, index) => new CompletionItem(
+                    value,
+                    _selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase),
+                    index == _highlightedIndex))
+                .ToList();
+        }
+
+        return _resolution.Candidates
+            .Select((value, index) => new CompletionItem(value, false, index == _highlightedIndex))
+            .ToList();
+    }
+
+    private CommandCompletionState BuildState()
+    {
+        var items = GetVisibleItems();
+        var highlighted = items.FirstOrDefault(item => item.IsHighlighted);
+        var prefix = _resolution.IsChecklist ? _listFilter : _resolution.Prefix;
+        var ghostText = highlighted is not null && highlighted.Value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? highlighted.Value[prefix.Length..]
+            : string.Empty;
+        return new CommandCompletionState(
+            _inputText,
+            ghostText,
+            items,
+            _resolution.IsChecklist,
+            CanComplete: _resolution.AwaitingSeparator || items.Count > 0);
+    }
+}
