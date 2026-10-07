@@ -1,0 +1,81 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:LaunchPad.Ignite.App.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="760" d:DesignHeight="360"
+        x:Class="LaunchPad.Ignite.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="LaunchPad.Ignite"
+        Width="760" Height="360" MinWidth="640" MinHeight="300"
+        WindowDecorations="None" CanResize="False"
+        Background="Transparent" ShowInTaskbar="False" Topmost="True"
+        WindowStartupLocation="CenterScreen">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <Window.Styles>
+        <Style Selector="Button.header-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#FF94A3B8" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+        </Style>
+    </Window.Styles>
+
+    <Border Background="#F2111827"
+            BorderBrush="#FF334155"
+            BorderThickness="1"
+            CornerRadius="18"
+            Padding="22">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+            <Grid Grid.Row="0" Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8"
+                            PointerPressed="HeaderBar_PointerPressed">
+                    <TextBlock Text="🚀" FontSize="16" VerticalAlignment="Center" />
+                    <TextBlock Text="LaunchPad" FontSize="15" FontWeight="SemiBold"
+                               Foreground="#FF67E8F9" VerticalAlignment="Center" />
+                    <TextBlock Text="command launcher" FontSize="15"
+                               Foreground="#FF94A3B8" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <Button Classes="header-action" Content="?" ToolTip.Tip="Help" />
+                    <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export" />
+                    <Button Classes="header-action" Content="⚙" ToolTip.Tip="Settings" />
+                </StackPanel>
+            </Grid>
+
+            <Border Grid.Row="1" Background="#FF020617" BorderBrush="#FF334155"
+                    BorderThickness="1" CornerRadius="10" Padding="12,8">
+                <TextBox x:Name="CommandBox" Text="{Binding CommandText}"
+                         PlaceholderText="Enter a command"
+                         FontFamily="Cascadia Mono, Consolas"
+                         FontSize="22" Foreground="#FFE2E8F0"
+                         Background="Transparent" BorderThickness="0"
+                         CaretBrush="#FF67E8F9" />
+            </Border>
+
+            <Grid Grid.Row="2" Margin="3,12,3,0">
+                <TextBlock Text="Start typing to see commands"
+                           Foreground="#FF64748B" FontSize="13"
+                           VerticalAlignment="Top" />
+            </Grid>
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0">
+                <TextBlock Text="Alt/Option+Space  toggle" Foreground="#FF64748B" FontSize="11" />
+                <TextBlock Text="Enter  run" Foreground="#FF64748B" FontSize="11" />
+                <TextBlock Text="Tab  complete" Foreground="#FF64748B" FontSize="11" />
+                <TextBlock Text="Esc  close" Foreground="#FF64748B" FontSize="11" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

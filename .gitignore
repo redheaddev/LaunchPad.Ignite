@@ -1,0 +1,31 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Aa]rtifacts/
+[Pp]ublish/
+
+# Test output
+[Tt]est[Rr]esults/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/packages/
+
+# IDE and local tooling
+.vscode/
+*.rsuser
+*.sln.ide
+
+# Generated logs and temporary files
+*.log
+*.tmp

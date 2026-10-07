@@ -1,0 +1,44 @@
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Markup.Xaml;
+using LaunchPad.Ignite.App.ViewModels;
+using LaunchPad.Ignite.App.Views;
+using System;
+
+namespace LaunchPad.Ignite.App;
+
+public partial class App : Application
+{
+    private IClassicDesktopStyleApplicationLifetime? _desktopLifetime;
+    private MainWindow? _mainWindow;
+
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+    }
+
+    public override void OnFrameworkInitializationCompleted()
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            _desktopLifetime = desktop;
+            _mainWindow = new MainWindow
+            {
+                DataContext = new MainViewModel(),
+            };
+            desktop.MainWindow = _mainWindow;
+        }
+
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private void ShowWindow_Click(object? sender, EventArgs e)
+    {
+        _mainWindow?.ShowAndActivate();
+    }
+
+    private void Exit_Click(object? sender, EventArgs e)
+    {
+        _desktopLifetime?.Shutdown();
+    }
+}
