@@ -27,6 +27,20 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void CommandSuggestionsAreFilteredByTypedPrefix()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(TestCommandSchemas.Pipeline),
+            TestCommandSchemas.CreatePipelineProvider());
+
+        var state = session.UpdateInputText("a");
+
+        Assert.Empty(state.Items);
+        Assert.Empty(state.GhostText);
+        Assert.False(state.CanComplete);
+    }
+
+    [Fact]
     public void ExactCommandWaitsForSeparatorBeforeShowingNextArgumentSuggestion()
     {
         var session = new CommandCompletionSession(

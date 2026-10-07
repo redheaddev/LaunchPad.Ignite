@@ -39,6 +39,40 @@ public class CommandLineParserTests
     }
 
     [Fact]
+    public void ParseAcceptsCustomValueForEnumArgumentWhenEnabled()
+    {
+        var schema = TestCommandSchemas.Pipeline;
+        var command = schema.Commands[0];
+        var action = command.Actions[0];
+        var projectArgument = action.Arguments[0] with { AllowCustomValues = true };
+        var customSchema = schema with
+        {
+            Commands =
+            [
+                command with
+                {
+                    Actions =
+                    [
+                        action with
+                        {
+                            Arguments = [projectArgument, action.Arguments[1]]
+                        }
+                    ]
+                }
+            ]
+        };
+        var parser = new CommandLineParser(
+            new CommandCatalog(customSchema),
+            TestCommandSchemas.CreatePipelineProvider());
+
+        var result = parser.Parse("pipeline x 1234");
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal("x", result.ParsedCommand!.Arguments["project"]);
+        Assert.Equal("1234", result.ParsedCommand.Arguments["pipelineId"]);
+    }
+
+    [Fact]
     public void ParseAcceptsMultipleDynamicListValues()
     {
         var schema = TestCommandSchemas.SecretList();

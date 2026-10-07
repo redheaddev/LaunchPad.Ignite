@@ -30,7 +30,7 @@ public static class PipelineCommandSchema
                     "pipeline <enum:project> [csv:pipelineId]",
                     "https://dev.azure.com/saifcorporation/<project>/_build?definitionId=<pipelineId>",
                     [
-                        new CommandArgumentDefinition("project", Ref: "enum:project"),
+                        new CommandArgumentDefinition("project", Ref: "enum:project", AllowCustomValues: true),
                         new CommandArgumentDefinition("pipelineId", Optional: true, InputType: "csv")
                     ],
                     new CommandExecutionDefinition(CommandExecutionMode.TargetPerValue, ["pipelineId"]))])]);

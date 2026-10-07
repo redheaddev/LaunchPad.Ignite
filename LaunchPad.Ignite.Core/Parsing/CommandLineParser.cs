@@ -109,12 +109,14 @@ public sealed class CommandLineParser
         var separator = argument.Ref.IndexOf(':');
         var refType = argument.Ref[..separator];
         var validValues = _valueProvider.GetValues(argument.Ref);
+        var allowCustomEnumValue = argument.AllowCustomValues
+            && string.Equals(refType, "enum", StringComparison.OrdinalIgnoreCase);
         var selections = string.Equals(refType, "list", StringComparison.OrdinalIgnoreCase)
             ? value.Split(',')
             : [value];
 
         if (selections.Any(selection => string.IsNullOrWhiteSpace(selection)
-            || !validValues.Contains(selection, StringComparer.OrdinalIgnoreCase)))
+            || (!allowCustomEnumValue && !validValues.Contains(selection, StringComparer.OrdinalIgnoreCase))))
         {
             error = $"Argument '{argument.Name}' contains an unknown value.";
             return false;

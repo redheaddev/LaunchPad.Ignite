@@ -96,6 +96,12 @@ public sealed class CommandSchemaValidator
                 errors.Add($"Argument '{argument.Name}' uses unsupported input type '{argument.InputType}'.");
             }
 
+            if (argument.AllowCustomValues
+                && (argument.Ref is null || !argument.Ref.StartsWith("enum:", StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Argument '{argument.Name}' can allow custom values only when referencing an enum.");
+            }
+
             if (argument.Ref is null)
             {
                 continue;

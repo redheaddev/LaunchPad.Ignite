@@ -38,7 +38,10 @@ internal sealed class CommandCompletionResolver
                 CompletionKind.Command,
                 tokens[0].Value,
                 tokens[0].Start,
-                _catalog.Commands.Select(candidate => candidate.Name).ToArray());
+                _catalog.Commands
+                    .Select(candidate => candidate.Name)
+                    .Where(name => name.StartsWith(tokens[0].Value, StringComparison.OrdinalIgnoreCase))
+                    .ToArray());
         }
 
         var hasDefault = _catalog.TryGetDefaultAction(command, out var defaultAction);

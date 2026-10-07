@@ -11,11 +11,13 @@ Legend:
 
   <list:source> = multi-value checklist populated by source. Source is either a named list or the reserved source "secrets".
   An argument with "ref": "list:secret" uses the reserved "secrets" source.
-  <enum:name> selects one value from the named enum list; <list:name> selects one or more values from that list.
+  <enum:name> selects one value from the named enum list; <list:name> selects one or more values from that list. Enum arguments reject values outside the enum by default; an argument with "allowCustomValues": true also accepts a non-empty value not listed in the enum.
   <flag:name> selects one boolean value and is not a multi-value checklist.
   <csv:name> = comma-delimited text input retained as a string; it does not open a checklist. Use [csv:name] for an optional argument. An execution mode may split this string when iterating over values.
   Arguments are strings by default. A "ref" property binds an argument to a named list and determines its available choices; input metadata such as CSV changes input handling, not the argument's string type.
   An execution mode of "targetPerValue" creates one target for each comma-delimited value in the named CSV string argument.
+
+  Command suggestions are filtered case-insensitively by the typed prefix; show no command suggestions when nothing matches. Enum completion suggestions remain limited to declared options, even when the argument allows manually entered custom values.
 
   Checklist behavior:
   - The checklist is kept open until the user presses {enter} to execute using committed selections, {esc} to cancel the command, or {space} to exit checklist mode and continue typing the next argument.
@@ -111,7 +113,8 @@ An action named "default" is implicit and does not appear in the usage string.
           "args": [
             {
               "name": "project",
-              "ref": "enum:project"
+              "ref": "enum:project",
+              "allowCustomValues": true
             },
             {
               "name": "pipelineId",
@@ -205,6 +208,7 @@ Completion expectations:
   press {tab} -> "secret shell token1,token2"; token2 is checked and added, no trailing space is added, and the list stays visible
 
 Parser acceptance examples:
+  pipeline x 1234 (x is accepted because the project argument enables custom enum values)
   secret shell token1
   secret shell token1,token2
   secret set API_TOKEN
