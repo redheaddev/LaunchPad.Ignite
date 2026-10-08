@@ -94,21 +94,23 @@
                                Foreground="#FF64748B" FontFamily="Cascadia Mono, Consolas"
                                FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"
                                Margin="0,0,0,8" />
-                    <ItemsControl Grid.Row="1" ItemsSource="{Binding CompletionItems}"
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                                   IsVisible="{Binding HasCompletionOptions}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
-                                        Classes.highlighted="{Binding IsHighlighted}">
-                                    <TextBlock Classes="completion-item-text"
-                                               Classes.highlighted="{Binding IsHighlighted}"
-                                               Classes.checked="{Binding IsSelected}"
-                                               Text="{Binding DisplayText}"
-                                               FontFamily="Cascadia Mono, Consolas" FontSize="13" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        <ItemsControl x:Name="CompletionList" ItemsSource="{Binding CompletionItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
+                                            Classes.highlighted="{Binding IsHighlighted}">
+                                        <TextBlock Classes="completion-item-text"
+                                                   Classes.highlighted="{Binding IsHighlighted}"
+                                                   Classes.checked="{Binding IsSelected}"
+                                                   Text="{Binding DisplayText}"
+                                                   FontFamily="Cascadia Mono, Consolas" FontSize="13" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                     <TextBlock Grid.Row="2" Text="{Binding StatusMessage}"
                                Foreground="#FF64748B" FontSize="12"
                                VerticalAlignment="Bottom" />

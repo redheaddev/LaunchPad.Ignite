@@ -16,6 +16,7 @@ public partial class MainWindow : Window
 {
     private readonly SimpleGlobalHook _globalHook = new();
     private readonly TextBox _commandBox;
+    private readonly ItemsControl _completionList;
     private Task? _hotKeyTask;
     private bool _altPressed;
     private bool _controlPressed;
@@ -28,6 +29,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _commandBox = this.FindControl<TextBox>("CommandBox")
             ?? throw new InvalidOperationException("Command input control was not found.");
+        _completionList = this.FindControl<ItemsControl>("CompletionList")
+            ?? throw new InvalidOperationException("Completion list control was not found.");
         _globalHook.KeyPressed += GlobalHook_KeyPressed;
         _globalHook.KeyReleased += GlobalHook_KeyReleased;
         Deactivated += MainWindow_Deactivated;
@@ -181,6 +184,17 @@ public partial class MainWindow : Window
             var previousText = viewModel.CommandText;
             viewModel.HandleInputKey(inputKey.Value);
             e.Handled = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                for (var index = 0; index < viewModel.CompletionItems.Count; index++)
+                {
+                    if (viewModel.CompletionItems[index].IsHighlighted)
+                    {
+                        _completionList.ContainerFromIndex(index)?.BringIntoView();
+                        break;
+                    }
+                }
+            }, DispatcherPriority.Background);
 
             if (!string.Equals(previousText, viewModel.CommandText, StringComparison.Ordinal))
             {
