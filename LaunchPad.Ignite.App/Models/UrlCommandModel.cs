@@ -20,6 +20,9 @@ public sealed class UrlCommandModel : ICommandModel
 
     public string Kind => "url";
 
+    public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
+        => _targetBuilder.UpdateVariables(variables);
+
     public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result)
     {
         var candidate = text.Trim();

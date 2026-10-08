@@ -80,6 +80,67 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void VariableSuggestionsAreFilteredAndCanBeAcceptedWithKeyboard()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(TestCommandSchemas.Pipeline),
+            TestCommandSchemas.CreatePipelineProvider(),
+            [
+                new CommandVariableDefinition("orgUrl", "https://dev.azure.com/example", "ado"),
+                new CommandVariableDefinition("account", "saif"),
+                new CommandVariableDefinition("project", "architecture")
+            ]);
+
+        var state = session.UpdateInputText("$a");
+
+        Assert.Equal(["$ado:orgUrl", "$account"], state.Items.Select(item => item.Value));
+        Assert.Equal(
+            ["$ado:orgUrl = https://dev.azure.com/example", "$account = saif"],
+            state.Items.Select(item => item.DisplayText));
+        Assert.Equal("do:orgUrl", state.GhostText);
+
+        state = session.HandleKey(CommandInputKey.Down);
+        Assert.Contains(state.Items, item => item.Value == "$account" && item.IsHighlighted);
+        state = session.HandleKey(CommandInputKey.Tab);
+
+        Assert.Equal("$account", state.InputText);
+    }
+
+    [Fact]
+    public void VariableSuggestionsRefreshForVariablesAddedAtRuntime()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(TestCommandSchemas.Pipeline),
+            TestCommandSchemas.CreatePipelineProvider());
+        Assert.Empty(session.UpdateInputText("$").Items);
+
+        var state = session.UpdateVariables(
+        [
+            new CommandVariableDefinition("project", "architecture"),
+            new CommandVariableDefinition("orgUrl", "https://dev.azure.com/example", "ado")
+        ]);
+
+        Assert.Equal(["$project", "$ado:orgUrl"], state.Items.Select(item => item.Value));
+        Assert.Equal(["$project = architecture", "$ado:orgUrl = https://dev.azure.com/example"],
+            state.Items.Select(item => item.DisplayText));
+    }
+
+    [Fact]
+    public void VariableSuggestionsWorkInsideDirectUrlTokens()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(TestCommandSchemas.Pipeline),
+            TestCommandSchemas.CreatePipelineProvider(),
+            [new CommandVariableDefinition("project", "architecture")]);
+
+        var state = session.UpdateInputText("https://dev.azure.com/saifcorporation/$pro");
+
+        Assert.Equal(["$project"], state.Items.Select(item => item.Value));
+        state = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("https://dev.azure.com/saifcorporation/$project", state.InputText);
+    }
+
+    [Fact]
     public void ExactCommandWaitsForSeparatorBeforeShowingNextArgumentSuggestion()
     {
         var session = new CommandCompletionSession(

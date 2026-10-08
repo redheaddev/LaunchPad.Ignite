@@ -10,13 +10,22 @@ public sealed record CommandTextExpansionResult(
 
 public sealed class CommandTextVariableExpander
 {
-    private static readonly Regex VariablePattern = new(@"\$([^\s/<>?&#]+:[^\s/<>?&#]+)", RegexOptions.Compiled);
-    private readonly IReadOnlyDictionary<string, string> _variables;
+    private static readonly Regex VariablePattern = new(@"\$([^\s/<>?&#]+)", RegexOptions.Compiled);
+    private readonly Dictionary<string, string> _variables;
 
     public CommandTextVariableExpander(IEnumerable<CommandVariableDefinition>? variables = null)
     {
         _variables = (variables ?? [])
             .ToDictionary(variable => variable.QualifiedName, variable => variable.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
+    {
+        _variables.Clear();
+        foreach (var variable in variables)
+        {
+            _variables[variable.QualifiedName] = variable.Value;
+        }
     }
 
     public CommandTextExpansionResult Expand(string commandText)

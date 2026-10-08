@@ -9,17 +9,48 @@ internal sealed class CommandCompletionResolver
     private readonly CommandCatalog _catalog;
     private readonly IArgumentValueProvider _valueProvider;
     private readonly CommandLineTokenizer _tokenizer = new();
+    private IReadOnlyList<CommandVariableDefinition> _variables;
 
-    public CommandCompletionResolver(CommandCatalog catalog, IArgumentValueProvider valueProvider)
+    public CommandCompletionResolver(
+        CommandCatalog catalog,
+        IArgumentValueProvider valueProvider,
+        IEnumerable<CommandVariableDefinition>? variables = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
+        _variables = (variables ?? []).ToArray();
     }
+
+    public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
+        => _variables = variables.ToArray();
 
     public CompletionResolution Resolve(string input)
     {
         var tokens = _tokenizer.Tokenize(input);
         var trailingWhitespace = _tokenizer.EndsWithWhitespace(input);
+
+        if (!trailingWhitespace && tokens.Count > 0)
+        {
+            var currentToken = tokens[^1];
+            var variableStart = currentToken.Value.LastIndexOf('$');
+            if (variableStart >= 0)
+            {
+                var prefix = currentToken.Value[variableStart..];
+                var matchingVariables = _variables
+                    .Where(variable => $"${variable.QualifiedName}".StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                return CreateResolution(
+                    CompletionKind.Variable,
+                    prefix,
+                    currentToken.Start + variableStart,
+                    matchingVariables.Select(variable => $"${variable.QualifiedName}").ToArray()) with
+                {
+                    CandidateDisplayValues = matchingVariables
+                        .Select(variable => $"${variable.QualifiedName} = {variable.Value}")
+                        .ToArray()
+                };
+            }
+        }
 
         if (tokens.Count == 0)
         {

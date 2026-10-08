@@ -28,18 +28,29 @@ public partial class MainViewModel : ViewModelBase
     public MainViewModel()
     {
         var extensions = new ExtensionLoader().Load();
-        var schema = new CommandSchemaLoader(extensions.Schema).Load();
-        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell"));
+        var schemaLoader = new CommandSchemaLoader(extensions.Schema);
+        var schema = schemaLoader.Load();
+        schema = schema with { Commands = schema.Commands.Append(VariableCommandModel.Definition).ToArray() };
+        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell").Append("variable"));
         _variableExpander = new CommandTextVariableExpander(schema.Variables);
         _shortcutResolver = new ShortcutResolver(schema.Commands);
         var valueProvider = new CommandSchemaValueProvider(schema);
-        _completionSession = new CommandCompletionSession(_catalog, valueProvider);
+        _completionSession = new CommandCompletionSession(
+            _catalog,
+            valueProvider,
+            schema.Variables);
         _parser = new CommandLineParser(_catalog, valueProvider);
         _urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["url"] = _urlCommandModel,
-            ["shell"] = new ShellCommandModel(new SystemProcessStarter())
+            ["shell"] = new ShellCommandModel(new SystemProcessStarter()),
+            ["variable"] = new VariableCommandModel(schemaLoader, updatedSchema =>
+            {
+                _variableExpander.UpdateVariables(updatedSchema.Variables);
+                _urlCommandModel.UpdateVariables(updatedSchema.Variables);
+                ApplyCompletionState(_completionSession.UpdateVariables(updatedSchema.Variables));
+            })
         };
         foreach (var (kind, executor) in extensions.Executors)
         {
@@ -146,7 +157,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var displayText = state.IsChecklistActive
                 ? $"{(item.IsSelected ? "[x]" : "[ ]")} {item.Value}"
-                : item.Value;
+                : item.DisplayText ?? item.Value;
             if (!state.IsChecklistActive
                 && isCommandCompletion
                 && _catalog.TryGetCommand(item.Value, out var command))

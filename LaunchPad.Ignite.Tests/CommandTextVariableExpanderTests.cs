@@ -19,6 +19,19 @@ public class CommandTextVariableExpanderTests
     }
 
     [Fact]
+    public void ExpandResolvesBareVariablesAndCanRefreshValues()
+    {
+        var expander = new CommandTextVariableExpander();
+
+        expander.UpdateVariables([new CommandVariableDefinition("region", "west")]);
+        var result = expander.Expand("open $region");
+
+        Assert.Equal("open west", result.ExpandedText);
+        Assert.Equal(["region"], result.ResolvedVariables);
+        Assert.Empty(result.UnresolvedVariables);
+    }
+
+    [Fact]
     public void ExpandLeavesUnknownVariablesInTextAndReportsThem()
     {
         var expander = new CommandTextVariableExpander(

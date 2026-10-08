@@ -16,7 +16,8 @@ public enum CommandInputKey
 public sealed record CompletionItem(
     string Value,
     bool IsSelected,
-    bool IsHighlighted);
+    bool IsHighlighted,
+    string? DisplayText = null);
 
 public sealed record CommandCompletionState(
     string InputText,

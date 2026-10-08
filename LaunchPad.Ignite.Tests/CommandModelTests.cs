@@ -27,6 +27,59 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void VariableCommandAddsBareAndNamespacedVariablesAndUpdatesExpansion()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        var expander = new CommandTextVariableExpander(loader.Load().Variables);
+        var model = new VariableCommandModel(loader, schema => expander.UpdateVariables(schema.Variables));
+        var parser = CreateVariableParser();
+
+        var bareResult = model.Execute(ParseVariableCommand(parser, "variable add region west"));
+        var namespacedResult = model.Execute(ParseVariableCommand(parser, "variable add ado:orgUrl https://example.test"));
+
+        Assert.True(bareResult.Succeeded);
+        Assert.True(namespacedResult.Succeeded);
+        Assert.Equal("west", expander.Expand("$region").ExpandedText);
+        Assert.Equal("https://example.test", expander.Expand("$ado:orgUrl").ExpandedText);
+        Assert.Equal(2, loader.Load().Variables.Count);
+    }
+
+    [Fact]
+    public void VariableCommandRemovesPersistedVariableAndUpdatesExpansion()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        var expander = new CommandTextVariableExpander(loader.Load().Variables);
+        var model = new VariableCommandModel(loader, schema => expander.UpdateVariables(schema.Variables));
+        var parser = CreateVariableParser();
+
+        Assert.True(model.Execute(ParseVariableCommand(parser, "variable add team:repo https://example.test/repo")).Succeeded);
+        var result = model.Execute(ParseVariableCommand(parser, "variable remove team:repo"));
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(loader.Load().Variables);
+        Assert.Equal("$team:repo", expander.Expand("$team:repo").ExpandedText);
+        Assert.Equal(["team:repo"], expander.Expand("$team:repo").UnresolvedVariables);
+    }
+
+    [Fact]
+    public void VariableCommandRejectsMalformedNamespacedVariableNames()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        var model = new VariableCommandModel(loader, _ => { });
+
+        var result = model.Execute(ParseVariableCommand(CreateVariableParser(), "variable add team:one:repo value"));
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(loader.Load().Variables);
+    }
+
+    [Fact]
     public void LoaderMergesUserDefinitionsOverAppDefinitions()
     {
         using var directory = new TemporaryDirectory();
@@ -59,6 +112,20 @@ public class CommandModelTests
         Assert.Contains(schema.Commands, command => command.Name == "user-only");
         Assert.Equal("user-value", Assert.Single(schema.Lists).Values[0]);
         Assert.Equal("https://user.test", Assert.Single(schema.Variables).Value);
+    }
+
+    private static CommandLineParser CreateVariableParser()
+    {
+        var schema = new CommandSchema([], [VariableCommandModel.Definition]);
+        var catalog = new CommandCatalog(schema, ["variable"]);
+        return new CommandLineParser(catalog, new CommandSchemaValueProvider(schema));
+    }
+
+    private static ParsedCommand ParseVariableCommand(CommandLineParser parser, string input)
+    {
+        var result = parser.Parse(input);
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        return result.ParsedCommand!;
     }
 
     [Fact]

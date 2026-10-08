@@ -15,16 +15,26 @@ public sealed class CommandCompletionSession
     private string? _preferredHighlightValue;
     private int _highlightedIndex;
 
-    public CommandCompletionSession(CommandCatalog catalog, IArgumentValueProvider valueProvider)
+    public CommandCompletionSession(
+        CommandCatalog catalog,
+        IArgumentValueProvider valueProvider,
+        IEnumerable<CommandVariableDefinition>? variables = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
-        _resolver = new CommandCompletionResolver(catalog, valueProvider);
+        _resolver = new CommandCompletionResolver(catalog, valueProvider, variables);
         _resolution = _resolver.Resolve(_inputText);
         State = BuildState();
     }
 
     public CommandCompletionState State { get; private set; }
+
+    public CommandCompletionState UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
+    {
+        _resolver.UpdateVariables(variables);
+        Recalculate(resetSelection: true);
+        return State;
+    }
 
     public CommandCompletionState UpdateInputText(string inputText)
     {
@@ -327,7 +337,13 @@ public sealed class CommandCompletionSession
         }
 
         return _resolution.Candidates
-            .Select((value, index) => new CompletionItem(value, false, index == _highlightedIndex))
+            .Select((value, index) => new CompletionItem(
+                value,
+                false,
+                index == _highlightedIndex,
+                _resolution.CandidateDisplayValues is { } displayValues && index < displayValues.Count
+                    ? displayValues[index]
+                    : null))
             .ToList();
     }
 

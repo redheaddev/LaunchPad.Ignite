@@ -43,9 +43,8 @@ public sealed class CommandSchemaValidator
         var variableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var variable in schema.Variables)
         {
-            if (variable.Namespace is null
-                || string.IsNullOrWhiteSpace(variable.Namespace)
-                || variable.Namespace.Contains(':'))
+            if (variable.Namespace is not null
+                && (string.IsNullOrWhiteSpace(variable.Namespace) || variable.Namespace.Contains(':')))
             {
                 errors.Add($"Variable '{variable.Name}' has an invalid namespace '{variable.Namespace}'.");
             }

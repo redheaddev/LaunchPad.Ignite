@@ -73,6 +73,20 @@ public class UrlTargetBuilderTests
     }
 
     [Fact]
+    public void BuildResolvesBareVariablesAddedAfterBuilderCreation()
+    {
+        var action = new CommandActionDefinition("default", "", "", "$host/path", []);
+        var command = new CommandDefinition("home", "url", "", [action]);
+        var builder = new UrlTargetBuilder();
+        builder.UpdateVariables([new CommandVariableDefinition("host", "https://example.test")]);
+
+        var result = builder.Build(new ParsedCommand(command, action, new Dictionary<string, string>()));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("https://example.test/path", Assert.Single(result.Targets).Value);
+    }
+
+    [Fact]
     public void BuildRejectsUnknownVariableTokens()
     {
         var action = new CommandActionDefinition("default", "", "", "$ado:missing/path", []);

@@ -7,7 +7,8 @@ internal enum CompletionKind
     None,
     Command,
     Action,
-    Argument
+    Argument,
+    Variable
 }
 
 internal sealed record CompletionResolution(
@@ -21,4 +22,7 @@ internal sealed record CompletionResolution(
     bool HasNextArgument,
     CommandArgumentDefinition? Argument = null,
     int ArgumentIndex = -1,
-    bool AwaitingSeparator = false);
+    bool AwaitingSeparator = false)
+{
+    public IReadOnlyList<string>? CandidateDisplayValues { get; init; }
+}

@@ -26,7 +26,7 @@ Command definitions are held in a schema with `lists`, `variables`, and `command
 
 Lists currently support only `type: "enum"`; each list needs a name and non-empty, case-insensitively unique values. Reference it with `ref: "enum:listName"`.
 
-Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty namespace and value; refer to them in URL targets as `$namespace:variable`.
+Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty value and may be unqualified or use a namespace; refer to them as `$variable` or `$namespace:variable`. Use `variable add <name> <value>` to create or update a persistent user variable and `variable remove <name>` to remove one.
 
 The built-in `shortcut` kind defines an alias and optional keyboard chord. It must have one `default` action with no arguments or execution; its `targetTemplate` is the command text to expand to.
 
@@ -46,7 +46,7 @@ Completion behavior
 URL execution
 -------------
 - A `kind: "url"` command action requires a non-empty `targetTemplate`. `<argumentName>` placeholders are replaced by parsed argument values; values are URI-escaped. Missing optional placeholder values become empty strings, and empty query parameters are removed.
-- `$namespace:variable` references in URL targets are replaced by the matching schema variable. Unknown placeholders or variables, or targets that are not absolute HTTP/HTTPS URLs, fail target construction.
+- `$variable` and `$namespace:variable` references in URL targets are replaced by the matching schema variable. Unknown placeholders or variables, or targets that are not absolute HTTP/HTTPS URLs, fail target construction.
 - An action may declare `execution: { "mode": "targetPerValue", "arguments": ["csvArgument"] }`. Each named argument must exist and have `inputType: "csv"`. The URL executor builds a target for each value; multiple target-per-value arguments produce the cartesian product of their values.
 - Other command kinds are dispatched to a registered `ICommandExecutor`; extension loading and executor rules are in `rules-extension.txt`.
 

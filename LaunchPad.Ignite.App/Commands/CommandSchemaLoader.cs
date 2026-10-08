@@ -43,6 +43,38 @@ public sealed class CommandSchemaLoader
         return Merge(_appSchema, userSchema);
     }
 
+    public CommandSchema AddVariable(string name, string value)
+    {
+        EnsureUserCommandsFileExists();
+        var variable = ParseVariable(name, value);
+        var userSchema = ReadSchema(_userCommandsPath);
+        var variables = userSchema.Variables
+            .Where(existing => !string.Equals(existing.QualifiedName, variable.QualifiedName, StringComparison.OrdinalIgnoreCase))
+            .Append(variable)
+            .ToArray();
+        WriteSchema(userSchema with { Variables = variables });
+        return Load();
+    }
+
+    public bool RemoveVariable(string name, out CommandSchema schema)
+    {
+        EnsureUserCommandsFileExists();
+        var variable = ParseVariable(name, null);
+        var userSchema = ReadSchema(_userCommandsPath);
+        var variables = userSchema.Variables
+            .Where(existing => !string.Equals(existing.QualifiedName, variable.QualifiedName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (variables.Length == userSchema.Variables.Count)
+        {
+            schema = Merge(_appSchema, userSchema);
+            return false;
+        }
+
+        WriteSchema(userSchema with { Variables = variables });
+        schema = Load();
+        return true;
+    }
+
     private void EnsureUserCommandsFileExists()
     {
         if (File.Exists(_userCommandsPath))
@@ -62,6 +94,37 @@ public sealed class CommandSchemaLoader
     private static CommandSchema ReadSchema(string path)
         => JsonSerializer.Deserialize<CommandSchema>(File.ReadAllText(path), SerializerOptions)
             ?? throw new InvalidDataException($"Command schema '{path}' is empty.");
+
+    private void WriteSchema(CommandSchema schema)
+        => File.WriteAllText(_userCommandsPath, JsonSerializer.Serialize(schema, SerializerOptions));
+
+    private static CommandVariableDefinition ParseVariable(string name, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Any(char.IsWhiteSpace)
+            || name.IndexOfAny(['/', '<', '>', '?', '&', '#']) >= 0)
+        {
+            throw new ArgumentException("Variable names must be non-empty and cannot contain whitespace or URL delimiters.", nameof(name));
+        }
+
+        if (value is not null && string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Variable values must be non-empty.", nameof(value));
+        }
+
+        var separator = name.IndexOf(':');
+        if (separator < 0)
+        {
+            return new CommandVariableDefinition(name, value ?? string.Empty);
+        }
+
+        if (separator == 0 || separator == name.Length - 1 || name.IndexOf(':', separator + 1) >= 0)
+        {
+            throw new ArgumentException("Namespaced variable names must use the form namespace:name.", nameof(name));
+        }
+
+        return new CommandVariableDefinition(name[(separator + 1)..], value ?? string.Empty, name[..separator]);
+    }
 
     private static CommandSchema Merge(CommandSchema appSchema, CommandSchema userSchema)
     {
