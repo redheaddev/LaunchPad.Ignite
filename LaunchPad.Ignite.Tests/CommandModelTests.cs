@@ -86,6 +86,32 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void UrlCommandModelOpensDirectHttpsUrl()
+    {
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var handled = model.TryExecuteDirectUrl("https://dev.azure.com/saifcorporation", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal("Opened URL.", result.Message);
+        Assert.Equal("https://dev.azure.com/saifcorporation", Assert.Single(opener.Targets).Value);
+    }
+
+    [Fact]
+    public void UrlCommandModelDoesNotHandleNonHttpDirectText()
+    {
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var handled = model.TryExecuteDirectUrl("mailto:user@example.com", out _);
+
+        Assert.False(handled);
+        Assert.Empty(opener.Targets);
+    }
+
+    [Fact]
     public void ShellCommandModelPassesQuotedAndHostileValuesAsSeparateArguments()
     {
         var action = new CommandActionDefinition(

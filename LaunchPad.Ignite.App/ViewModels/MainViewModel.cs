@@ -22,6 +22,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandTextVariableExpander _variableExpander;
     private readonly CommandLineTokenizer _tokenizer = new();
     private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
+    private readonly UrlCommandModel _urlCommandModel;
     private bool _syncingInput;
 
     public MainViewModel()
@@ -34,9 +35,10 @@ public partial class MainViewModel : ViewModelBase
         var valueProvider = new CommandSchemaValueProvider(schema);
         _completionSession = new CommandCompletionSession(_catalog, valueProvider);
         _parser = new CommandLineParser(_catalog, valueProvider);
+        _urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables),
+            ["url"] = _urlCommandModel,
             ["shell"] = new ShellCommandModel(new SystemProcessStarter())
         };
         foreach (var (kind, executor) in extensions.Executors)
@@ -207,6 +209,18 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         {
             StatusMessage = $"Unknown variable(s): {string.Join(", ", expansion.UnresolvedVariables.Select(name => $"${name}"))}";
             return false;
+        }
+
+        if (_urlCommandModel.TryExecuteDirectUrl(expansion.ExpandedText, out var directUrlResult))
+        {
+            StatusMessage = directUrlResult.Message;
+            if (!directUrlResult.Succeeded)
+            {
+                return false;
+            }
+
+            CommandText = string.Empty;
+            return true;
         }
 
         var parseResult = _parser.Parse(expansion.ExpandedText);

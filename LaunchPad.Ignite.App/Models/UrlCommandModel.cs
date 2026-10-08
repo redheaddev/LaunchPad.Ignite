@@ -20,6 +20,30 @@ public sealed class UrlCommandModel : ICommandModel
 
     public string Kind => "url";
 
+    public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result)
+    {
+        var candidate = text.Trim();
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || !Uri.IsWellFormedUriString(candidate, UriKind.Absolute))
+        {
+            result = new CommandExecutionResult(false, string.Empty);
+            return false;
+        }
+
+        try
+        {
+            _targetOpener.Open([new UrlTarget(uri.AbsoluteUri)]);
+            result = new CommandExecutionResult(true, "Opened URL.");
+        }
+        catch (Exception exception)
+        {
+            result = new CommandExecutionResult(false, $"Unable to open URL: {exception.Message}");
+        }
+
+        return true;
+    }
+
     public CommandExecutionResult Execute(ParsedCommand command)
     {
         var targetResult = _targetBuilder.Build(command);
