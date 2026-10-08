@@ -1,0 +1,60 @@
+Command and parser rules
+========================
+
+Notation
+--------
+  <arg> = required argument
+  [arg] = optional argument
+  /value/ = ghost-text completion preview; it is not committed input
+  {key} = key press
+
+Input and parsing
+-----------------
+- Input is tokenized on whitespace. Quoting and escaping are not supported; a value cannot contain whitespace.
+- Command and action lookup is case-insensitive. A namespaced command is written `namespace:command`; an unnamespaced command uses its name alone.
+- A command may have a `default` action. Otherwise an action name is required before its arguments. The action name is omitted from the syntax for the default action.
+- Arguments are strings by default and required unless `optional` is true. Required arguments must precede optional arguments in the schema.
+- Arguments can be positional, named as `name=value`, or mixed. Names are case-insensitive; positional values fill the next argument not already assigned. Unknown, duplicate, and empty named values are invalid. Any token containing `=` is interpreted as a named argument, so positional values containing `=` are not supported.
+- Missing required arguments produce an incomplete parse. Invalid commands or values produce an invalid parse. Optional arguments omitted from input are absent from the parsed argument map.
+- `inputType` currently supports only `csv`. CSV values remain a string during parsing and cannot be empty or contain empty comma-delimited entries.
+- An argument with `ref: "enum:name"` is checked against the matching declared enum values, case-insensitively. `allowCustomValues: true` permits other non-empty values during parsing, but completion suggestions still come only from the declared enum values.
+- `ref: "list:name"` represents a multi-value list supplied by an argument value provider. List values are comma-delimited and must be non-empty, valid, and unique. The current application does not configure a dynamic list provider, so it does not supply values for these references.
+
+Schema basics
+-------------
+Command definitions are held in a schema with `lists`, `variables`, and `commands` arrays. App definitions are combined with extension definitions, then `%LocalAppData%/LaunchPad.Ignite/user-commands.json` is merged over them. A user command replaces one with the same qualified name; a user list replaces one with the same type and name; a user variable replaces one with the same qualified name. Comparisons are case-insensitive. The user schema file is created empty on first run.
+
+Lists currently support only `type: "enum"`; each list needs a name and non-empty, case-insensitively unique values. Reference it with `ref: "enum:listName"`.
+
+Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty namespace and value; refer to them in URL targets as `$namespace:variable`.
+
+Arguments use the `arguments` property (not `args`). Supported argument properties are `name`, `optional`, `ref`, `inputType`, `listMode`, and `allowCustomValues`. Supported `inputType` is `csv`. `listMode` is `normal` or `minimal` and applies to checklist-style `list:` references.
+
+Completion behavior
+-------------------
+- Command, action, and enum candidates are filtered by the typed prefix without regard to case. No candidates are shown if none match.
+- Completion resolves argument position by token position; it does not account for already supplied `name=value` arguments. Named arguments are supported by the parser, but completion after named arguments may not reflect the parser's next unassigned argument.
+- {up} and {down} move the highlight through candidates and wrap at either end. {tab} accepts a regular command, action, or enum candidate. A space is appended after acceptance only when the completion engine determines a following required argument needs one; it does not add a space before an optional next argument.
+- For a normal-mode `list:` checklist, {tab} toggles the highlighted value. Checked values remain visible, values are comma-delimited in the command line, and no trailing comma is added. {ctrl+a} selects all values and {ctrl+d} clears them, including values not currently visible due to filtering.
+- For a `list:` checklist with `listMode: "minimal"`, {tab} accepts the highlighted value, adds it to the committed comma-delimited selections, and removes it from the remaining choices. The list remains available for further selection.
+- Typing filters checklist values by prefix. The highlighted candidate's unmatched suffix is shown as ghost text. Ghost text is only a preview: {enter} does not commit it.
+- In checklist mode, {space} advances to the next argument only when at least one value is selected and a next argument exists. It does not select ghost text. Otherwise it does not advance.
+- {enter} parses and executes only committed input. On success, the command box is cleared and the launcher remains open. Incomplete, invalid, or unsuccessful commands remain open with their input intact. {esc} clears the command and closes the launcher. {ctrl+backspace} clears the command and leaves the launcher open.
+
+URL execution
+-------------
+- A `kind: "url"` command action requires a non-empty `targetTemplate`. `<argumentName>` placeholders are replaced by parsed argument values; values are URI-escaped. Missing optional placeholder values become empty strings, and empty query parameters are removed.
+- `$namespace:variable` references in URL targets are replaced by the matching schema variable. Unknown placeholders or variables, or targets that are not absolute HTTP/HTTPS URLs, fail target construction.
+- An action may declare `execution: { "mode": "targetPerValue", "arguments": ["csvArgument"] }`. Each named argument must exist and have `inputType: "csv"`. The URL executor builds a target for each value; multiple target-per-value arguments produce the cartesian product of their values.
+- Other command kinds are dispatched to a registered `ICommandExecutor`; extension loading and executor rules are in `rules-extension.txt`.
+
+Current ADO extension examples
+------------------------------
+The ADO extension declares the `ado` namespace and a `project` enum. These inputs are valid:
+  ado:pipeline claims
+  ado:pipeline project=claims pipelineId=1234
+  ado:pipeline claims 1234,2345
+  ado:repo claims repoName=LaunchPad.Ignite
+
+The `pipelineId` and `repoName` arguments are optional CSV strings configured for `targetPerValue` execution. The `project` argument allows custom enum values: custom values parse successfully, although they are not suggested by completion.
+
