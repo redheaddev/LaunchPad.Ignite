@@ -4,6 +4,7 @@ using Avalonia.Interactivity;
 using Avalonia.Threading;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Completion;
+using LaunchPad.Ignite.Core.Schema;
 using SharpHook;
 using SharpHook.Data;
 using System;
@@ -17,6 +18,7 @@ public partial class MainWindow : Window
     private readonly SimpleGlobalHook _globalHook = new();
     private readonly TextBox _commandBox;
     private readonly ItemsControl _completionList;
+    private MainViewModel? _shortcutViewModel;
     private Task? _hotKeyTask;
     private bool _altPressed;
     private bool _controlPressed;
@@ -49,6 +51,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Opened(object? sender, EventArgs e)
     {
+        _shortcutViewModel = DataContext as MainViewModel;
+
         Dispatcher.UIThread.Post(() =>
         {
             Activate();
@@ -98,7 +102,46 @@ public partial class MainWindow : Window
             _activationKeyPressed = true;
             e.SuppressEvent = true;
             Dispatcher.UIThread.Post(ToggleVisibility);
+            return;
         }
+
+        if (!_controlPressed && !_altPressed && !_shiftPressed && !_metaPressed)
+        {
+            return;
+        }
+
+        if (!TryGetShortcutKey(e.Data.KeyCode, out var key))
+        {
+            return;
+        }
+
+        var chord = new KeyboardShortcutChord(_controlPressed, _altPressed, _shiftPressed, _metaPressed, key);
+        if (_shortcutViewModel is { } viewModel
+            && viewModel.TryGetKeyboardShortcutExpansion(chord, out var expansion))
+        {
+            e.SuppressEvent = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                viewModel.CommandText = expansion;
+                ShowAndActivate();
+                _commandBox.CaretIndex = expansion.Length;
+            });
+        }
+    }
+
+    private static bool TryGetShortcutKey(KeyCode keyCode, out string key)
+    {
+        var keyCodeName = keyCode.ToString();
+        if (keyCodeName.Length == 3
+            && keyCodeName.StartsWith("Vc", StringComparison.Ordinal)
+            && char.IsAsciiLetterOrDigit(keyCodeName[2]))
+        {
+            key = keyCodeName[2].ToString().ToLowerInvariant();
+            return true;
+        }
+
+        key = string.Empty;
+        return false;
     }
 
     private void GlobalHook_KeyReleased(object? sender, KeyboardHookEventArgs e)
@@ -170,7 +213,7 @@ public partial class MainWindow : Window
         {
             inputKey = e.Key switch
             {
-                Key.Tab when viewModel.CanComplete => CommandInputKey.Tab,
+                Key.Tab when viewModel.CanComplete || viewModel.CanExpandTypedShortcut => CommandInputKey.Tab,
                 Key.Enter => CommandInputKey.Enter,
                 Key.Space when viewModel.IsChecklistActive => CommandInputKey.Space,
                 Key.Up when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Up,

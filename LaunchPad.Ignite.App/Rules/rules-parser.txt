@@ -28,6 +28,8 @@ Lists currently support only `type: "enum"`; each list needs a name and non-empt
 
 Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty namespace and value; refer to them in URL targets as `$namespace:variable`.
 
+The built-in `shortcut` kind defines an alias and optional keyboard chord. It must have one `default` action with no arguments or execution; its `targetTemplate` is the command text to expand to.
+
 Arguments use the `arguments` property (not `args`). Supported argument properties are `name`, `optional`, `ref`, `inputType`, `listMode`, and `allowCustomValues`. Supported `inputType` is `csv`. `listMode` is `normal` or `minimal` and applies to checklist-style `list:` references.
 
 Completion behavior

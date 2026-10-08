@@ -39,7 +39,7 @@ Schema and validation
 - Lists currently support only `type: "enum"`. List names are unique per type, values must be non-empty, and values must be unique case-insensitively. Reference a list from an argument with `"ref": "enum:listName"`.
 - Variables require a non-empty value and unique qualified name.
 - Argument and execution fields, including `arguments`, `optional`, `ref`, `inputType`, `allowCustomValues`, `listMode`, `targetTemplate`, and `execution`, follow `rules-parser.txt`.
-- A command `kind` must be `url` or match a loaded extension executor's `Kind`, case-insensitively.
+- A command `kind` must be `url`, the built-in `shortcut` kind, or match a loaded extension executor's `Kind`, case-insensitively.
 - Schema validation errors prevent the command catalog from being created; malformed manifests and invalid executor assemblies also fail extension loading.
 
 Executors

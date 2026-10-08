@@ -25,7 +25,8 @@ public sealed record CommandDefinition(
     string Kind,
     string Description,
     IReadOnlyList<CommandActionDefinition> Actions,
-    string? Namespace = null)
+    string? Namespace = null,
+    string? KeyboardShortcut = null)
 {
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
 }

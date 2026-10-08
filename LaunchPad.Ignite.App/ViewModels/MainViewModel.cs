@@ -18,6 +18,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandCompletionSession _completionSession;
     private readonly CommandCatalog _catalog;
     private readonly CommandLineParser _parser;
+    private readonly ShortcutResolver _shortcutResolver;
     private readonly CommandLineTokenizer _tokenizer = new();
     private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
     private bool _syncingInput;
@@ -27,6 +28,7 @@ public partial class MainViewModel : ViewModelBase
         var extensions = new ExtensionLoader().Load();
         var schema = new CommandSchemaLoader(extensions.Schema).Load();
         _catalog = new CommandCatalog(schema, extensions.Executors.Keys);
+        _shortcutResolver = new ShortcutResolver(schema.Commands);
         var valueProvider = new CommandSchemaValueProvider(schema);
         _completionSession = new CommandCompletionSession(_catalog, valueProvider);
         _parser = new CommandLineParser(_catalog, valueProvider);
@@ -70,13 +72,24 @@ public partial class MainViewModel : ViewModelBase
 
     public bool CanComplete => _completionSession.State.CanComplete;
 
+    public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
+
+    public bool TryGetKeyboardShortcutExpansion(KeyboardShortcutChord chord, out string expansion)
+        => _shortcutResolver.TryExpandChord(chord, out expansion!);
+
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
     public bool HandleInputKey(CommandInputKey key)
     {
         if (key == CommandInputKey.Enter)
         {
+            TryExpandTypedShortcut();
             return ExecuteCommand();
+        }
+
+        if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
+        {
+            return false;
         }
 
         ApplyCompletionState(_completionSession.HandleKey(key));
@@ -110,6 +123,18 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsChecklistActive));
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
+        OnPropertyChanged(nameof(CanExpandTypedShortcut));
+    }
+
+    private bool TryExpandTypedShortcut()
+    {
+        if (!_shortcutResolver.TryExpandAlias(CommandText, out var expansion))
+        {
+            return false;
+        }
+
+        CommandText = expansion;
+        return true;
     }
 
 public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighlighted, bool IsSelected);

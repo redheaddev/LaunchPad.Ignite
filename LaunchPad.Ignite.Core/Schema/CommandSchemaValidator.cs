@@ -8,8 +8,10 @@ public sealed class CommandSchemaValidator
         var listKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var commandKinds = new HashSet<string>(supportedCommandKinds ?? [], StringComparer.OrdinalIgnoreCase)
         {
-            "url"
+            "url",
+            "shortcut"
         };
+        var keyboardShortcuts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var list in schema.Lists)
         {
@@ -77,6 +79,30 @@ public sealed class CommandSchemaValidator
             if (!commandKinds.Contains(command.Kind))
             {
                 errors.Add($"Command '{command.Name}' has unsupported kind '{command.Kind}'.");
+            }
+
+            if (string.Equals(command.Kind, "shortcut", StringComparison.OrdinalIgnoreCase))
+            {
+                if (command.Actions.Count != 1
+                    || !string.Equals(command.Actions[0].Name, "default", StringComparison.OrdinalIgnoreCase)
+                    || command.Actions[0].Arguments.Count != 0
+                    || command.Actions[0].Execution is not null)
+                {
+                    errors.Add($"Shortcut command '{command.Name}' must define only a default action with no arguments or execution.");
+                }
+
+            }
+
+            if (command.KeyboardShortcut is not null)
+            {
+                if (!KeyboardShortcutChord.TryParse(command.KeyboardShortcut, out var chord))
+                {
+                    errors.Add($"Command '{command.Name}' has an invalid keyboard shortcut '{command.KeyboardShortcut}'.");
+                }
+                else if (!keyboardShortcuts.Add(chord.ToString()))
+                {
+                    errors.Add($"Keyboard shortcut '{command.KeyboardShortcut}' is assigned more than once.");
+                }
             }
 
             if (command.Actions.Count == 0)
