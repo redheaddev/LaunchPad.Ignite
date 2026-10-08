@@ -56,6 +56,53 @@ public class ExtensionLoaderTests
         Assert.Equal("Executed by extension.", result.Message);
     }
 
+    [Fact]
+    public void PreservesExplicitCommandNamespacesAndUsesManifestNamespaceAsFallback()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        Directory.CreateDirectory(extensionDirectory);
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "fallback",
+              "schema": {
+                "lists": [],
+                "commands": [
+                  {
+                    "name": "bare",
+                    "namespace": "",
+                    "kind": "url",
+                    "description": "Bare command",
+                    "actions": [{ "name": "default", "usage": "bare", "targetTemplate": "https://example.test", "arguments": [] }]
+                  },
+                  {
+                    "name": "grouped",
+                    "namespace": "gh",
+                    "kind": "url",
+                    "description": "Grouped command",
+                    "actions": [{ "name": "default", "usage": "gh:grouped", "targetTemplate": "https://example.test", "arguments": [] }]
+                  },
+                  {
+                    "name": "defaulted",
+                    "kind": "url",
+                    "description": "Defaulted command",
+                    "actions": [{ "name": "default", "usage": "fallback:defaulted", "targetTemplate": "https://example.test", "arguments": [] }]
+                  }
+                ]
+              }
+            }
+            """);
+
+        var extensions = new ExtensionLoader([directory.Path]).Load();
+        var catalog = new CommandCatalog(extensions.Schema, extensions.Executors.Keys);
+
+        Assert.True(catalog.TryGetCommand("bare", out _));
+        Assert.True(catalog.TryGetCommand("gh:grouped", out _));
+        Assert.True(catalog.TryGetCommand("fallback:defaulted", out _));
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()

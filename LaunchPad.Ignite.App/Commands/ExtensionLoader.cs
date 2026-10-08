@@ -82,7 +82,10 @@ public sealed class ExtensionLoader
         foreach (var (manifest, extensionDirectory) in manifests.Values)
         {
             lists.AddRange(manifest.Schema.Lists);
-            commands.AddRange(manifest.Schema.Commands.Select(command => command with { Namespace = manifest.Namespace }));
+            commands.AddRange(manifest.Schema.Commands.Select(command => command with
+            {
+                Namespace = command.Namespace ?? manifest.Namespace
+            }));
             variables.AddRange(manifest.Schema.Variables.Select(variable => variable with { Namespace = manifest.Namespace }));
             LoadExecutors(manifest, extensionDirectory, executors);
         }

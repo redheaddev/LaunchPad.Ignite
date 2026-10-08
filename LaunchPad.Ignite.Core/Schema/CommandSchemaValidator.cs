@@ -61,7 +61,8 @@ public sealed class CommandSchemaValidator
         foreach (var command in schema.Commands)
         {
             if (command.Namespace is not null
-                && (string.IsNullOrWhiteSpace(command.Namespace) || command.Namespace.Contains(':')))
+                && ((command.Namespace.Length > 0 && string.IsNullOrWhiteSpace(command.Namespace))
+                    || command.Namespace.Contains(':')))
             {
                 errors.Add($"Command '{command.Name}' has an invalid namespace '{command.Namespace}'.");
             }
