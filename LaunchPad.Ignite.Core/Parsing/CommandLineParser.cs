@@ -56,16 +56,67 @@ public sealed class CommandLineParser
         }
 
         var argumentTokens = tokens.Skip(argumentStartIndex).ToArray();
-        if (argumentTokens.Length > action.Arguments.Count)
+        var suppliedArguments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nextPositionalIndex = 0;
+        foreach (var token in argumentTokens)
         {
-            return new CommandParseResult(CommandParseStatus.Invalid, Error: "Too many arguments.");
+            var equalsIndex = token.Value.IndexOf('=');
+            if (equalsIndex >= 0)
+            {
+                if (equalsIndex == 0)
+                {
+                    return new CommandParseResult(
+                        CommandParseStatus.Invalid,
+                        Error: "Named arguments must use the form name=value.");
+                }
+
+                var argumentName = token.Value[..equalsIndex];
+                var argument = action.Arguments.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Name, argumentName, StringComparison.OrdinalIgnoreCase));
+                if (argument is null)
+                {
+                    return new CommandParseResult(
+                        CommandParseStatus.Invalid,
+                        Error: $"Unknown argument '{argumentName}'.");
+                }
+
+                var value = token.Value[(equalsIndex + 1)..];
+                if (value.Length == 0)
+                {
+                    return new CommandParseResult(
+                        CommandParseStatus.Invalid,
+                        Error: $"Argument '{argument.Name}' requires a value.");
+                }
+
+                if (!suppliedArguments.TryAdd(argument.Name, value))
+                {
+                    return new CommandParseResult(
+                        CommandParseStatus.Invalid,
+                        Error: $"Argument '{argument.Name}' was supplied more than once.");
+                }
+
+                continue;
+            }
+
+            while (nextPositionalIndex < action.Arguments.Count
+                && suppliedArguments.ContainsKey(action.Arguments[nextPositionalIndex].Name))
+            {
+                nextPositionalIndex++;
+            }
+
+            if (nextPositionalIndex >= action.Arguments.Count)
+            {
+                return new CommandParseResult(CommandParseStatus.Invalid, Error: "Too many arguments.");
+            }
+
+            suppliedArguments.Add(action.Arguments[nextPositionalIndex].Name, token.Value);
+            nextPositionalIndex++;
         }
 
         var parsedArguments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        for (var index = 0; index < action.Arguments.Count; index++)
+        foreach (var argument in action.Arguments)
         {
-            var argument = action.Arguments[index];
-            if (index >= argumentTokens.Length)
+            if (!suppliedArguments.TryGetValue(argument.Name, out var value))
             {
                 if (!argument.Optional)
                 {
@@ -75,7 +126,6 @@ public sealed class CommandLineParser
                 continue;
             }
 
-            var value = argumentTokens[index].Value;
             if (!ValidateValue(argument, value, out var error))
             {
                 return new CommandParseResult(CommandParseStatus.Invalid, Error: error);

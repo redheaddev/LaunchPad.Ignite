@@ -24,7 +24,7 @@ internal sealed class CommandCompletionResolver
         if (tokens.Count == 0)
         {
             return CreateResolution(CompletionKind.Command, string.Empty, input.Length,
-                _catalog.Commands.Select(command => command.Name).ToArray());
+                _catalog.Commands.Select(command => command.QualifiedName).ToArray());
         }
 
         if (!_catalog.TryGetCommand(tokens[0].Value, out var command))
@@ -39,7 +39,7 @@ internal sealed class CommandCompletionResolver
                 tokens[0].Value,
                 tokens[0].Start,
                 _catalog.Commands
-                    .Select(candidate => candidate.Name)
+                    .Select(candidate => candidate.QualifiedName)
                     .Where(name => name.StartsWith(tokens[0].Value, StringComparison.OrdinalIgnoreCase))
                     .ToArray());
         }

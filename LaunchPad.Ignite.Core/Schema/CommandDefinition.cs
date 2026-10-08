@@ -13,7 +13,11 @@ public sealed record CommandDefinition(
     string Name,
     string Kind,
     string Description,
-    IReadOnlyList<CommandActionDefinition> Actions);
+    IReadOnlyList<CommandActionDefinition> Actions,
+    string? Namespace = null)
+{
+    public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
+}
 
 public sealed record CommandActionDefinition(
     string Name,

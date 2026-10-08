@@ -33,9 +33,17 @@ public sealed class CommandSchemaValidator
         var commandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var command in schema.Commands)
         {
-            if (string.IsNullOrWhiteSpace(command.Name) || !commandNames.Add(command.Name))
+            if (command.Namespace is not null
+                && (string.IsNullOrWhiteSpace(command.Namespace) || command.Namespace.Contains(':')))
             {
-                errors.Add($"Command name '{command.Name}' is empty or duplicated.");
+                errors.Add($"Command '{command.Name}' has an invalid namespace '{command.Namespace}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(command.Name)
+                || command.Name.Contains(':')
+                || !commandNames.Add(command.QualifiedName))
+            {
+                errors.Add($"Command name '{command.QualifiedName}' is empty or duplicated.");
             }
 
             if (!string.Equals(command.Kind, "url", StringComparison.OrdinalIgnoreCase))

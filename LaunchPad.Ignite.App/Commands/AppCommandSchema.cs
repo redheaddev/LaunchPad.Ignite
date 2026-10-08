@@ -2,7 +2,7 @@ using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.Commands;
 
-public static class PipelineCommandSchema
+public static class AppCommandSchema
 {
     public static CommandSchema Create()
         => new(

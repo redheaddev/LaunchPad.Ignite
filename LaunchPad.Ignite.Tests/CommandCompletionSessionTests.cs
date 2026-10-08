@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Completion;
+using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Tests;
@@ -38,6 +39,26 @@ public class CommandCompletionSessionTests
         Assert.Empty(state.Items);
         Assert.Empty(state.GhostText);
         Assert.False(state.CanComplete);
+    }
+
+    [Fact]
+    public void TabCompletesNamespacedCommandUsingQualifiedName()
+    {
+        var schema = TestCommandSchemas.Pipeline;
+        var namespacedSchema = schema with
+        {
+            Commands = [schema.Commands[0] with { Namespace = "ns" }]
+        };
+        var catalog = new CommandCatalog(namespacedSchema);
+        var session = new CommandCompletionSession(catalog, new CommandSchemaValueProvider(namespacedSchema));
+
+        var state = session.UpdateInputText("ns:pipe");
+        Assert.Equal("line", state.GhostText);
+
+        state = session.HandleKey(CommandInputKey.Tab);
+
+        Assert.Equal("ns:pipeline ", state.InputText);
+        Assert.Equal("claims", state.GhostText);
     }
 
     [Fact]

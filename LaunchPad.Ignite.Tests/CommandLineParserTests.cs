@@ -1,3 +1,4 @@
+using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
 
@@ -20,6 +21,58 @@ public class CommandLineParserTests
         Assert.NotNull(result.ParsedCommand);
         Assert.Equal(expectedProject, result.ParsedCommand.Arguments["project"]);
         Assert.Equal(expectedIds, result.ParsedCommand.Arguments.GetValueOrDefault("pipelineId"));
+    }
+
+    [Theory]
+    [InlineData("pipeline pipelineId=1234 project=claims")]
+    [InlineData("pipeline pipelineId=1234 claims")]
+    [InlineData("pipeline project=claims 1234")]
+    public void ParseAcceptsNamedAndMixedArguments(string input)
+    {
+        var result = _parser.Parse(input);
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal("claims", result.ParsedCommand!.Arguments["project"]);
+        Assert.Equal("1234", result.ParsedCommand.Arguments["pipelineId"]);
+    }
+
+    [Theory]
+    [InlineData("pipeline unknown=value")]
+    [InlineData("pipeline project=claims project=architecture")]
+    [InlineData("pipeline project=")]
+    [InlineData("pipeline claims project=architecture")]
+    public void ParseRejectsUnknownDuplicateOrEmptyNamedArguments(string input)
+    {
+        var result = _parser.Parse(input);
+
+        Assert.Equal(CommandParseStatus.Invalid, result.Status);
+    }
+
+    [Fact]
+    public void ParsePreservesEqualsAfterNamedArgumentSeparator()
+    {
+        var result = _parser.Parse("pipeline project=claims pipelineId=12=34");
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal("12=34", result.ParsedCommand!.Arguments["pipelineId"]);
+    }
+
+    [Fact]
+    public void ParseResolvesNamespacedCommandName()
+    {
+        var schema = TestCommandSchemas.Pipeline;
+        var namespacedSchema = schema with
+        {
+            Commands = [schema.Commands[0] with { Namespace = "ns" }]
+        };
+        var parser = new CommandLineParser(
+            new CommandCatalog(namespacedSchema),
+            new CommandSchemaValueProvider(namespacedSchema));
+
+        var result = parser.Parse("ns:pipeline claims");
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal("ns:pipeline", result.ParsedCommand!.Definition.QualifiedName);
     }
 
     [Fact]

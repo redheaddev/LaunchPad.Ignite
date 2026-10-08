@@ -1,8 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Completion;
-using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
@@ -18,18 +18,20 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandCatalog _catalog;
     private readonly CommandLineParser _parser;
     private readonly CommandLineTokenizer _tokenizer = new();
-    private readonly UrlTargetBuilder _targetBuilder = new();
-    private readonly IUrlTargetOpener _urlTargetOpener;
+    private readonly IReadOnlyDictionary<string, ICommandModel> _commandModels;
     private bool _syncingInput;
 
     public MainViewModel()
     {
-        var schema = PipelineCommandSchema.Create();
+        var schema = new CommandSchemaLoader(AppCommandSchema.Create()).Load();
         _catalog = new CommandCatalog(schema);
         var valueProvider = new CommandSchemaValueProvider(schema);
         _completionSession = new CommandCompletionSession(_catalog, valueProvider);
         _parser = new CommandLineParser(_catalog, valueProvider);
-        _urlTargetOpener = new SystemUrlTargetOpener();
+        _commandModels = new Dictionary<string, ICommandModel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener())
+        };
         ApplyCompletionState(_completionSession.State);
     }
 
@@ -59,15 +61,15 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
-    public void HandleInputKey(CommandInputKey key)
+    public bool HandleInputKey(CommandInputKey key)
     {
         if (key == CommandInputKey.Enter)
         {
-            ExecuteCommand();
-            return;
+            return ExecuteCommand();
         }
 
         ApplyCompletionState(_completionSession.HandleKey(key));
+        return false;
     }
 
     partial void OnCommandTextChanged(string value)
@@ -120,38 +122,36 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         return action is null ? string.Empty : $"Usage: {action.Usage}";
     }
 
-    private void ExecuteCommand()
+    private bool ExecuteCommand()
     {
         var parseResult = _parser.Parse(CommandText);
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
             StatusMessage = "Command is incomplete.";
-            return;
+            return false;
         }
 
         if (parseResult.Status == CommandParseStatus.Invalid)
         {
             StatusMessage = parseResult.Error ?? "Command is invalid.";
-            return;
+            return false;
         }
 
-        var targetResult = _targetBuilder.Build(parseResult);
-        if (!targetResult.Succeeded)
+        var parsedCommand = parseResult.ParsedCommand!;
+        if (!_commandModels.TryGetValue(parsedCommand.Definition.Kind, out var commandModel))
         {
-            StatusMessage = targetResult.Error ?? "Unable to build URL target.";
-            return;
+            StatusMessage = $"Command kind '{parsedCommand.Definition.Kind}' is not supported.";
+            return false;
         }
 
-        try
+        var executionResult = commandModel.Execute(parsedCommand);
+        StatusMessage = executionResult.Message;
+        if (!executionResult.Succeeded)
         {
-            _urlTargetOpener.Open(targetResult.Targets);
-            StatusMessage = targetResult.Targets.Count == 1
-                ? "Opened URL."
-                : $"Opened {targetResult.Targets.Count} URLs.";
+            return false;
         }
-        catch (Exception exception)
-        {
-            StatusMessage = $"Unable to open URL: {exception.Message}";
-        }
+
+        CommandText = string.Empty;
+        return true;
     }
 }

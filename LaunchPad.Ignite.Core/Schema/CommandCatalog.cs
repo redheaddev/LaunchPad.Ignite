@@ -13,7 +13,7 @@ public sealed class CommandCatalog
         }
 
         Schema = schema;
-        _commands = schema.Commands.ToDictionary(command => command.Name, StringComparer.OrdinalIgnoreCase);
+        _commands = schema.Commands.ToDictionary(command => command.QualifiedName, StringComparer.OrdinalIgnoreCase);
     }
 
     public CommandSchema Schema { get; }

@@ -10,12 +10,17 @@ public sealed class UrlTargetBuilder
 
     public UrlTargetBuildResult Build(CommandParseResult parseResult)
     {
-        if (parseResult.Status != CommandParseStatus.Valid || parseResult.ParsedCommand is null)
+        var parsedCommand = parseResult.ParsedCommand;
+        if (parseResult.Status != CommandParseStatus.Valid || parsedCommand is null)
         {
             return new UrlTargetBuildResult([], "A valid parsed command is required to build URL targets.");
         }
 
-        var parsedCommand = parseResult.ParsedCommand;
+        return Build(parsedCommand);
+    }
+
+    public UrlTargetBuildResult Build(ParsedCommand parsedCommand)
+    {
         if (!string.Equals(parsedCommand.Definition.Kind, "url", StringComparison.OrdinalIgnoreCase))
         {
             return new UrlTargetBuildResult([], $"Command kind '{parsedCommand.Definition.Kind}' is not supported.");

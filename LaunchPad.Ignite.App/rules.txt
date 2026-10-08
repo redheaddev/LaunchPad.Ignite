@@ -3,7 +3,7 @@ Legend:
   [arg] = optional
   /value/ = ghost text
   {key} = key press
-  {enter} = execute the current committed command if it is valid; never accept ghost text
+  {enter} = execute the current committed command if it is valid; never accept ghost text. After successful execution, clear the command box and close the launcher. Invalid, incomplete, or failed commands leave the input and window open.
   {tab} = accept/complete command or argument
   {space} = activates the next argument. If that argument is a list, it enters checklist mode. The system may append a space automatically after an argument is completed when the next argument is required. It does not append a space automatically when the next argument is optional.
   {ctrl+backspace} = cancels command entirely. clears command and keeps window open
@@ -18,6 +18,8 @@ Legend:
   An execution mode of "targetPerValue" creates one target for each comma-delimited value in the named CSV string argument.
 
   Command suggestions are filtered case-insensitively by the typed prefix; show no command suggestions when nothing matches. Enum completion suggestions remain limited to declared options, even when the argument allows manually entered custom values.
+  A command may declare a "namespace". Invoke it as namespace:commandname; unnamespaced commands keep their current syntax. Namespace and command-name matching is case-insensitive.
+  Arguments may be supplied by name as argName=value for required or optional arguments. Named and positional values may be mixed; positional values fill the next argument not already assigned. Argument names are case-insensitive. Unknown, duplicate, or empty named values are invalid.
 
   Checklist behavior:
   - The checklist is kept open until the user presses {enter} to execute using committed selections, {esc} to cancel the command, or {space} to exit checklist mode and continue typing the next argument.
@@ -93,8 +95,14 @@ Lists:
     }
 ]
 
+Command JSON sources:
+  App-provided command definitions are authored in code.
+  User-defined command definitions are stored in %LocalAppData%/LaunchPad.Ignite/user-commands.json; an empty file is created on first run.
+  The user file uses one CommandSchema object with "lists" and "commands" arrays. A user command replaces an app-provided command with the same name, case-insensitively. User lists replace app lists with the same type and name.
+  The command "kind" selects an ICommandModel execution handler. URL target construction and opening belong to UrlCommandModel, not the view model or JSON loader.
+
 Commands:
-An action named "default" is implicit and does not appear in the usage string.
+The example below illustrates the command schema; the built-in pipeline command is defined in code. User-defined commands use the same "commands" array shape in user-commands.json. An action named "default" is implicit and does not appear in the usage string.
 [
     {
       "name": "pipeline",
@@ -105,12 +113,12 @@ An action named "default" is implicit and does not appear in the usage string.
           "name": "default",
           "description": "ADO project",
           "usage": "pipeline <enum:project> [csv:pipelineId]",
-          "target": "https://dev.azure.com/saifcorporation/<project>/_build?definitionId=<pipelineId>",
+          "targetTemplate": "https://dev.azure.com/saifcorporation/<project>/_build?definitionId=<pipelineId>",
           "execution": {
             "mode": "targetPerValue",
-            "args": ["pipelineId"]
+            "arguments": ["pipelineId"]
           },
-          "args": [
+          "arguments": [
             {
               "name": "project",
               "ref": "enum:project",
@@ -118,9 +126,7 @@ An action named "default" is implicit and does not appear in the usage string.
             },
             {
               "name": "pipelineId",
-              "input": {
-                "type": "csv"
-              },
+              "inputType": "csv",
               "optional": true
             }
           ]
@@ -209,6 +215,9 @@ Completion expectations:
 
 Parser acceptance examples:
   pipeline x 1234 (x is accepted because the project argument enables custom enum values)
+  pipeline project=claims pipelineId=1234
+  pipeline project=claims 1234 (the positional value fills the next unassigned argument)
+  ns:commandname argName=value (for a command whose schema declares namespace "ns")
   secret shell token1
   secret shell token1,token2
   secret set API_TOKEN
@@ -229,7 +238,7 @@ Parser acceptance examples:
    type "{tab}" -> "pipeline claims"; does not add a space (no more required args)
    type "{space}" -> "pipeline claims "; recognizes that next text is the optional pipelineid
    type "1234" -> "pipeline claims 1234"; 
-   type "{enter}" -> executes the pipeline command with claims as the project argument and 1234 as the optional pipelineid argument.
+   type "{enter}" -> executes the pipeline command with claims as the project argument and 1234 as the optional pipelineid argument, then clears the command box and closes the launcher.
    type "pipe{tab}cl{tab}{space}1234,2345{enter}" -> executes the pipeline command with claims as the project argument and 1234,2345 as the optional pipelineid argument. Opens 2 browser windows with the 2 pipeline urls.
    # expand command
    plc{tab} -> "pipeline $project"
