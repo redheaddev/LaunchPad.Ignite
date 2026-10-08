@@ -42,6 +42,21 @@ public class ShortcutExpansionTests
     }
 
     [Fact]
+    public void ShortcutExpansionCanResolveVariablesInItsExpandedText()
+    {
+        var shortcut = CreateShortcut("plc", "ado:pipeline $project ", null);
+        var resolver = new ShortcutResolver([shortcut]);
+        var variableExpander = new LaunchPad.Ignite.Core.Execution.CommandTextVariableExpander(
+            [new CommandVariableDefinition("project", "architecture")]);
+
+        Assert.True(resolver.TryExpandAlias("plc", out var shortcutExpansion));
+        var preview = variableExpander.Expand(shortcutExpansion);
+
+        Assert.Equal("ado:pipeline architecture ", preview.ExpandedText);
+        Assert.Equal(["project"], preview.ResolvedVariables);
+    }
+
+    [Fact]
     public void ResolvesKeyboardChordOnRegularCommandToQualifiedCommandName()
     {
         var command = new CommandDefinition(

@@ -186,10 +186,17 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateCommandExpansionPreview(string commandText)
     {
-        var expansion = _variableExpander.Expand(commandText);
-        CommandExpansionPreview = expansion.ResolvedVariables.Count == 0
-            ? string.Empty
-            : expansion.ExpandedText;
+        var previewText = commandText;
+        var hasShortcutExpansion = _shortcutResolver.TryExpandAlias(commandText, out var shortcutExpansion);
+        if (hasShortcutExpansion)
+        {
+            previewText = shortcutExpansion;
+        }
+
+        var expansion = _variableExpander.Expand(previewText);
+        CommandExpansionPreview = hasShortcutExpansion || expansion.ResolvedVariables.Count > 0
+            ? expansion.ExpandedText
+            : string.Empty;
     }
 
 public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighlighted, bool IsSelected);
