@@ -4,9 +4,9 @@ public sealed class CommandCatalog
 {
     private readonly Dictionary<string, CommandDefinition> _commands;
 
-    public CommandCatalog(CommandSchema schema)
+    public CommandCatalog(CommandSchema schema, IEnumerable<string>? supportedCommandKinds = null)
     {
-        var errors = new CommandSchemaValidator().Validate(schema);
+        var errors = new CommandSchemaValidator().Validate(schema, supportedCommandKinds);
         if (errors.Count > 0)
         {
             throw new ArgumentException(string.Join(Environment.NewLine, errors), nameof(schema));

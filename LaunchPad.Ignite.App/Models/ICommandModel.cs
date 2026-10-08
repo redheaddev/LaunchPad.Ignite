@@ -1,12 +1,8 @@
-using LaunchPad.Ignite.Core.Parsing;
+using LaunchPad.Ignite.Core.Execution;
 
 namespace LaunchPad.Ignite.App.Models;
 
-public interface ICommandModel
+public interface ICommandModel : ICommandExecutor
 {
-    string Kind { get; }
-
-    CommandExecutionResult Execute(ParsedCommand command);
 }
 
-public sealed record CommandExecutionResult(bool Succeeded, string Message);

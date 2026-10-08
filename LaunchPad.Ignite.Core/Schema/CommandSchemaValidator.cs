@@ -2,10 +2,14 @@ namespace LaunchPad.Ignite.Core.Schema;
 
 public sealed class CommandSchemaValidator
 {
-    public IReadOnlyList<string> Validate(CommandSchema schema)
+    public IReadOnlyList<string> Validate(CommandSchema schema, IEnumerable<string>? supportedCommandKinds = null)
     {
         var errors = new List<string>();
         var listKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var commandKinds = new HashSet<string>(supportedCommandKinds ?? [], StringComparer.OrdinalIgnoreCase)
+        {
+            "url"
+        };
 
         foreach (var list in schema.Lists)
         {
@@ -30,6 +34,29 @@ public sealed class CommandSchemaValidator
             }
         }
 
+        var variableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var variable in schema.Variables)
+        {
+            if (variable.Namespace is null
+                || string.IsNullOrWhiteSpace(variable.Namespace)
+                || variable.Namespace.Contains(':'))
+            {
+                errors.Add($"Variable '{variable.Name}' has an invalid namespace '{variable.Namespace}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(variable.Name)
+                || variable.Name.Contains(':')
+                || !variableNames.Add(variable.QualifiedName))
+            {
+                errors.Add($"Variable name '{variable.QualifiedName}' is empty or duplicated.");
+            }
+
+            if (string.IsNullOrWhiteSpace(variable.Value))
+            {
+                errors.Add($"Variable '{variable.QualifiedName}' must have a non-empty value.");
+            }
+        }
+
         var commandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var command in schema.Commands)
         {
@@ -46,7 +73,7 @@ public sealed class CommandSchemaValidator
                 errors.Add($"Command name '{command.QualifiedName}' is empty or duplicated.");
             }
 
-            if (!string.Equals(command.Kind, "url", StringComparison.OrdinalIgnoreCase))
+            if (!commandKinds.Contains(command.Kind))
             {
                 errors.Add($"Command '{command.Name}' has unsupported kind '{command.Kind}'.");
             }

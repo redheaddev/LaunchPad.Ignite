@@ -81,7 +81,15 @@ public sealed class CommandSchemaLoader
             .Concat(userSchema.Lists)
             .ToArray();
 
-        return new CommandSchema(lists, commands);
+        var userVariableNames = userSchema.Variables
+            .Select(variable => variable.QualifiedName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var variables = appSchema.Variables
+            .Where(variable => !userVariableNames.Contains(variable.QualifiedName))
+            .Concat(userSchema.Variables)
+            .ToArray();
+
+        return new CommandSchema(lists, commands) { Variables = variables };
     }
 
     private static string GetListKey(CommandListDefinition list)

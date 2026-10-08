@@ -2,7 +2,18 @@ namespace LaunchPad.Ignite.Core.Schema;
 
 public sealed record CommandSchema(
     IReadOnlyList<CommandListDefinition> Lists,
-    IReadOnlyList<CommandDefinition> Commands);
+    IReadOnlyList<CommandDefinition> Commands)
+{
+    public IReadOnlyList<CommandVariableDefinition> Variables { get; init; } = [];
+}
+
+public sealed record CommandVariableDefinition(
+    string Name,
+    string Value,
+    string? Namespace = null)
+{
+    public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
+}
 
 public sealed record CommandListDefinition(
     string Type,

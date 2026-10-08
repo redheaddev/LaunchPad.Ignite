@@ -7,6 +7,14 @@ namespace LaunchPad.Ignite.Core.Execution;
 public sealed class UrlTargetBuilder
 {
     private static readonly Regex PlaceholderPattern = new("<([^<>]+)>", RegexOptions.Compiled);
+    private static readonly Regex VariablePattern = new(@"\$([^\s/<>?&#]+:[^\s/<>?&#]+)", RegexOptions.Compiled);
+    private readonly IReadOnlyDictionary<string, string> _variables;
+
+    public UrlTargetBuilder(IEnumerable<CommandVariableDefinition>? variables = null)
+    {
+        _variables = (variables ?? [])
+            .ToDictionary(variable => variable.QualifiedName, variable => variable.Value, StringComparer.OrdinalIgnoreCase);
+    }
 
     public UrlTargetBuildResult Build(CommandParseResult parseResult)
     {
@@ -37,6 +45,16 @@ public sealed class UrlTargetBuilder
         if (unknownPlaceholder is not null)
         {
             return new UrlTargetBuildResult([], $"Target contains unknown argument placeholder '<{unknownPlaceholder}>'.");
+        }
+
+        var variableNames = VariablePattern.Matches(action.TargetTemplate)
+            .Select(match => match.Groups[1].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var unknownVariable = variableNames.FirstOrDefault(name => !_variables.ContainsKey(name));
+        if (unknownVariable is not null)
+        {
+            return new UrlTargetBuildResult([], $"Target contains unknown variable token '${unknownVariable}'.");
         }
 
         var valueSets = new List<(string Name, IReadOnlyList<string?> Values)>();
@@ -77,6 +95,8 @@ public sealed class UrlTargetBuilder
                     value is null ? string.Empty : Uri.EscapeDataString(value),
                     StringComparison.OrdinalIgnoreCase);
             }
+
+            target = VariablePattern.Replace(target, match => _variables[match.Groups[1].Value]);
 
             target = RemoveEmptyQueryParameters(target);
             if (!Uri.TryCreate(target, UriKind.Absolute, out var uri)

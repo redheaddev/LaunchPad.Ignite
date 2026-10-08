@@ -34,10 +34,14 @@ public class CommandModelTests
             [
                 new CommandDefinition("pipeline", "url", "app version", []),
                 new CommandDefinition("app-only", "url", "app command", [])
-            ]);
+            ])
+        {
+            Variables = [new CommandVariableDefinition("orgUrl", "https://app.test", "ado")]
+        };
         File.WriteAllText(userPath, """
             {
               "lists": [{ "type": "enum", "name": "project", "values": ["user-value"] }],
+              "variables": [{ "name": "orgUrl", "namespace": "ado", "value": "https://user.test" }],
               "commands": [
                 { "name": "PIPELINE", "kind": "url", "description": "user version", "actions": [] },
                 { "name": "user-only", "kind": "url", "description": "user command", "actions": [] }
@@ -52,6 +56,7 @@ public class CommandModelTests
         Assert.Contains(schema.Commands, command => command.Name == "app-only");
         Assert.Contains(schema.Commands, command => command.Name == "user-only");
         Assert.Equal("user-value", Assert.Single(schema.Lists).Values[0]);
+        Assert.Equal("https://user.test", Assert.Single(schema.Variables).Value);
     }
 
     [Fact]

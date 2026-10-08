@@ -1,18 +1,21 @@
 using System;
+using System.Collections.Generic;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
+using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.Models;
 
 public sealed class UrlCommandModel : ICommandModel
 {
-    private readonly UrlTargetBuilder _targetBuilder = new();
+    private readonly UrlTargetBuilder _targetBuilder;
     private readonly IUrlTargetOpener _targetOpener;
 
-    public UrlCommandModel(IUrlTargetOpener targetOpener)
+    public UrlCommandModel(IUrlTargetOpener targetOpener, IEnumerable<CommandVariableDefinition>? variables = null)
     {
         _targetOpener = targetOpener;
+        _targetBuilder = new UrlTargetBuilder(variables);
     }
 
     public string Kind => "url";

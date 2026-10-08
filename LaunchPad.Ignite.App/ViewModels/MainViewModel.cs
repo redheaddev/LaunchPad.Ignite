@@ -3,6 +3,7 @@ using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Completion;
+using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
@@ -18,20 +19,30 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandCatalog _catalog;
     private readonly CommandLineParser _parser;
     private readonly CommandLineTokenizer _tokenizer = new();
-    private readonly IReadOnlyDictionary<string, ICommandModel> _commandModels;
+    private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
     private bool _syncingInput;
 
     public MainViewModel()
     {
-        var schema = new CommandSchemaLoader(AppCommandSchema.Create()).Load();
-        _catalog = new CommandCatalog(schema);
+        var extensions = new ExtensionLoader().Load();
+        var schema = new CommandSchemaLoader(extensions.Schema).Load();
+        _catalog = new CommandCatalog(schema, extensions.Executors.Keys);
         var valueProvider = new CommandSchemaValueProvider(schema);
         _completionSession = new CommandCompletionSession(_catalog, valueProvider);
         _parser = new CommandLineParser(_catalog, valueProvider);
-        _commandModels = new Dictionary<string, ICommandModel>(StringComparer.OrdinalIgnoreCase)
+        var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener())
+            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables)
         };
+        foreach (var (kind, executor) in extensions.Executors)
+        {
+            if (!commandExecutors.TryAdd(kind, executor))
+            {
+                throw new InvalidOperationException($"Command kind '{kind}' is already registered.");
+            }
+        }
+
+        _commandExecutors = commandExecutors;
         ApplyCompletionState(_completionSession.State);
     }
 
@@ -138,13 +149,13 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
-        if (!_commandModels.TryGetValue(parsedCommand.Definition.Kind, out var commandModel))
+        if (!_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
         {
             StatusMessage = $"Command kind '{parsedCommand.Definition.Kind}' is not supported.";
             return false;
         }
 
-        var executionResult = commandModel.Execute(parsedCommand);
+        var executionResult = commandExecutor.Execute(parsedCommand);
         StatusMessage = executionResult.Message;
         if (!executionResult.Succeeded)
         {
