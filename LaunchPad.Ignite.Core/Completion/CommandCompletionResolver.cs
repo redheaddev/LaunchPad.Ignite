@@ -27,6 +27,22 @@ internal sealed class CommandCompletionResolver
                 _catalog.Commands.Select(command => command.QualifiedName).ToArray());
         }
 
+        if (!trailingWhitespace && tokens.Count == 1
+            && _catalog.TryGetCommand(tokens[0].Value, out _))
+        {
+            var matchingCommands = _catalog.Commands
+                .Where(candidate => candidate.QualifiedName.StartsWith(tokens[0].Value, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (matchingCommands.Length > 1)
+            {
+                return CreateResolution(
+                    CompletionKind.Command,
+                    tokens[0].Value,
+                    tokens[0].Start,
+                    matchingCommands.Select(candidate => candidate.QualifiedName).ToArray());
+            }
+        }
+
         if (!_catalog.TryGetCommand(tokens[0].Value, out var command))
         {
             if (trailingWhitespace)

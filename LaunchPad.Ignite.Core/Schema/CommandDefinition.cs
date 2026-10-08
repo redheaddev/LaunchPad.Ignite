@@ -37,7 +37,10 @@ public sealed record CommandActionDefinition(
     string Usage,
     string TargetTemplate,
     IReadOnlyList<CommandArgumentDefinition> Arguments,
-    CommandExecutionDefinition? Execution = null);
+    CommandExecutionDefinition? Execution = null)
+{
+    public IReadOnlyList<string> ArgumentTemplates { get; init; } = [];
+}
 
 public sealed record CommandArgumentDefinition(
     string Name,

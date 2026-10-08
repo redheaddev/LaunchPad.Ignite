@@ -22,12 +22,23 @@ public sealed class CommandLineTokenizer
             }
 
             var start = index;
-            while (index < input.Length && !char.IsWhiteSpace(input[index]))
+            var value = new System.Text.StringBuilder();
+            var insideQuotes = false;
+            while (index < input.Length && (insideQuotes || !char.IsWhiteSpace(input[index])))
             {
+                if (input[index] == '"')
+                {
+                    insideQuotes = !insideQuotes;
+                }
+                else
+                {
+                    value.Append(input[index]);
+                }
+
                 index++;
             }
 
-            tokens.Add(new CommandLineToken(input[start..index], start, index - start));
+            tokens.Add(new CommandLineToken(value.ToString(), start, index - start));
         }
 
         return tokens;

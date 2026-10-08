@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
+using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
 
@@ -83,12 +85,120 @@ public class CommandModelTests
         Assert.Equal("https://example.test/my%20project", Assert.Single(opener.Targets).Value);
     }
 
+    [Fact]
+    public void ShellCommandModelPassesQuotedAndHostileValuesAsSeparateArguments()
+    {
+        var action = new CommandActionDefinition(
+            "default",
+            "",
+            "",
+            "editor.exe",
+            [new CommandArgumentDefinition("file"), new CommandArgumentDefinition("option", Optional: true)]);
+        var command = new CommandDefinition("editor", "shell", "", [action]);
+        var schema = new CommandSchema([], [command]);
+        var catalog = new CommandCatalog(schema, ["shell"]);
+        var parser = new CommandLineParser(catalog, new CommandSchemaValueProvider(schema));
+        var parseResult = parser.Parse("editor \"C:\\work area\\file.txt\" \"--name value & whoami\"");
+        var starter = new RecordingProcessStarter();
+        var model = new ShellCommandModel(starter);
+
+        Assert.Equal(CommandParseStatus.Valid, parseResult.Status);
+        var executionResult = model.Execute(parseResult.ParsedCommand!);
+
+        Assert.True(executionResult.Succeeded);
+        Assert.Equal("editor.exe", starter.StartInfo!.FileName);
+        Assert.False(starter.StartInfo.UseShellExecute);
+        Assert.Equal(
+            ["C:\\work area\\file.txt", "--name value & whoami"],
+            starter.StartInfo.ArgumentList);
+    }
+
+    [Fact]
+    public void ShellCommandModelReportsProcessStartErrors()
+    {
+        var action = new CommandActionDefinition("default", "", "", "missing.exe", []);
+        var command = new CommandDefinition("missing", "shell", "", [action]);
+        var starter = new RecordingProcessStarter(new InvalidOperationException("not found"));
+        var model = new ShellCommandModel(starter);
+
+        var result = model.Execute(new ParsedCommand(command, action, new Dictionary<string, string>()));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("not found", result.Message);
+    }
+
+    [Fact]
+    public void ShellCommandModelExpandsArgumentTemplatesAsSeparateArguments()
+    {
+        var action = new CommandActionDefinition(
+            "default",
+            "",
+            "",
+            "explorer.exe",
+            [
+                new CommandArgumentDefinition("server"),
+                new CommandArgumentDefinition("agent"),
+                new CommandArgumentDefinition("work", Optional: true)
+            ])
+        {
+            ArgumentTemplates = [@"\\tfsbld{server}prod\agents\a{agent}\_work\{work}"]
+        };
+        var command = new CommandDefinition("tfsbld", "shell", "", [action]);
+        var schema = new CommandSchema([], [command]);
+        var catalog = new CommandCatalog(schema, ["shell"]);
+        var parser = new CommandLineParser(catalog, new CommandSchemaValueProvider(schema));
+        var parseResult = parser.Parse("tfsbld 12 3");
+        var starter = new RecordingProcessStarter();
+        var model = new ShellCommandModel(starter);
+
+        Assert.Equal(CommandParseStatus.Valid, parseResult.Status);
+        var result = model.Execute(parseResult.ParsedCommand!);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal([@"\\tfsbld12prod\agents\a3\_work\"], starter.StartInfo!.ArgumentList);
+    }
+
+    [Fact]
+    public void CommandCatalogRejectsUnknownArgumentTemplatePlaceholders()
+    {
+        var action = new CommandActionDefinition("default", "", "", "tool.exe", [])
+        {
+            ArgumentTemplates = ["{missing}"]
+        };
+        var schema = new CommandSchema([], [new CommandDefinition("tool", "shell", "", [action])]);
+
+        var exception = Assert.Throws<ArgumentException>(() => new CommandCatalog(schema, ["shell"]));
+
+        Assert.Contains("unknown placeholder", exception.Message);
+    }
+
     private sealed class RecordingUrlTargetOpener : IUrlTargetOpener
     {
         public List<UrlTarget> Targets { get; } = [];
 
         public void Open(IEnumerable<UrlTarget> targets)
             => Targets.AddRange(targets);
+    }
+
+    private sealed class RecordingProcessStarter : IProcessStarter
+    {
+        private readonly Exception? _exception;
+
+        public RecordingProcessStarter(Exception? exception = null)
+        {
+            _exception = exception;
+        }
+
+        public ProcessStartInfo? StartInfo { get; private set; }
+
+        public void Start(ProcessStartInfo startInfo)
+        {
+            StartInfo = startInfo;
+            if (_exception is not null)
+            {
+                throw _exception;
+            }
+        }
     }
 
     private sealed class TemporaryDirectory : IDisposable

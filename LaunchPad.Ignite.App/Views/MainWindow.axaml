@@ -88,13 +88,19 @@
             </Border>
 
             <Grid Grid.Row="2" Margin="3,12,3,0">
-                <Grid RowDefinitions="Auto,*,Auto">
+                <Grid RowDefinitions="Auto,Auto,*,Auto">
                     <TextBlock Text="{Binding UsageText}"
                                IsVisible="{Binding HasUsageText}"
                                Foreground="#FF64748B" FontFamily="Cascadia Mono, Consolas"
                                FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"
                                Margin="0,0,0,8" />
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6"
+                                IsVisible="{Binding HasCommandExpansionPreview}" Margin="0,0,0,8">
+                        <TextBlock Text="Expanded:" Foreground="#FF64748B" FontSize="12" />
+                        <TextBlock Text="{Binding CommandExpansionPreview}" Foreground="#FF67E8F9"
+                                   FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
                                   IsVisible="{Binding HasCompletionOptions}">
                         <ItemsControl x:Name="CompletionList" ItemsSource="{Binding CompletionItems}">
                             <ItemsControl.ItemTemplate>
@@ -111,7 +117,7 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
-                    <TextBlock Grid.Row="2" Text="{Binding StatusMessage}"
+                    <TextBlock Grid.Row="3" Text="{Binding StatusMessage}"
                                Foreground="#FF64748B" FontSize="12"
                                VerticalAlignment="Bottom" />
                 </Grid>

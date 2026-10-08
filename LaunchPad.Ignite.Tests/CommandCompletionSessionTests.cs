@@ -42,6 +42,24 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void ExactCommandPrefixStillShowsLongerMatchingCommands()
+    {
+        var schema = new CommandSchema(
+            [],
+            [
+                new CommandDefinition("tfs", "url", "", [new CommandActionDefinition("default", "", "", "https://example.test", [])]),
+                new CommandDefinition("tfsbld", "shell", "", [new CommandActionDefinition("default", "", "", "explorer.exe", [])])
+            ]);
+        var session = new CommandCompletionSession(
+            new CommandCatalog(schema, ["shell"]),
+            new CommandSchemaValueProvider(schema));
+
+        var state = session.UpdateInputText("tfs");
+
+        Assert.Equal(["tfs", "tfsbld"], state.Items.Select(item => item.Value));
+    }
+
+    [Fact]
     public void TabCompletesNamespacedCommandUsingQualifiedName()
     {
         var schema = TestCommandSchemas.Pipeline;

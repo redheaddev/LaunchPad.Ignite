@@ -19,6 +19,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandCatalog _catalog;
     private readonly CommandLineParser _parser;
     private readonly ShortcutResolver _shortcutResolver;
+    private readonly CommandTextVariableExpander _variableExpander;
     private readonly CommandLineTokenizer _tokenizer = new();
     private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
     private bool _syncingInput;
@@ -27,14 +28,16 @@ public partial class MainViewModel : ViewModelBase
     {
         var extensions = new ExtensionLoader().Load();
         var schema = new CommandSchemaLoader(extensions.Schema).Load();
-        _catalog = new CommandCatalog(schema, extensions.Executors.Keys);
+        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell"));
+        _variableExpander = new CommandTextVariableExpander(schema.Variables);
         _shortcutResolver = new ShortcutResolver(schema.Commands);
         var valueProvider = new CommandSchemaValueProvider(schema);
         _completionSession = new CommandCompletionSession(_catalog, valueProvider);
         _parser = new CommandLineParser(_catalog, valueProvider);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables)
+            ["url"] = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables),
+            ["shell"] = new ShellCommandModel(new SystemProcessStarter())
         };
         foreach (var (kind, executor) in extensions.Executors)
         {
@@ -54,6 +57,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _completionGhostText = string.Empty;
 
+    private string _commandExpansionPreview = string.Empty;
+
     [ObservableProperty]
     private IReadOnlyList<CompletionOptionViewModel> _completionItems = Array.Empty<CompletionOptionViewModel>();
 
@@ -69,6 +74,20 @@ public partial class MainViewModel : ViewModelBase
     public bool HasCompletionOptions => _completionSession.State.Items.Count > 0;
 
     public bool HasUsageText => !string.IsNullOrEmpty(UsageText);
+
+    public string CommandExpansionPreview
+    {
+        get => _commandExpansionPreview;
+        private set
+        {
+            if (SetProperty(ref _commandExpansionPreview, value))
+            {
+                OnPropertyChanged(nameof(HasCommandExpansionPreview));
+            }
+        }
+    }
+
+    public bool HasCommandExpansionPreview => !string.IsNullOrEmpty(CommandExpansionPreview);
 
     public bool CanComplete => _completionSession.State.CanComplete;
 
@@ -99,6 +118,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnCommandTextChanged(string value)
     {
         OnPropertyChanged(nameof(IsCommandTextEmpty));
+        UpdateCommandExpansionPreview(value);
         if (!_syncingInput)
         {
             ApplyCompletionState(_completionSession.UpdateInputText(value));
@@ -114,12 +134,26 @@ public partial class MainViewModel : ViewModelBase
             _syncingInput = false;
         }
 
+        UpdateCommandExpansionPreview(state.InputText);
         CompletionGhostText = state.InputText.Length == 0 ? string.Empty : state.GhostText;
         UsageText = GetUsageText(CommandText);
-        CompletionItems = state.Items.Select(item => new CompletionOptionViewModel(
-            state.IsChecklistActive ? $"{(item.IsSelected ? "[x]" : "[ ]")} {item.Value}" : item.Value,
-            item.IsHighlighted,
-            item.IsSelected)).ToArray();
+        var tokens = _tokenizer.Tokenize(state.InputText);
+        var isCommandCompletion = tokens.Count == 0
+            || (tokens.Count == 1 && !_tokenizer.EndsWithWhitespace(state.InputText));
+        CompletionItems = state.Items.Select(item =>
+        {
+            var displayText = state.IsChecklistActive
+                ? $"{(item.IsSelected ? "[x]" : "[ ]")} {item.Value}"
+                : item.Value;
+            if (!state.IsChecklistActive
+                && isCommandCompletion
+                && _catalog.TryGetCommand(item.Value, out var command))
+            {
+                displayText = $"{item.Value} [{command.Kind}]";
+            }
+
+            return new CompletionOptionViewModel(displayText, item.IsHighlighted, item.IsSelected);
+        }).ToArray();
         OnPropertyChanged(nameof(IsChecklistActive));
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
@@ -135,6 +169,14 @@ public partial class MainViewModel : ViewModelBase
 
         CommandText = expansion;
         return true;
+    }
+
+    private void UpdateCommandExpansionPreview(string commandText)
+    {
+        var expansion = _variableExpander.Expand(commandText);
+        CommandExpansionPreview = expansion.ResolvedVariables.Count == 0
+            ? string.Empty
+            : expansion.ExpandedText;
     }
 
 public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighlighted, bool IsSelected);
@@ -160,7 +202,14 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
 
     private bool ExecuteCommand()
     {
-        var parseResult = _parser.Parse(CommandText);
+        var expansion = _variableExpander.Expand(CommandText);
+        if (expansion.UnresolvedVariables.Count > 0)
+        {
+            StatusMessage = $"Unknown variable(s): {string.Join(", ", expansion.UnresolvedVariables.Select(name => $"${name}"))}";
+            return false;
+        }
+
+        var parseResult = _parser.Parse(expansion.ExpandedText);
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
             StatusMessage = "Command is incomplete.";

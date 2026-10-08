@@ -1,7 +1,11 @@
+using System.Text.RegularExpressions;
+
 namespace LaunchPad.Ignite.Core.Schema;
 
 public sealed class CommandSchemaValidator
 {
+    private static readonly Regex ArgumentTemplatePlaceholder = new("\\{([^{}]+)\\}", RegexOptions.Compiled);
+
     public IReadOnlyList<string> Validate(CommandSchema schema, IEnumerable<string>? supportedCommandKinds = null)
     {
         var errors = new List<string>();
@@ -125,7 +129,9 @@ public sealed class CommandSchemaValidator
                 }
 
                 ValidateArguments(command, action, schema, errors);
+                ValidateArgumentTemplates(command, action, errors);
             }
+
         }
 
         return errors;
@@ -210,6 +216,44 @@ public sealed class CommandSchemaValidator
             if (executionArgument is null || !string.Equals(executionArgument.InputType, "csv", StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add($"Action '{action.Name}' execution argument '{executionArgumentName}' must reference a CSV argument.");
+            }
+        }
+    }
+
+    private static void ValidateArgumentTemplates(
+        CommandDefinition command,
+        CommandActionDefinition action,
+        ICollection<string> errors)
+    {
+        if (action.ArgumentTemplates.Count == 0)
+        {
+            return;
+        }
+
+        if (!string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"Action '{action.Name}' in command '{command.Name}' can define argument templates only for shell commands.");
+            return;
+        }
+
+        var argumentNames = action.Arguments
+            .Select(argument => argument.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var template in action.ArgumentTemplates)
+        {
+            var placeholders = ArgumentTemplatePlaceholder.Matches(template)
+                .Select(match => match.Groups[1].Value)
+                .ToArray();
+            var unknownPlaceholder = placeholders.FirstOrDefault(name => !argumentNames.Contains(name));
+            if (unknownPlaceholder is not null)
+            {
+                errors.Add($"Action '{action.Name}' in command '{command.Name}' argument template contains unknown placeholder '{{{unknownPlaceholder}}}'.");
+            }
+
+            var remainder = ArgumentTemplatePlaceholder.Replace(template, string.Empty);
+            if (remainder.Contains('{') || remainder.Contains('}'))
+            {
+                errors.Add($"Action '{action.Name}' in command '{command.Name}' has an invalid argument template '{template}'.");
             }
         }
     }
