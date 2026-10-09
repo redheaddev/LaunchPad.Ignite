@@ -10,15 +10,18 @@ internal sealed class CommandCompletionResolver
     private readonly IArgumentValueProvider _valueProvider;
     private readonly CommandLineTokenizer _tokenizer = new();
     private IReadOnlyList<CommandVariableDefinition> _variables;
+    private readonly IReadOnlyList<CommandFunctionDefinition> _functions;
 
     public CommandCompletionResolver(
         CommandCatalog catalog,
         IArgumentValueProvider valueProvider,
-        IEnumerable<CommandVariableDefinition>? variables = null)
+        IEnumerable<CommandVariableDefinition>? variables = null,
+        IEnumerable<CommandFunctionDefinition>? functions = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
         _variables = (variables ?? []).ToArray();
+        _functions = (functions ?? []).ToArray();
     }
 
     public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
@@ -33,6 +36,31 @@ internal sealed class CommandCompletionResolver
         {
             var currentToken = tokens[^1];
             var variableStart = currentToken.Value.LastIndexOf('$');
+            var functionStart = currentToken.Value.LastIndexOf('@');
+            if (functionStart > variableStart
+                && currentToken.Value.IndexOf('(', functionStart + 1) < 0)
+            {
+                var prefix = currentToken.Value[functionStart..];
+                var matchingFunctions = _functions
+                    .Where(function => $"@{function.QualifiedName}".StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                return CreateResolution(
+                    CompletionKind.Function,
+                    prefix,
+                    currentToken.Start + functionStart,
+                    matchingFunctions.Select(function => $"@{function.QualifiedName}(").ToArray()) with
+                {
+                    CandidateDisplayValues = matchingFunctions
+                        .Select(function =>
+                        {
+                            var parameters = string.Join(", ", function.Parameters.Select(parameter =>
+                                parameter.Optional ? $"[{parameter.Name}]" : parameter.Name));
+                            return $"@{function.QualifiedName}({parameters})";
+                        })
+                        .ToArray()
+                };
+            }
+
             if (variableStart >= 0)
             {
                 var prefix = currentToken.Value[variableStart..];

@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
     <ProjectReference Include="..\LaunchPad.Ignite.App\LaunchPad.Ignite.App.csproj" />
+    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Weather\LaunchPad.Ignite.Extensions.Weather.csproj" />
   </ItemGroup>
 
 </Project>

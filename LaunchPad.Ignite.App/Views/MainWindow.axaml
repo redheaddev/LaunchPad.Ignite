@@ -121,9 +121,21 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
-                    <TextBlock Grid.Row="3" Text="{Binding StatusMessage}"
-                               Foreground="#FF64748B" FontSize="12"
-                               VerticalAlignment="Bottom" />
+                    <StackPanel Grid.Row="3" Spacing="6">
+                        <Border Height="1" Background="#FF334155" />
+                        <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*" ColumnSpacing="6"
+                              IsVisible="{Binding IsValueOutput}">
+                            <TextBlock Text="Result:" Foreground="#FF67E8F9" FontSize="14"
+                                       VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Text="{Binding StatusMessage}"
+                                       Foreground="{Binding StatusMessageBrush}" FontSize="14"
+                                       TextWrapping="Wrap" VerticalAlignment="Top" />
+                        </Grid>
+                        <TextBlock Text="{Binding StatusMessage}"
+                                   IsVisible="{Binding IsStatusMessage}"
+                                   Foreground="{Binding StatusMessageBrush}" FontSize="14"
+                                   TextWrapping="Wrap" VerticalAlignment="Bottom" />
+                    </StackPanel>
                 </Grid>
             </Grid>
 

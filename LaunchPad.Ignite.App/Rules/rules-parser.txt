@@ -50,6 +50,12 @@ URL execution
 - An action may declare `execution: { "mode": "targetPerValue", "arguments": ["csvArgument"] }`. Each named argument must exist and have `inputType: "csv"`. The URL executor builds a target for each value; multiple target-per-value arguments produce the cartesian product of their values.
 - Other command kinds are dispatched to a registered `ICommandExecutor`; extension loading and executor rules are in `rules-extension.txt`.
 
+Value printing
+--------------
+- A line beginning with `?` followed by whitespace evaluates and displays the remaining text. Variables and functions are expanded before the value is shown in the status area.
+- Examples: `? x`, `? $project`, `? @namespace:functionName(argument)`.
+- A successful value print clears the command input. An empty expression or expansion error leaves the input in place and displays an error.
+
 Current ADO extension examples
 ------------------------------
 The ADO extension declares the `ado` namespace and a `project` enum. These inputs are valid:

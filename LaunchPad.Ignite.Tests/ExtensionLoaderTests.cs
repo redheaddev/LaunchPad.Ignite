@@ -37,7 +37,8 @@ public class ExtensionLoaderTests
                     "targetTemplate": "sample:",
                     "arguments": []
                   }]
-                }]
+                }],
+                "functions": [{ "name": "lookup", "parameters": [{ "name": "value" }] }]
               }
             }
             """);
@@ -103,6 +104,128 @@ public class ExtensionLoaderTests
         Assert.True(catalog.TryGetCommand("fallback:defaulted", out _));
     }
 
+    [Fact]
+    public void LoadsRegisteredScriptFunctionsAndResolvesTheirPathsInsideTheExtension()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        var scriptsDirectory = Path.Combine(extensionDirectory, "scripts");
+        Directory.CreateDirectory(scriptsDirectory);
+        File.WriteAllText(Path.Combine(scriptsDirectory, "greet.py"), "print('hello')");
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "sample",
+              "schema": {
+                "lists": [],
+                "commands": [],
+                "functions": [{
+                  "name": "greet",
+                  "kind": "script",
+                  "parameters": [{ "name": "name" }, { "name": "prefix", "optional": true }],
+                  "interpreter": "python3",
+                  "scriptPath": "scripts/greet.py"
+                }]
+              }
+            }
+            """);
+
+        var extensions = new ExtensionLoader([directory.Path]).Load();
+        var function = Assert.Single(extensions.Schema.Functions);
+
+        Assert.Equal("sample:greet", function.QualifiedName);
+        Assert.Equal(Path.GetFullPath(Path.Combine(scriptsDirectory, "greet.py")), function.ScriptPath);
+        Assert.True(function.Parameters[1].Optional);
+    }
+
+    [Fact]
+    public void LoadsNamedFunctionExecutorsWithoutRestrictingCommandKinds()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        Directory.CreateDirectory(extensionDirectory);
+        var assemblyPath = Path.Combine(extensionDirectory, "extension-plugin.dll");
+        File.Copy(typeof(TestExtensionFunctionExecutor).Assembly.Location, assemblyPath);
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "sample",
+              "assembly": "extension-plugin.dll",
+              "schema": {
+                "lists": [],
+                "commands": [{
+                  "name": "custom",
+                  "kind": "sample",
+                  "description": "Custom command kind",
+                  "actions": [{ "name": "default", "usage": "sample:custom", "targetTemplate": "sample:", "arguments": [] }]
+                }],
+                "functions": [{ "name": "lookup", "parameters": [{ "name": "value" }] }]
+              }
+            }
+            """);
+
+        var extensions = new ExtensionLoader([directory.Path]).Load();
+
+        Assert.Contains("sample", extensions.Executors.Keys);
+        Assert.Contains("sample:lookup", extensions.FunctionExecutors.Keys);
+        Assert.Equal("value", Assert.Single(extensions.Schema.Functions).Parameters[0].Name);
+    }
+
+    [Fact]
+    public void RejectsRequiredFunctionParametersAfterOptionalParameters()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        Directory.CreateDirectory(extensionDirectory);
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "sample",
+              "schema": {
+                "lists": [],
+                "commands": [],
+                "functions": [{
+                  "name": "lookup",
+                  "kind": "httpGet",
+                  "parameters": [{ "name": "optional", "optional": true }, { "name": "required" }],
+                  "targetTemplate": "https://example.test/<required>"
+                }]
+              }
+            }
+            """);
+
+        Assert.Throws<InvalidDataException>(() => new ExtensionLoader([directory.Path]).Load());
+    }
+
+    [Fact]
+    public void RejectsUnsupportedFunctionKindsInExtensionManifests()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        Directory.CreateDirectory(extensionDirectory);
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "sample",
+              "schema": {
+                "lists": [],
+                "commands": [],
+                "functions": [{
+                  "name": "temp",
+                  "kind": "weatherTemp",
+                  "parameters": [{ "name": "zip" }]
+                }]
+              }
+            }
+            """);
+
+        Assert.Throws<InvalidDataException>(() => new ExtensionLoader([directory.Path]).Load());
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()
@@ -124,4 +247,15 @@ public sealed class TestExtensionExecutor : ICommandExecutor
 
     public CommandExecutionResult Execute(ParsedCommand command)
         => new(true, "Executed by extension.");
+}
+
+public sealed class TestExtensionFunctionExecutor : IExtensionFunctionExecutor
+{
+    public string FunctionName => "lookup";
+
+    public Task<string> ExecuteAsync(
+        CommandFunctionDefinition function,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+        => Task.FromResult(arguments[0]);
 }

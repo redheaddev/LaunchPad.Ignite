@@ -20,11 +20,14 @@ namespace LaunchPad.Ignite.App.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
+    private static readonly IBrush ValueOutputBrush = new SolidColorBrush(Color.FromRgb(0x67, 0xE8, 0xF9));
+    private static readonly IBrush StatusMessageBrushDefault = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B));
     private readonly CommandCompletionSession _completionSession;
     private readonly CommandCatalog _catalog;
     private readonly CommandLineParser _parser;
     private readonly ShortcutResolver _shortcutResolver;
     private readonly CommandTextVariableExpander _variableExpander;
+    private readonly CommandTextFunctionExpander _functionExpander;
     private readonly CommandLineTokenizer _tokenizer = new();
     private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
     private readonly UrlCommandModel _urlCommandModel;
@@ -51,10 +54,14 @@ public partial class MainViewModel : ViewModelBase
         _variableExpander = new CommandTextVariableExpander(schema.Variables);
         _shortcutResolver = new ShortcutResolver(schema.Commands);
         var valueProvider = new CommandSchemaValueProvider(schema, new SecretNamesArgumentValueProvider(secretStore));
+        _functionExpander = new CommandTextFunctionExpander(
+            schema.Functions,
+            new RegisteredCommandFunctionExecutor(extensionFunctionExecutors: extensions.FunctionExecutors));
         _completionSession = new CommandCompletionSession(
             _catalog,
             valueProvider,
-            schema.Variables);
+            schema.Variables,
+            schema.Functions);
         _parser = new CommandLineParser(_catalog, valueProvider);
         _urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
         var processStarter = new SystemProcessStarter();
@@ -110,6 +117,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusMessage = "Start typing to see commands";
 
+    private bool _isValueOutput;
+
     [NotifyPropertyChangedFor(nameof(SecretLockIcon))]
     [NotifyPropertyChangedFor(nameof(SecretLockBrush))]
     [ObservableProperty]
@@ -124,6 +133,23 @@ public partial class MainViewModel : ViewModelBase
             : "Secret access is unlocked; no master password is set";
 
     public IBrush SecretLockBrush => SecretAccessLocked ? Brushes.Gold : Brushes.Gray;
+
+    public IBrush StatusMessageBrush => IsValueOutput ? ValueOutputBrush : StatusMessageBrushDefault;
+
+    public bool IsValueOutput
+    {
+        get => _isValueOutput;
+        private set
+        {
+            if (SetProperty(ref _isValueOutput, value))
+            {
+                OnPropertyChanged(nameof(StatusMessageBrush));
+                OnPropertyChanged(nameof(IsStatusMessage));
+            }
+        }
+    }
+
+    public bool IsStatusMessage => !IsValueOutput;
 
     public bool IsChecklistActive => _completionSession.State.IsChecklistActive;
 
@@ -265,16 +291,41 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
 
     private async Task<bool> ExecuteCommandAsync()
     {
-        var expansion = _variableExpander.Expand(CommandText);
-        if (expansion.UnresolvedVariables.Count > 0)
+        var isPrintCommand = PrintValueCommandParser.TryParse(CommandText, out var printExpression);
+        if (isPrintCommand && string.IsNullOrWhiteSpace(printExpression))
         {
-            StatusMessage = $"Unknown variable(s): {string.Join(", ", expansion.UnresolvedVariables.Select(name => $"${name}"))}";
+            SetStatusMessage("A value expression is required.");
             return false;
         }
 
-        if (_urlCommandModel.TryExecuteDirectUrl(expansion.ExpandedText, out var directUrlResult))
+        var expansion = _variableExpander.Expand(isPrintCommand ? printExpression : CommandText);
+        if (expansion.UnresolvedVariables.Count > 0)
         {
-            StatusMessage = directUrlResult.Message;
+            SetStatusMessage($"Unknown variable(s): {string.Join(", ", expansion.UnresolvedVariables.Select(name => $"${name}"))}");
+            return false;
+        }
+
+        string expandedText;
+        try
+        {
+            expandedText = await _functionExpander.ExpandAsync(expansion.ExpandedText);
+        }
+        catch (Exception exception)
+        {
+            SetStatusMessage($"Function expansion failed: {exception.Message}");
+            return false;
+        }
+
+        if (isPrintCommand)
+        {
+            SetStatusMessage(expandedText, isValueOutput: true);
+            CommandText = string.Empty;
+            return true;
+        }
+
+        if (_urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult))
+        {
+            SetStatusMessage(directUrlResult.Message);
             if (!directUrlResult.Succeeded)
             {
                 return false;
@@ -284,16 +335,16 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
             return true;
         }
 
-        var parseResult = _parser.Parse(expansion.ExpandedText);
+        var parseResult = _parser.Parse(expandedText);
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
-            StatusMessage = "Command is incomplete.";
+            SetStatusMessage("Command is incomplete.");
             return false;
         }
 
         if (parseResult.Status == CommandParseStatus.Invalid)
         {
-            StatusMessage = parseResult.Error ?? "Command is invalid.";
+            SetStatusMessage(parseResult.Error ?? "Command is invalid.");
             return false;
         }
 
@@ -310,11 +361,11 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
         else
         {
-            StatusMessage = $"Command kind '{parsedCommand.Definition.Kind}' is not supported.";
+            SetStatusMessage($"Command kind '{parsedCommand.Definition.Kind}' is not supported.");
             return false;
         }
 
-        StatusMessage = executionResult.Message;
+        SetStatusMessage(executionResult.Message);
         if (!executionResult.Succeeded)
         {
             return false;
@@ -322,6 +373,12 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
 
         CommandText = string.Empty;
         return true;
+    }
+
+    private void SetStatusMessage(string message, bool isValueOutput = false)
+    {
+        IsValueOutput = isValueOutput;
+        StatusMessage = message;
     }
 
     private void RefreshSecretAccessState()

@@ -20,12 +20,13 @@ Each extension directory contains one `extension.json` file with this shape:
   "schema": {
 	"variables": [],
 	"lists": [],
-	"commands": []
+	"commands": [],
+	"functions": []
   },
   "assembly": "Example.Extension.dll"
 }
 
-`id`, `name`, `namespace`, and `schema` are required. `id`, `name`, and `namespace` must be non-empty strings. `schema` must contain `lists` and `commands` arrays; `variables` is optional and defaults to an empty array. Use the supported schema fields and rules described in `rules-parser.txt`. `assembly` is optional. JSON property names are case-insensitive, and enum values such as execution mode and list mode use camel-case strings.
+`id`, `name`, `namespace`, and `schema` are required. `id`, `name`, and `namespace` must be non-empty strings. `schema` must contain `lists` and `commands` arrays; `variables` and `functions` are optional and default to empty arrays. Use the supported schema fields and rules described in `rules-parser.txt` and `rules-function.txt`. `assembly` is optional. JSON property names are case-insensitive, and enum values such as execution mode and list mode use camel-case strings.
 
 Namespacing
 -----------
@@ -40,11 +41,14 @@ Schema and validation
 - Variables require a non-empty value and unique qualified name.
 - Argument and execution fields, including `arguments`, `optional`, `ref`, `inputType`, `allowCustomValues`, `listMode`, `targetTemplate`, and `execution`, follow `rules-parser.txt`.
 - A command `kind` must be `url`, the built-in `shortcut` kind, or match a loaded extension executor's `Kind`, case-insensitively.
+- Extension command kinds are open-ended: any non-empty `ICommandExecutor.Kind` may be supplied by an extension; they are not restricted to a built-in list.
 - Schema validation errors prevent the command catalog from being created; malformed manifests and invalid executor assemblies also fail extension loading.
 
 Executors
 ---------
-An extension may omit `assembly` when it only defines URL commands. When `assembly` is supplied, it must resolve to a file inside that extension's directory and must exist. The assembly must contain at least one concrete type implementing `ICommandExecutor`; each executor must have a public parameterless constructor and a non-empty `Kind`. Executor kinds must be unique across loaded extensions. The `url` kind is provided by the host and cannot be registered by an extension.
+An extension may omit `assembly` when it only defines schema commands and generic HTTP/script functions. When `assembly` is supplied, it must resolve to a file inside that extension's directory and must exist. The assembly must contain at least one concrete `ICommandExecutor` or `IExtensionFunctionExecutor`. Each executor must have a public parameterless constructor. Command executor kinds must be non-empty and unique across loaded extensions. The `url` kind is provided by the host and cannot be registered by an extension.
+
+An `IExtensionFunctionExecutor` declares an unqualified `FunctionName`; the loader prefixes the extension manifest namespace and requires a matching `schema.functions` entry with no generic execution `kind`. Conversely, a function entry with no `kind` must have exactly one matching extension function executor. Function handlers and command executors may coexist in one assembly.
 
 User overrides
 --------------

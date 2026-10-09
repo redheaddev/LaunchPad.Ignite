@@ -1,0 +1,80 @@
+Function expressions
+====================
+
+Function expressions retrieve a value and expand inline, similarly to a variable. The syntax is:
+
+	@FunctionName(arg1, arg2)
+	@namespace:FunctionName(arg1, arg2)
+
+For example:
+
+	Hello, @GetUserName("42")!
+
+When the expression is evaluated, the function's returned value replaces the expression in the containing text.
+
+Syntax and arguments
+--------------------
+
+- A function expression begins with `@`, followed by a registered function name and `(`. Function names are case-insensitive and may be namespaced, such as `@ado:GetUserName("42")`.
+- The argument list ends at the matching `)`. Calls may be nested.
+- Literal string arguments use JSON-style double quotes. This is required when an argument contains spaces, commas, or parentheses; for example, `@Lookup("Ada Lovelace", "last, first")`.
+- Function parameters are positional. Required parameters must be declared before optional parameters, and optional trailing arguments may be omitted from a call.
+- Variables are expanded before functions; for example, `@GetUserName($userId)`. Unknown variables fail command execution.
+- Ordinary `@` text that is not followed by a valid function name and `(` is not a function expression.
+- Function expressions are evaluated on command execution, not while typing the command or showing its expansion preview.
+
+Function registration and execution
+-----------------------------------
+
+Extension functions are registered in an extension's `schema.functions` array, rather than allowing arbitrary code to be invoked from an expression. Each has a name, a generic execution `kind`, and an ordered `parameters` list of objects with a `name` and optional `optional: true` flag. Required parameters must precede optional ones. Calls must supply all required arguments and may omit trailing optional ones. Extension kinds describe execution mechanisms, not feature names:
+
+- Making an HTTP REST GET request using `kind: "httpGet"` and a `targetTemplate`.
+- Running an explicitly approved script using `kind: "script"`, an `interpreter`, and a relative `scriptPath` inside the extension directory.
+
+REST target templates use `<parameterName>` placeholders. Each supplied argument is URI-escaped before substitution. An omitted optional HTTP parameter is replaced with an empty value. If `jsonPath` is omitted, the full response body is returned; otherwise the selected JSON value is returned. Supported JSON selectors start with `$` and may follow object properties with `.property` and array indexes with `[index]`, such as `$.users[0].name`.
+
+Script functions start the configured interpreter directly, without a command shell. The script path is passed first, followed by function arguments in parameter order. Successful standard output is the value returned for expansion; its trailing line ending is removed. The interpreter must be installed and available to the application.
+
+Extensions may also provide a function handler in their assembly by implementing `IExtensionFunctionExecutor`. The handler declares an unqualified function name; the extension loader qualifies it with the manifest namespace. Such a function is declared in `schema.functions` without a generic `kind`, and must have exactly one matching handler. The same extension assembly may provide function handlers, command executors, or both. Command executor kinds remain open-ended and are not limited to function execution kinds.
+
+Built-in weather function
+-------------------------
+
+The `@weather:temp(zip)` function is supplied by the Weather extension, which uses Open-Meteo and does not require an API key. It accepts a five-digit U.S. ZIP code, verifies an exact postal-code match, and returns the current temperature in Fahrenheit with Open-Meteo attribution, for example `72.3 °F (Open-Meteo)`. The app must have internet access; the function uses its configured timeout for both geocoding and weather requests.
+
+Example extension schema:
+
+	{
+	  "functions": [
+		{
+		  "name": "userName",
+		  "kind": "httpGet",
+		  "parameters": [{ "name": "id" }],
+		  "targetTemplate": "https://api.example.test/users/<id>",
+		  "jsonPath": "$.name",
+		  "timeoutSeconds": 10
+		},
+		{
+		  "name": "greeting",
+		  "kind": "script",
+		  "parameters": [{ "name": "name" }, { "name": "greeting", "optional": true }],
+		  "interpreter": "python3",
+		  "scriptPath": "scripts/greeting.py",
+		  "timeoutSeconds": 10
+		}
+	  ]
+	}
+
+Function expressions return a string value for inline expansion. Evaluation should support asynchronous HTTP and script execution.
+
+Errors and execution limits
+---------------------------
+
+If a function cannot be resolved or executed, processing should fail with an informative error that identifies the function and the cause. It should not silently substitute an empty value or leave the expression unchanged.
+
+HTTP requests and scripts have a per-function timeout, configurable from 1 to 300 seconds (default 10). HTTP status failures, invalid JSON selectors, missing scripts, and non-zero script exit codes fail expansion. Scripts must be trusted, registered files contained in their extension directory; expressions must not enable arbitrary script execution.
+
+Repeated evaluation and caching
+-------------------------------
+
+Cache successful function results for the duration of one text expansion. If the same registered function is evaluated again with the same resolved arguments during that expansion, reuse the cached value instead of executing it again. Use the function identity and resolved arguments as the cache key. Do not share cached values across separate expansions, and do not cache failures.

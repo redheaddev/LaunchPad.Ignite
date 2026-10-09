@@ -8,7 +8,8 @@ internal enum CompletionKind
     Command,
     Action,
     Argument,
-    Variable
+    Variable,
+    Function
 }
 
 internal sealed record CompletionResolution(

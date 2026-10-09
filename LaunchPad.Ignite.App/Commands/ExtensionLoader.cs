@@ -13,7 +13,8 @@ namespace LaunchPad.Ignite.App.Commands;
 
 public sealed record LoadedExtensions(
     CommandSchema Schema,
-    IReadOnlyDictionary<string, ICommandExecutor> Executors);
+    IReadOnlyDictionary<string, ICommandExecutor> Executors,
+    IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors);
 
 public sealed class ExtensionLoader
 {
@@ -78,7 +79,9 @@ public sealed class ExtensionLoader
         var lists = new List<CommandListDefinition>();
         var commands = new List<CommandDefinition>();
         var variables = new List<CommandVariableDefinition>();
+        var functions = new List<CommandFunctionDefinition>();
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
+        var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in manifests.Values)
         {
             lists.AddRange(manifest.Schema.Lists);
@@ -87,20 +90,131 @@ public sealed class ExtensionLoader
                 Namespace = command.Namespace ?? manifest.Namespace
             }));
             variables.AddRange(manifest.Schema.Variables.Select(variable => variable with { Namespace = manifest.Namespace }));
-            LoadExecutors(manifest, extensionDirectory, executors);
+            var extensionFunctions = manifest.Schema.Functions
+                .Select(function => LoadFunction(function, manifest, extensionDirectory))
+                .ToArray();
+            var registeredFunctionNames = LoadExecutors(manifest, extensionDirectory, executors, functionExecutors);
+            var extensionFunctionNames = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var function in extensionFunctions)
+            {
+                var hasExtensionExecutor = extensionFunctionNames.Contains(function.QualifiedName);
+                if (function.Kind is null && !hasExtensionExecutor)
+                {
+                    throw new InvalidDataException($"Function '{function.QualifiedName}' has no matching extension function executor.");
+                }
+
+                if (function.Kind is not null && hasExtensionExecutor)
+                {
+                    throw new InvalidDataException($"Function '{function.QualifiedName}' is registered both by kind and by an extension executor.");
+                }
+            }
+
+            foreach (var functionName in registeredFunctionNames)
+            {
+                if (!extensionFunctions.Any(function =>
+                    string.Equals(function.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase)
+                    && function.Kind is null))
+                {
+                    throw new InvalidDataException(
+                        $"Extension '{manifest.Id}' function executor '{functionName}' has no matching function definition in its manifest.");
+                }
+            }
+
+            functions.AddRange(extensionFunctions);
         }
 
-        return new LoadedExtensions(new CommandSchema(lists, commands) { Variables = variables }, executors);
+        return new LoadedExtensions(new CommandSchema(lists, commands)
+        {
+            Variables = variables,
+            Functions = functions
+        }, executors, functionExecutors);
     }
 
-    private static void LoadExecutors(
+    private static CommandFunctionDefinition LoadFunction(
+        CommandFunctionDefinition function,
+        ExtensionManifest manifest,
+        string extensionDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(function.Name)
+            || (function.Kind is not null && string.IsNullOrWhiteSpace(function.Kind))
+            || function.Parameters is null
+            || function.Parameters.Any(parameter => parameter is null || string.IsNullOrWhiteSpace(parameter.Name))
+            || function.Parameters.Select(parameter => parameter.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != function.Parameters.Count
+            || function.TimeoutSeconds is < 1 or > 300)
+        {
+            throw new InvalidDataException($"Function in extension '{manifest.Id}' has invalid name, kind, parameters, or timeout.");
+        }
+
+        var optionalParameterFound = false;
+        foreach (var parameter in function.Parameters)
+        {
+            if (parameter.Optional)
+            {
+                optionalParameterFound = true;
+            }
+            else if (optionalParameterFound)
+            {
+                throw new InvalidDataException(
+                    $"Function '{function.Name}' must declare required parameters before optional parameters.");
+            }
+        }
+
+        var qualifiedFunction = function with { Namespace = function.Namespace ?? manifest.Namespace };
+        if (function.Kind is null)
+        {
+            if (string.IsNullOrWhiteSpace(manifest.Assembly))
+            {
+                throw new InvalidDataException($"Function '{qualifiedFunction.QualifiedName}' requires an extension assembly executor.");
+            }
+
+            return qualifiedFunction;
+        }
+
+        if (string.Equals(function.Kind, "httpGet", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(function.TargetTemplate))
+            {
+                throw new InvalidDataException($"REST function '{qualifiedFunction.QualifiedName}' must define a targetTemplate.");
+            }
+
+            return qualifiedFunction;
+        }
+
+        if (!string.Equals(function.Kind, "script", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Function '{qualifiedFunction.QualifiedName}' has unsupported kind '{function.Kind}'.");
+        }
+
+        if (string.IsNullOrWhiteSpace(function.Interpreter) || string.IsNullOrWhiteSpace(function.ScriptPath)
+            || Path.IsPathRooted(function.ScriptPath))
+        {
+            throw new InvalidDataException($"Script function '{qualifiedFunction.QualifiedName}' must define an interpreter and a relative scriptPath.");
+        }
+
+        var extensionRoot = Path.GetFullPath(extensionDirectory) + Path.DirectorySeparatorChar;
+        var scriptPath = Path.GetFullPath(Path.Combine(extensionDirectory, function.ScriptPath));
+        if (!scriptPath.StartsWith(extensionRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Script for function '{qualifiedFunction.QualifiedName}' must be inside its extension directory.");
+        }
+
+        if (!File.Exists(scriptPath))
+        {
+            throw new FileNotFoundException($"Script for function '{qualifiedFunction.QualifiedName}' was not found.", scriptPath);
+        }
+
+        return qualifiedFunction with { ScriptPath = scriptPath };
+    }
+
+    private static IReadOnlyList<string> LoadExecutors(
         ExtensionManifest manifest,
         string extensionDirectory,
-        IDictionary<string, ICommandExecutor> executors)
+        IDictionary<string, ICommandExecutor> executors,
+        IDictionary<string, ICommandFunctionExecutor> functionExecutors)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
         {
-            return;
+            return [];
         }
 
         var fullDirectory = Path.GetFullPath(extensionDirectory) + Path.DirectorySeparatorChar;
@@ -119,22 +233,51 @@ public sealed class ExtensionLoader
         using var assemblyStream = File.OpenRead(assemblyPath);
         var assembly = loadContext.LoadFromStream(assemblyStream);
         var executorTypes = assembly.GetTypes()
-            .Where(type => !type.IsAbstract && !type.IsInterface && typeof(ICommandExecutor).IsAssignableFrom(type))
+            .Where(type => !type.IsAbstract
+                && !type.IsInterface
+                && (typeof(ICommandExecutor).IsAssignableFrom(type)
+                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)))
             .ToArray();
         if (executorTypes.Length == 0)
         {
-            throw new InvalidDataException($"Extension '{manifest.Id}' assembly does not contain any command executors.");
+            throw new InvalidDataException($"Extension '{manifest.Id}' assembly does not contain any command or function executors.");
         }
 
+        var registeredFunctionNames = new List<string>();
         foreach (var executorType in executorTypes)
         {
-            if (Activator.CreateInstance(executorType) is not ICommandExecutor executor
-                || string.IsNullOrWhiteSpace(executor.Kind)
-                || !executors.TryAdd(executor.Kind, executor))
+            var instance = Activator.CreateInstance(executorType)
+                ?? throw new InvalidDataException($"Extension '{manifest.Id}' executor '{executorType.FullName}' could not be created.");
+            if (instance is ICommandExecutor commandExecutor
+                && (string.IsNullOrWhiteSpace(commandExecutor.Kind)
+                    || !executors.TryAdd(commandExecutor.Kind, commandExecutor)))
             {
                 throw new InvalidDataException($"Extension '{manifest.Id}' has an invalid or duplicate command executor '{executorType.FullName}'.");
             }
+
+            if (instance is IExtensionFunctionExecutor functionExecutor)
+            {
+                if (string.IsNullOrWhiteSpace(functionExecutor.FunctionName)
+                    || functionExecutor.FunctionName.Contains(':'))
+                {
+                    throw new InvalidDataException(
+                        $"Extension '{manifest.Id}' function executor '{executorType.FullName}' must provide an unqualified function name.");
+                }
+
+                var functionQualifiedName = string.IsNullOrEmpty(manifest.Namespace)
+                    ? functionExecutor.FunctionName
+                    : $"{manifest.Namespace}:{functionExecutor.FunctionName}";
+                if (!functionExecutors.TryAdd(functionQualifiedName, functionExecutor))
+                {
+                    throw new InvalidDataException(
+                        $"Extension '{manifest.Id}' has a duplicate function executor '{functionQualifiedName}'.");
+                }
+
+                registeredFunctionNames.Add(functionQualifiedName);
+            }
         }
+
+        return registeredFunctionNames;
     }
 
     private sealed class ExtensionLoadContext : AssemblyLoadContext

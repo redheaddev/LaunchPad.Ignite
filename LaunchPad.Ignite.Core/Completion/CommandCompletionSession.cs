@@ -18,11 +18,12 @@ public sealed class CommandCompletionSession
     public CommandCompletionSession(
         CommandCatalog catalog,
         IArgumentValueProvider valueProvider,
-        IEnumerable<CommandVariableDefinition>? variables = null)
+        IEnumerable<CommandVariableDefinition>? variables = null,
+        IEnumerable<CommandFunctionDefinition>? functions = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
-        _resolver = new CommandCompletionResolver(catalog, valueProvider, variables);
+        _resolver = new CommandCompletionResolver(catalog, valueProvider, variables, functions);
         _resolution = _resolver.Resolve(_inputText);
         State = BuildState();
     }

@@ -141,6 +141,34 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void FunctionSuggestionsUseAtPrefixShowSignatureAndInsertCallParenthesis()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(TestCommandSchemas.Pipeline),
+            TestCommandSchemas.CreatePipelineProvider(),
+            functions:
+            [
+                new CommandFunctionDefinition(
+                    "forecast",
+                    null,
+                    [new("zip"), new("days", Optional: true)],
+                    Namespace: "weather"),
+                new CommandFunctionDefinition("temp", null, [new("zip")], Namespace: "weather")
+            ]);
+
+        var state = session.UpdateInputText("open https://example.test/@weather:fo");
+
+        var item = Assert.Single(state.Items);
+        Assert.Equal("@weather:forecast(", item.Value);
+        Assert.Equal("@weather:forecast(zip, [days])", item.DisplayText);
+        Assert.Equal("recast(", state.GhostText);
+
+        state = session.HandleKey(CommandInputKey.Tab);
+
+        Assert.Equal("open https://example.test/@weather:forecast(", state.InputText);
+    }
+
+    [Fact]
     public void ExactCommandWaitsForSeparatorBeforeShowingNextArgumentSuggestion()
     {
         var session = new CommandCompletionSession(
