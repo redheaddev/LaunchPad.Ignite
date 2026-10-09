@@ -42,6 +42,26 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void NamespacedCommandSuggestionsMatchNamespaceOrCommandName()
+    {
+        var schema = new CommandSchema(
+            [],
+            [
+                new CommandDefinition("pipeline", "url", "", [new CommandActionDefinition("default", "", "", "https://example.test", [])], "ado"),
+                new CommandDefinition("status", "url", "", [new CommandActionDefinition("default", "", "", "https://example.test", [])], "git")
+            ]);
+        var session = new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new CommandSchemaValueProvider(schema));
+
+        var state = session.UpdateInputText("pipe");
+        Assert.Equal(["ado:pipeline"], state.Items.Select(item => item.Value));
+
+        state = session.UpdateInputText("git");
+        Assert.Equal(["git:status"], state.Items.Select(item => item.Value));
+    }
+
+    [Fact]
     public void ExactCommandPrefixStillShowsLongerMatchingCommands()
     {
         var schema = new CommandSchema(

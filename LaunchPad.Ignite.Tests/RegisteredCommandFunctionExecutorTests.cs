@@ -58,13 +58,15 @@ public class RegisteredCommandFunctionExecutorTests
         Assert.Equal(body, result);
     }
 
-    [Fact]
-    public async Task WeatherFunctionGeocodesExactZipAndReturnsFahrenheit()
+    [Theory]
+    [InlineData("72.9", "72")]
+    [InlineData("-3.9", "-3")]
+    public async Task WeatherFunctionGeocodesExactZipAndReturnsTruncatedTemperature(string temperature, string expected)
     {
         var handler = new StubHttpMessageHandler(request =>
             request.RequestUri!.Host.StartsWith("geocoding-api.", StringComparison.Ordinal)
                 ? "{\"results\":[{\"name\":\"Mount Vernon\",\"latitude\":37.1,\"longitude\":-93.8,\"postcodes\":[\"65738\"]}]}"
-                : "{\"current\":{\"temperature_2m\":72.3}}");
+                : $"{{\"current\":{{\"temperature_2m\":{temperature}}}}}");
         using var client = new HttpClient(handler);
         var executor = new RegisteredCommandFunctionExecutor(
             client,
@@ -76,7 +78,7 @@ public class RegisteredCommandFunctionExecutorTests
 
         var result = await executor.ExecuteAsync(function, ["65738"], CancellationToken.None);
 
-        Assert.Equal("72.3 °F (Open-Meteo)", result);
+        Assert.Equal(expected, result);
         Assert.Equal(2, handler.RequestUris.Count);
         Assert.Contains("countryCode=US", handler.RequestUris[0].Query);
         Assert.Contains("temperature_unit=fahrenheit", handler.RequestUris[1].Query);

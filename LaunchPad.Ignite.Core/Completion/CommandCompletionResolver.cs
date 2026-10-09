@@ -90,7 +90,7 @@ internal sealed class CommandCompletionResolver
             && _catalog.TryGetCommand(tokens[0].Value, out _))
         {
             var matchingCommands = _catalog.Commands
-                .Where(candidate => candidate.QualifiedName.StartsWith(tokens[0].Value, StringComparison.OrdinalIgnoreCase))
+                .Where(candidate => MatchesCommandPrefix(candidate, tokens[0].Value))
                 .ToArray();
             if (matchingCommands.Length > 1)
             {
@@ -114,8 +114,8 @@ internal sealed class CommandCompletionResolver
                 tokens[0].Value,
                 tokens[0].Start,
                 _catalog.Commands
+                    .Where(candidate => MatchesCommandPrefix(candidate, tokens[0].Value))
                     .Select(candidate => candidate.QualifiedName)
-                    .Where(name => name.StartsWith(tokens[0].Value, StringComparison.OrdinalIgnoreCase))
                     .ToArray());
         }
 
@@ -259,6 +259,11 @@ internal sealed class CommandCompletionResolver
         int tokenStart,
         IReadOnlyList<string> candidates)
         => new(kind, prefix, tokenStart, candidates, false, ListSelectionMode.Multiple, false, false);
+
+    private static bool MatchesCommandPrefix(CommandDefinition command, string prefix)
+        => command.QualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || command.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || command.Namespace?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true;
 
     private static CompletionResolution None(int tokenStart, bool awaitingSeparator = false)
         => CreateResolution(CompletionKind.None, string.Empty, tokenStart, Array.Empty<string>()) with

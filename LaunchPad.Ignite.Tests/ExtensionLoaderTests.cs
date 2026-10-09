@@ -55,6 +55,66 @@ public class ExtensionLoaderTests
         var result = executor.Execute(new ParsedCommand(command, action, new Dictionary<string, string>()));
         Assert.True(result.Succeeded);
         Assert.Equal("Executed by extension.", result.Message);
+        Assert.Equal(new LoadedExtensionInfo("sample", "unknown", true), Assert.Single(extensions.Extensions));
+    }
+
+    [Fact]
+    public void DisabledExtensionsRemainListedButDoNotContributeSchema()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionDirectory = Path.Combine(directory.Path, "sample");
+        Directory.CreateDirectory(extensionDirectory);
+        File.WriteAllText(Path.Combine(extensionDirectory, "extension.json"), """
+            {
+              "id": "sample",
+              "name": "Sample extension",
+              "namespace": "sample",
+              "version": "2.3.4",
+              "schema": {
+                "variables": [{ "name": "endpoint", "value": "https://example.test" }],
+                "lists": [{ "type": "enum", "name": "environment", "values": ["dev"] }],
+                "commands": [{
+                  "name": "sample",
+                  "kind": "url",
+                  "description": "Sample command",
+                  "actions": [{ "name": "default", "usage": "sample:sample", "targetTemplate": "https://example.test", "arguments": [] }]
+                }],
+                "functions": [{
+                  "name": "lookup",
+                  "kind": "httpGet",
+                  "parameters": [],
+                  "targetTemplate": "https://example.test/value"
+                }]
+              }
+            }
+            """);
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json"));
+        var loader = new ExtensionLoader([directory.Path], stateStore);
+
+        var enabledExtensions = loader.Load();
+        Assert.Single(enabledExtensions.Schema.Commands);
+        Assert.Single(enabledExtensions.Schema.Variables);
+        Assert.Single(enabledExtensions.Schema.Lists);
+        Assert.Single(enabledExtensions.Schema.Functions);
+
+        stateStore.SetEnabled("sample", enabled: false);
+
+        var extensions = loader.Load();
+
+        Assert.Empty(extensions.Schema.Commands);
+        Assert.Empty(extensions.Schema.Variables);
+        Assert.Empty(extensions.Schema.Lists);
+        Assert.Empty(extensions.Schema.Functions);
+        Assert.Equal(new LoadedExtensionInfo("sample", "2.3.4", false), Assert.Single(extensions.Extensions));
+        Assert.Empty(extensions.Executors);
+        Assert.Empty(extensions.FunctionExecutors);
+
+        stateStore.SetEnabled("sample", enabled: true);
+        var reenabledExtensions = loader.Load();
+        Assert.Single(reenabledExtensions.Schema.Commands);
+        Assert.Single(reenabledExtensions.Schema.Variables);
+        Assert.Single(reenabledExtensions.Schema.Lists);
+        Assert.Single(reenabledExtensions.Schema.Functions);
     }
 
     [Fact]

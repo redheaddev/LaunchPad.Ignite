@@ -18,12 +18,91 @@ public class CommandModelTests
     {
         using var directory = new TemporaryDirectory();
         var userPath = Path.Combine(directory.Path, "user", "user-commands.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(userPath)!);
+        File.WriteAllText(userPath + ".legacy-migrated", string.Empty);
 
         var schema = new CommandSchemaLoader(new CommandSchema([], []), userPath).Load();
 
         Assert.True(File.Exists(userPath));
         Assert.Empty(schema.Commands);
         Assert.Empty(schema.Lists);
+    }
+
+    [Fact]
+    public void LoaderMigratesBundledCommandsIntoUserSchemaOnlyOnce()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var defaultsPath = Path.Combine(directory.Path, "defaults.json");
+        File.WriteAllText(defaultsPath, """
+            {
+              "lists": [],
+              "variables": [],
+              "functions": [],
+              "commands": [
+                { "name": "legacy-one", "kind": "url", "description": "seed", "actions": [] },
+                { "name": "shared", "kind": "url", "description": "seed", "actions": [] }
+              ]
+            }
+            """);
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath, defaultsPath);
+
+        var firstLoad = loader.Load();
+
+        Assert.Equal(2, firstLoad.Commands.Count);
+        Assert.Contains(firstLoad.Commands, command => command.Name == "legacy-one");
+        Assert.Contains(firstLoad.Commands, command => command.Name == "shared" && command.Description == "seed");
+
+        File.WriteAllText(userPath, """
+            {
+              "lists": [],
+              "variables": [],
+              "functions": [],
+              "commands": [
+                { "name": "shared", "kind": "url", "description": "user edit", "actions": [] }
+              ]
+            }
+            """);
+        var secondLoad = loader.Load();
+
+        Assert.Single(secondLoad.Commands);
+        Assert.Equal("user edit", Assert.Single(secondLoad.Commands).Description);
+    }
+
+    [Fact]
+    public void LoaderAddsDefaultsToExistingUserFileWithoutOverwritingMatchingCommands()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var defaultsPath = Path.Combine(directory.Path, "defaults.json");
+        File.WriteAllText(userPath, """
+            {
+              "lists": [],
+              "variables": [],
+              "functions": [],
+              "commands": [
+                { "name": "shared", "kind": "url", "description": "user version", "actions": [] }
+              ]
+            }
+            """);
+        File.WriteAllText(defaultsPath, """
+            {
+              "lists": [],
+              "variables": [],
+              "functions": [],
+              "commands": [
+                { "name": "legacy-one", "kind": "url", "description": "seed", "actions": [] },
+                { "name": "shared", "kind": "url", "description": "seed", "actions": [] }
+              ]
+            }
+            """);
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath, defaultsPath);
+
+        var schema = loader.Load();
+
+        Assert.Equal(2, schema.Commands.Count);
+        Assert.Contains(schema.Commands, command => command.Name == "legacy-one");
+        Assert.Contains(schema.Commands, command => command.Name == "shared" && command.Description == "user version");
     }
 
     [Fact]
@@ -93,6 +172,7 @@ public class CommandModelTests
         {
             Variables = [new CommandVariableDefinition("orgUrl", "https://app.test", "ado")]
         };
+        File.WriteAllText(userPath + ".legacy-migrated", string.Empty);
         File.WriteAllText(userPath, """
             {
               "lists": [{ "type": "enum", "name": "project", "values": ["user-value"] }],

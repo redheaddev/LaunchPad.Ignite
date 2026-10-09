@@ -14,7 +14,10 @@ namespace LaunchPad.Ignite.App.Commands;
 public sealed record LoadedExtensions(
     CommandSchema Schema,
     IReadOnlyDictionary<string, ICommandExecutor> Executors,
-    IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors);
+    IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
+    IReadOnlyList<LoadedExtensionInfo> Extensions);
+
+public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled);
 
 public sealed class ExtensionLoader
 {
@@ -27,22 +30,29 @@ public sealed class ExtensionLoader
     };
 
     private readonly IReadOnlyList<string> _extensionRoots;
+    private readonly ExtensionStateStore? _stateStore;
 
     public ExtensionLoader()
         : this(
-        [
-            Path.Combine(AppContext.BaseDirectory, "extensions"),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LaunchPad.Ignite",
-                "extensions")
-        ])
+            GetDefaultExtensionRoots(),
+            new ExtensionStateStore())
     {
     }
 
     public ExtensionLoader(IEnumerable<string> extensionRoots)
+        : this(extensionRoots, null)
+    {
+    }
+
+    public ExtensionLoader(ExtensionStateStore stateStore)
+        : this(GetDefaultExtensionRoots(), stateStore)
+    {
+    }
+
+    public ExtensionLoader(IEnumerable<string> extensionRoots, ExtensionStateStore? stateStore)
     {
         _extensionRoots = extensionRoots.ToArray();
+        _stateStore = stateStore;
     }
 
     public LoadedExtensions Load()
@@ -76,13 +86,26 @@ public sealed class ExtensionLoader
             }
         }
 
+        var disabledIds = _stateStore?.GetDisabledExtensionIds()
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var extensionInfo = manifests.Values
+            .Select(entry => new LoadedExtensionInfo(
+                entry.Manifest.Id,
+                string.IsNullOrWhiteSpace(entry.Manifest.Version) ? "unknown" : entry.Manifest.Version,
+                !disabledIds.Contains(entry.Manifest.Id)))
+            .OrderBy(extension => extension.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var enabledManifests = manifests.Values
+            .Where(entry => !disabledIds.Contains(entry.Manifest.Id))
+            .ToArray();
+
         var lists = new List<CommandListDefinition>();
         var commands = new List<CommandDefinition>();
         var variables = new List<CommandVariableDefinition>();
         var functions = new List<CommandFunctionDefinition>();
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (manifest, extensionDirectory) in manifests.Values)
+        foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
             lists.AddRange(manifest.Schema.Lists);
             commands.AddRange(manifest.Schema.Commands.Select(command => command with
@@ -127,8 +150,18 @@ public sealed class ExtensionLoader
         {
             Variables = variables,
             Functions = functions
-        }, executors, functionExecutors);
+        }, executors, functionExecutors, extensionInfo);
     }
+
+    private static string[] GetDefaultExtensionRoots()
+        =>
+        [
+            Path.Combine(AppContext.BaseDirectory, "extensions"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LaunchPad.Ignite",
+                "extensions")
+        ];
 
     private static CommandFunctionDefinition LoadFunction(
         CommandFunctionDefinition function,

@@ -19,6 +19,8 @@ public sealed class CommandSchemaLoader
 
     private readonly CommandSchema _appSchema;
     private readonly string _userCommandsPath;
+    private readonly string _defaultUserCommandsPath;
+    private readonly string _migrationMarkerPath;
 
     public CommandSchemaLoader(CommandSchema appSchema)
         : this(
@@ -31,14 +33,25 @@ public sealed class CommandSchemaLoader
     }
 
     public CommandSchemaLoader(CommandSchema appSchema, string userCommandsPath)
+        : this(
+            appSchema,
+            userCommandsPath,
+            Path.Combine(AppContext.BaseDirectory, "defaults", "user-commands.json"))
+    {
+    }
+
+    public CommandSchemaLoader(CommandSchema appSchema, string userCommandsPath, string defaultUserCommandsPath)
     {
         _appSchema = appSchema;
         _userCommandsPath = userCommandsPath;
+        _defaultUserCommandsPath = defaultUserCommandsPath;
+        _migrationMarkerPath = userCommandsPath + ".legacy-migrated";
     }
 
     public CommandSchema Load()
     {
         EnsureUserCommandsFileExists();
+        MigrateLegacyCommandsOnce();
         var userSchema = ReadSchema(_userCommandsPath);
         return Merge(_appSchema, userSchema);
     }
@@ -89,6 +102,48 @@ public sealed class CommandSchemaLoader
         }
 
         File.WriteAllText(_userCommandsPath, JsonSerializer.Serialize(new CommandSchema([], []), SerializerOptions));
+    }
+
+    private void MigrateLegacyCommandsOnce()
+    {
+        if (File.Exists(_migrationMarkerPath) || !File.Exists(_defaultUserCommandsPath))
+        {
+            return;
+        }
+
+        var userSchema = ReadSchema(_userCommandsPath);
+        var defaultSchema = ReadSchema(_defaultUserCommandsPath);
+        var userCommands = userSchema.Commands ?? [];
+        var defaultCommands = defaultSchema.Commands ?? [];
+        var userLists = userSchema.Lists ?? [];
+        var defaultLists = defaultSchema.Lists ?? [];
+        var userVariables = userSchema.Variables ?? [];
+        var defaultVariables = defaultSchema.Variables ?? [];
+        var userFunctions = userSchema.Functions ?? [];
+        var defaultFunctions = defaultSchema.Functions ?? [];
+        var commands = userCommands
+            .Concat(defaultCommands.Where(defaultCommand => !userCommands.Any(userCommand =>
+                string.Equals(userCommand.QualifiedName, defaultCommand.QualifiedName, StringComparison.OrdinalIgnoreCase))))
+            .ToArray();
+        var lists = userLists
+            .Concat(defaultLists.Where(defaultList => !userLists.Any(userList =>
+                string.Equals(GetListKey(userList), GetListKey(defaultList), StringComparison.OrdinalIgnoreCase))))
+            .ToArray();
+        var variables = userVariables
+            .Concat(defaultVariables.Where(defaultVariable => !userVariables.Any(userVariable =>
+                string.Equals(userVariable.QualifiedName, defaultVariable.QualifiedName, StringComparison.OrdinalIgnoreCase))))
+            .ToArray();
+        var functions = userFunctions
+            .Concat(defaultFunctions.Where(defaultFunction => !userFunctions.Any(userFunction =>
+                string.Equals(userFunction.QualifiedName, defaultFunction.QualifiedName, StringComparison.OrdinalIgnoreCase))))
+            .ToArray();
+
+        WriteSchema(new CommandSchema(lists, commands)
+        {
+            Variables = variables,
+            Functions = functions
+        });
+        File.WriteAllText(_migrationMarkerPath, string.Empty);
     }
 
     private static CommandSchema ReadSchema(string path)

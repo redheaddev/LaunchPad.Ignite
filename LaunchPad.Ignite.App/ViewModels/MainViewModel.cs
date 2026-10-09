@@ -22,53 +22,85 @@ public partial class MainViewModel : ViewModelBase
 {
     private static readonly IBrush ValueOutputBrush = new SolidColorBrush(Color.FromRgb(0x67, 0xE8, 0xF9));
     private static readonly IBrush StatusMessageBrushDefault = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B));
-    private readonly CommandCompletionSession _completionSession;
-    private readonly CommandCatalog _catalog;
-    private readonly CommandLineParser _parser;
-    private readonly ShortcutResolver _shortcutResolver;
-    private readonly CommandTextVariableExpander _variableExpander;
-    private readonly CommandTextFunctionExpander _functionExpander;
+    private CommandCompletionSession _completionSession = null!;
+    private CommandCatalog _catalog = null!;
+    private CommandLineParser _parser = null!;
+    private ShortcutResolver _shortcutResolver = null!;
+    private CommandTextVariableExpander _variableExpander = null!;
+    private CommandTextFunctionExpander _functionExpander = null!;
     private readonly CommandLineTokenizer _tokenizer = new();
-    private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
-    private readonly UrlCommandModel _urlCommandModel;
+    private IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors = null!;
+    private UrlCommandModel _urlCommandModel = null!;
     private readonly SecretCommandModel _secretCommandModel;
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
+    private readonly ExtensionStateStore _extensionStateStore;
+    private LoadedExtensions _extensions = null!;
+    private readonly ISecretStore _secretStore;
+    private readonly IProcessStarter _processStarter;
+    private bool _isExtensionListVisible;
     private bool _syncingInput;
 
     public MainViewModel()
     {
-        var extensions = new ExtensionLoader().Load();
+        _extensionStateStore = new ExtensionStateStore();
+        _secretStore = PlatformSecretStore.Create();
+        _processStarter = new SystemProcessStarter();
+        _secretAccessGate = new SecretAccessGate();
+        _secretCommandModel = new SecretCommandModel(
+            _secretStore,
+            _secretAccessGate,
+            new AvaloniaSecretEntryDialogService(),
+            new AvaloniaClipboardService(GetSystemClipboard),
+            new SystemSecretTerminalLauncher(_processStarter));
+        InitializeCommandRuntime();
+        _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
+        _secretAccessStateTimer.Start();
+        RefreshSecretAccessState();
+    }
+
+    private void InitializeCommandRuntime()
+    {
+        var extensions = new ExtensionLoader(_extensionStateStore).Load();
+        var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
         var schemaLoader = new CommandSchemaLoader(extensions.Schema);
         var schema = schemaLoader.Load();
+        var commands = schema.Commands
+            .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command.QualifiedName, ExtensionCommandModel.Definition.QualifiedName, StringComparison.OrdinalIgnoreCase))
+            .Append(VariableCommandModel.Definition);
+        commands = commands.Append(ExtensionCommandModel.Definition);
+
         schema = schema with
         {
-            Commands = schema.Commands
-                .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase))
-                .Append(VariableCommandModel.Definition)
-                .Append(SecretCommandDefinition.Definition)
-                .ToArray()
+            Commands = commands.Append(SecretCommandDefinition.Definition).ToArray()
         };
-        var secretStore = PlatformSecretStore.Create();
-        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell").Append("variable").Append("secret"));
-        _variableExpander = new CommandTextVariableExpander(schema.Variables);
-        _shortcutResolver = new ShortcutResolver(schema.Commands);
-        var valueProvider = new CommandSchemaValueProvider(schema, new SecretNamesArgumentValueProvider(secretStore));
-        _functionExpander = new CommandTextFunctionExpander(
+        var builtInKinds = new[] { "shell", "variable", "secret" };
+        builtInKinds = [.. builtInKinds, "extension"];
+
+        var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(builtInKinds));
+        var variableExpander = new CommandTextVariableExpander(schema.Variables);
+        var shortcutResolver = new ShortcutResolver(schema.Commands);
+        var valueProvider = new CommandSchemaValueProvider(
+            schema,
+            new CompositeArgumentValueProvider(
+                new SecretNamesArgumentValueProvider(_secretStore),
+                new ExtensionIdsArgumentValueProvider(extensionIds)));
+        var functionExpander = new CommandTextFunctionExpander(
             schema.Functions,
             new RegisteredCommandFunctionExecutor(extensionFunctionExecutors: extensions.FunctionExecutors));
-        _completionSession = new CommandCompletionSession(
-            _catalog,
+        var completionSession = new CommandCompletionSession(
+            catalog,
             valueProvider,
             schema.Variables,
             schema.Functions);
-        _parser = new CommandLineParser(_catalog, valueProvider);
-        _urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
-        var processStarter = new SystemProcessStarter();
+        var parser = new CommandLineParser(catalog, valueProvider);
+        var urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["url"] = _urlCommandModel,
-            ["shell"] = new ShellCommandModel(processStarter),
+            ["url"] = urlCommandModel,
+            ["shell"] = new ShellCommandModel(_processStarter),
             ["variable"] = new VariableCommandModel(schemaLoader, updatedSchema =>
             {
                 _variableExpander.UpdateVariables(updatedSchema.Variables);
@@ -76,6 +108,11 @@ public partial class MainViewModel : ViewModelBase
                 ApplyCompletionState(_completionSession.UpdateVariables(updatedSchema.Variables));
             })
         };
+        commandExecutors["extension"] = new ExtensionCommandModel(
+            _extensionStateStore,
+            extensionIds,
+            InitializeCommandRuntime);
+
         foreach (var (kind, executor) in extensions.Executors)
         {
             if (!commandExecutors.TryAdd(kind, executor))
@@ -84,18 +121,15 @@ public partial class MainViewModel : ViewModelBase
             }
         }
 
+        _extensions = extensions;
+        _catalog = catalog;
+        _variableExpander = variableExpander;
+        _shortcutResolver = shortcutResolver;
+        _functionExpander = functionExpander;
+        _completionSession = completionSession;
+        _parser = parser;
+        _urlCommandModel = urlCommandModel;
         _commandExecutors = commandExecutors;
-        _secretAccessGate = new SecretAccessGate();
-        _secretCommandModel = new SecretCommandModel(
-            secretStore,
-            _secretAccessGate,
-            new AvaloniaSecretEntryDialogService(),
-            new AvaloniaClipboardService(GetSystemClipboard),
-            new SystemSecretTerminalLauncher(processStarter));
-        _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
-        _secretAccessStateTimer.Start();
-        RefreshSecretAccessState();
         ApplyCompletionState(_completionSession.State);
     }
 
@@ -153,7 +187,7 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsChecklistActive => _completionSession.State.IsChecklistActive;
 
-    public bool HasCompletionOptions => _completionSession.State.Items.Count > 0;
+    public bool HasCompletionOptions => CompletionItems.Count > 0;
 
     public bool HasUsageText => !string.IsNullOrEmpty(UsageText);
 
@@ -171,7 +205,7 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCommandExpansionPreview => !string.IsNullOrEmpty(CommandExpansionPreview);
 
-    public bool CanComplete => _completionSession.State.CanComplete;
+    public bool CanComplete => _isExtensionListVisible || _completionSession.State.CanComplete;
 
     public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
 
@@ -184,8 +218,19 @@ public partial class MainViewModel : ViewModelBase
     {
         if (key == CommandInputKey.Enter)
         {
-            TryExpandTypedShortcut();
+            if (!string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
+            {
+                TryExpandTypedShortcut();
+            }
+
             return await ExecuteCommandAsync();
+        }
+
+        if (_isExtensionListVisible
+            && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
+                or CommandInputKey.SelectAll or CommandInputKey.DeselectAll)
+        {
+            return false;
         }
 
         if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
@@ -204,11 +249,16 @@ public partial class MainViewModel : ViewModelBase
         if (!_syncingInput)
         {
             ApplyCompletionState(_completionSession.UpdateInputText(value));
+            if (string.Equals(value.Trim(), "!", StringComparison.Ordinal))
+            {
+                ShowExtensionList();
+            }
         }
     }
 
     private void ApplyCompletionState(CommandCompletionState state)
     {
+        _isExtensionListVisible = false;
         if (!string.Equals(CommandText, state.InputText, StringComparison.Ordinal))
         {
             _syncingInput = true;
@@ -240,6 +290,19 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
         OnPropertyChanged(nameof(CanExpandTypedShortcut));
+    }
+
+    private void ShowExtensionList()
+    {
+        var displayLines = ExtensionCommandModel.FormatList(_extensions.Extensions, _extensionStateStore)
+            .Split(Environment.NewLine, StringSplitOptions.None);
+        UsageText = "Installed extensions";
+        CompletionItems = displayLines
+            .Select(line => new CompletionOptionViewModel(line, false, false))
+            .ToArray();
+        _isExtensionListVisible = true;
+        OnPropertyChanged(nameof(HasCompletionOptions));
+        OnPropertyChanged(nameof(CanComplete));
     }
 
     private bool TryExpandTypedShortcut()
@@ -291,6 +354,13 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
 
     private async Task<bool> ExecuteCommandAsync()
     {
+        if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
+        {
+            SetStatusMessage(ExtensionCommandModel.FormatList(_extensions.Extensions, _extensionStateStore), isValueOutput: true);
+            CommandText = string.Empty;
+            return true;
+        }
+
         var isPrintCommand = PrintValueCommandParser.TryParse(CommandText, out var printExpression);
         if (isPrintCommand && string.IsNullOrWhiteSpace(printExpression))
         {
@@ -379,6 +449,20 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
     {
         IsValueOutput = isValueOutput;
         StatusMessage = message;
+    }
+
+    private string FormatExtensionList()
+    {
+        if (_extensions.Extensions.Count == 0)
+        {
+            return "No extensions installed.";
+        }
+
+        return string.Join(
+            Environment.NewLine,
+            _extensions.Extensions.Select(extension =>
+                $"{extension.Id} | {extension.Version} [{(_extensionStateStore.IsEnabled(extension.Id) ? "enabled" : "disabled")}]")
+        );
     }
 
     private void RefreshSecretAccessState()

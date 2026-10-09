@@ -17,6 +17,7 @@ Each extension directory contains one `extension.json` file with this shape:
   "id": "example",
   "name": "Example Extension",
   "namespace": "example",
+	"version": "1.2.3",
   "schema": {
 	"variables": [],
 	"lists": [],
@@ -26,7 +27,17 @@ Each extension directory contains one `extension.json` file with this shape:
   "assembly": "Example.Extension.dll"
 }
 
-`id`, `name`, `namespace`, and `schema` are required. `id`, `name`, and `namespace` must be non-empty strings. `schema` must contain `lists` and `commands` arrays; `variables` and `functions` are optional and default to empty arrays. Use the supported schema fields and rules described in `rules-parser.txt` and `rules-function.txt`. `assembly` is optional. JSON property names are case-insensitive, and enum values such as execution mode and list mode use camel-case strings.
+`id`, `name`, `namespace`, and `schema` are required. `id`, `name`, and `namespace` must be non-empty strings. `version` is optional; extensions without a version display `unknown`. `schema` must contain `lists` and `commands` arrays; `variables` and `functions` are optional and default to empty arrays. Use the supported schema fields and rules described in `rules-parser.txt` and `rules-function.txt`. `assembly` is optional. JSON property names are case-insensitive, and enum values such as execution mode and list mode use camel-case strings.
+
+Enable and disable extensions
+-----------------------------
+Type `!` to list discovered extensions as `id | version [enabled]` or `id | version [disabled]`. Use `extension enable <id>` or `extension disable <id>` to change an extension's persisted state. Extension state is stored in `%LocalAppData%/LaunchPad.Ignite/extension-state.json`. Changes immediately reload the active commands and functions; disabled extensions remain listed but their commands and functions are not loaded.
+
+Install and uninstall extensions
+--------------------------------
+Package an extension as a ZIP file with `extension.json` at the archive root and the files referenced by the manifest beside it. Install a local package with `extension install <zip-path>`. The extension ID in the manifest determines its user installation directory under `%LocalAppData%/LaunchPad.Ignite/extensions`. Installing an extension with an existing ID replaces its user-installed copy; installed extensions with the same ID as an app-bundled extension override the bundled copy.
+
+Use `extension uninstall <id>` to remove a user-installed extension. App-bundled extensions cannot be uninstalled. Install and uninstall reload the active commands and functions immediately; if the reload fails, the filesystem operation is rolled back. ZIP entries that escape the package directory and packages without a valid root manifest are rejected.
 
 Namespacing
 -----------
@@ -53,3 +64,6 @@ An `IExtensionFunctionExecutor` declares an unqualified `FunctionName`; the load
 User overrides
 --------------
 After extensions load, `%LocalAppData%/LaunchPad.Ignite/user-commands.json` is merged over the app and extension schema. A user command replaces the command with the same qualified name; a user list replaces a list with the same type and name; a user variable replaces the variable with the same qualified name. Comparisons are case-insensitive. User-defined command namespaces are used as supplied rather than assigned from an extension manifest.
+
+The former Legacy Commands extension is now supplied as user-command defaults. On first startup with the new version, its commands are merged into `%LocalAppData%/LaunchPad.Ignite/user-commands.json` once. Existing user definitions with matching names take precedence, and subsequent launches do not reapply the defaults or overwrite edits.
+Legacy commands are now delivered through `user-commands.json` and are not installed, enabled, disabled, or uninstalled as an extension package.

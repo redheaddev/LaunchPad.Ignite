@@ -40,7 +40,7 @@ Extensions may also provide a function handler in their assembly by implementing
 Built-in weather function
 -------------------------
 
-The `@weather:temp(zip)` function is supplied by the Weather extension, which uses Open-Meteo and does not require an API key. It accepts a five-digit U.S. ZIP code, verifies an exact postal-code match, and returns the current temperature in Fahrenheit with Open-Meteo attribution, for example `72.3 °F (Open-Meteo)`. The app must have internet access; the function uses its configured timeout for both geocoding and weather requests.
+The `@weather:temp(zip)` function is supplied by the Weather extension, which uses Open-Meteo and does not require an API key. It accepts a five-digit U.S. ZIP code, verifies an exact postal-code match, and returns the current temperature in Fahrenheit truncated to an integer, for example `72`. The app must have internet access; the function uses its configured timeout for both geocoding and weather requests.
 
 Example extension schema:
 

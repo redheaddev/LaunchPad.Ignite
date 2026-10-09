@@ -7,4 +7,5 @@ public sealed record ExtensionManifest(
     string Name,
     string Namespace,
     CommandSchema Schema,
-    string? Assembly = null);
+    string? Assembly = null,
+    string? Version = null);

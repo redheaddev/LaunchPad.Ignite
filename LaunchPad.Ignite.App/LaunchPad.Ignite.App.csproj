@@ -11,8 +11,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Extensions\**\*">
-      <TargetPath>extensions\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    <Content Include="Defaults\user-commands.json">
+      <TargetPath>defaults\user-commands.json</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -32,5 +32,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
+    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Ado\LaunchPad.Ignite.Extensions.Ado.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
