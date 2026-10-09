@@ -173,14 +173,17 @@ public class CommandCompletionSessionTests
 
         var state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1", state.InputText);
+        Assert.Equal(",token2", state.GhostText);
         Assert.Contains(state.Items, item => item.Value == "token1" && item.IsSelected);
 
-        session.HandleKey(CommandInputKey.Down);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1,token2", state.InputText);
+        Assert.Equal(",token3", state.GhostText);
 
+        session.HandleKey(CommandInputKey.Up);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1", state.InputText);
+        Assert.Equal(",token2", state.GhostText);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1,token2", state.InputText);
     }
@@ -201,18 +204,20 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
-    public void MinimalListAcceptsCurrentSuggestionAndAdvancesGhost()
+    public void MinimalListAcceptsOneValueWithoutSuggestingAdditionalValues()
     {
         var session = new CommandCompletionSession(
-            new CommandCatalog(TestCommandSchemas.SecretList(ListSelectionMode.Minimal)),
+            new CommandCatalog(TestCommandSchemas.SecretList(ListSelectionMode.Single)),
             TestCommandSchemas.CreateSecretListProvider());
         session.UpdateInputText("secret shell ");
 
         var state = session.HandleKey(CommandInputKey.Tab);
 
         Assert.Equal("secret shell token1", state.InputText);
-        Assert.Equal("token2", state.GhostText);
+        Assert.Empty(state.GhostText);
+        Assert.False(state.IsChecklistActive);
         Assert.DoesNotContain(state.Items, item => item.Value == "token1");
+        Assert.Empty(state.Items);
     }
 
     private static CommandCompletionSession CreateSecretListSession()

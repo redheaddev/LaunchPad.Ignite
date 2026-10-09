@@ -103,7 +103,7 @@ public sealed class CommandCompletionSession
         var selectedItem = items[_highlightedIndex].Value;
         if (_resolution.IsChecklist)
         {
-            if (_resolution.ListMode == ListSelectionMode.Minimal)
+            if (_resolution.ListMode == ListSelectionMode.Single)
             {
                 if (!_selectedValues.Contains(selectedItem, StringComparer.OrdinalIgnoreCase))
                 {
@@ -126,7 +126,8 @@ public sealed class CommandCompletionSession
                     _selectedValues.Add(selectedItem);
                 }
 
-                _preferredHighlightValue = selectedItem;
+                _preferredHighlightValue = GetVisibleListValues()
+                    .FirstOrDefault(value => !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase));
             }
 
             ReplaceCurrentArgument(string.Join(',', _selectedValues));
@@ -201,7 +202,7 @@ public sealed class CommandCompletionSession
 
     private void SelectAll()
     {
-        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Minimal)
+        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Single)
         {
             return;
         }
@@ -215,7 +216,7 @@ public sealed class CommandCompletionSession
 
     private void DeselectAll()
     {
-        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Minimal)
+        if (!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Single)
         {
             return;
         }
@@ -316,10 +317,15 @@ public sealed class CommandCompletionSession
             return [];
         }
 
+        if (_resolution.ListMode == ListSelectionMode.Single && _selectedValues.Count > 0)
+        {
+            return [];
+        }
+
         var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
         return values
             .Where(value => value.StartsWith(_listFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(value => _resolution.ListMode != ListSelectionMode.Minimal
+            .Where(value => _resolution.ListMode != ListSelectionMode.Single
                 || !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
             .ToList();
     }
@@ -352,14 +358,36 @@ public sealed class CommandCompletionSession
         var items = GetVisibleItems();
         var highlighted = items.FirstOrDefault(item => item.IsHighlighted);
         var prefix = _resolution.IsChecklist ? _listFilter : _resolution.Prefix;
-        var ghostText = highlighted is not null && highlighted.Value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? highlighted.Value[prefix.Length..]
-            : string.Empty;
+        if (_resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Single)
+        {
+            items = items
+                .Where(item => !string.Equals(item.Value, prefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            highlighted = items.FirstOrDefault(item => item.IsHighlighted)
+                ?? items.FirstOrDefault();
+        }
+
+        var ghostText = string.Empty;
+        var ghostCandidate = _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple
+            ? items.FirstOrDefault(item => !item.IsSelected)
+            : highlighted;
+        if (ghostCandidate is not null && ghostCandidate.Value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            ghostText = ghostCandidate.Value[prefix.Length..];
+            if (_resolution.IsChecklist
+                && _resolution.ListMode == ListSelectionMode.Multiple
+                && _selectedValues.Count > 0
+                && _listFilter.Length == 0
+                && !_inputText.EndsWith(','))
+            {
+                ghostText = "," + ghostText;
+            }
+        }
         return new CommandCompletionState(
             _inputText,
             ghostText,
             items,
-            _resolution.IsChecklist,
+            _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple,
             CanComplete: _resolution.AwaitingSeparator || items.Count > 0);
     }
 }

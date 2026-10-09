@@ -47,7 +47,7 @@ public sealed record CommandArgumentDefinition(
     bool Optional = false,
     string? Ref = null,
     string? InputType = null,
-    ListSelectionMode ListMode = ListSelectionMode.Normal,
+    ListSelectionMode ListMode = ListSelectionMode.Multiple,
     bool AllowCustomValues = false);
 
 public sealed record CommandExecutionDefinition(

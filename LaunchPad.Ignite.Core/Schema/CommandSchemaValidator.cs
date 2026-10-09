@@ -163,10 +163,13 @@ public sealed class CommandSchemaValidator
                 errors.Add($"Argument '{argument.Name}' uses unsupported input type '{argument.InputType}'.");
             }
 
+            var supportsCustomValues = argument.Ref is not null
+                && (argument.Ref.StartsWith("enum:", StringComparison.OrdinalIgnoreCase)
+                    || argument.Ref.StartsWith("list:", StringComparison.OrdinalIgnoreCase));
             if (argument.AllowCustomValues
-                && (argument.Ref is null || !argument.Ref.StartsWith("enum:", StringComparison.OrdinalIgnoreCase)))
+                && !supportsCustomValues)
             {
-                errors.Add($"Argument '{argument.Name}' can allow custom values only when referencing an enum.");
+                errors.Add($"Argument '{argument.Name}' can allow custom values only when referencing an enum or list.");
             }
 
             if (argument.Ref is null)

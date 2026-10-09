@@ -1,4 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
+using Avalonia.Threading;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
@@ -10,6 +14,7 @@ using LaunchPad.Ignite.Core.Schema;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace LaunchPad.Ignite.App.ViewModels;
 
@@ -23,6 +28,9 @@ public partial class MainViewModel : ViewModelBase
     private readonly CommandLineTokenizer _tokenizer = new();
     private readonly IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors;
     private readonly UrlCommandModel _urlCommandModel;
+    private readonly SecretCommandModel _secretCommandModel;
+    private readonly SecretAccessGate _secretAccessGate;
+    private readonly DispatcherTimer _secretAccessStateTimer;
     private bool _syncingInput;
 
     public MainViewModel()
@@ -30,21 +38,30 @@ public partial class MainViewModel : ViewModelBase
         var extensions = new ExtensionLoader().Load();
         var schemaLoader = new CommandSchemaLoader(extensions.Schema);
         var schema = schemaLoader.Load();
-        schema = schema with { Commands = schema.Commands.Append(VariableCommandModel.Definition).ToArray() };
-        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell").Append("variable"));
+        schema = schema with
+        {
+            Commands = schema.Commands
+                .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase))
+                .Append(VariableCommandModel.Definition)
+                .Append(SecretCommandDefinition.Definition)
+                .ToArray()
+        };
+        var secretStore = PlatformSecretStore.Create();
+        _catalog = new CommandCatalog(schema, extensions.Executors.Keys.Append("shell").Append("variable").Append("secret"));
         _variableExpander = new CommandTextVariableExpander(schema.Variables);
         _shortcutResolver = new ShortcutResolver(schema.Commands);
-        var valueProvider = new CommandSchemaValueProvider(schema);
+        var valueProvider = new CommandSchemaValueProvider(schema, new SecretNamesArgumentValueProvider(secretStore));
         _completionSession = new CommandCompletionSession(
             _catalog,
             valueProvider,
             schema.Variables);
         _parser = new CommandLineParser(_catalog, valueProvider);
         _urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
+        var processStarter = new SystemProcessStarter();
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["url"] = _urlCommandModel,
-            ["shell"] = new ShellCommandModel(new SystemProcessStarter()),
+            ["shell"] = new ShellCommandModel(processStarter),
             ["variable"] = new VariableCommandModel(schemaLoader, updatedSchema =>
             {
                 _variableExpander.UpdateVariables(updatedSchema.Variables);
@@ -61,6 +78,17 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _commandExecutors = commandExecutors;
+        _secretAccessGate = new SecretAccessGate();
+        _secretCommandModel = new SecretCommandModel(
+            secretStore,
+            _secretAccessGate,
+            new AvaloniaSecretEntryDialogService(),
+            new AvaloniaClipboardService(GetSystemClipboard),
+            new SystemSecretTerminalLauncher(processStarter));
+        _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
+        _secretAccessStateTimer.Start();
+        RefreshSecretAccessState();
         ApplyCompletionState(_completionSession.State);
     }
 
@@ -81,6 +109,21 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _statusMessage = "Start typing to see commands";
+
+    [NotifyPropertyChangedFor(nameof(SecretLockIcon))]
+    [NotifyPropertyChangedFor(nameof(SecretLockBrush))]
+    [ObservableProperty]
+    private bool _secretAccessLocked;
+
+    public string SecretLockIcon => SecretAccessLocked ? "🔒" : "🔓";
+
+    public string SecretLockTooltip => SecretAccessLocked
+        ? "Secret access is locked"
+        : _secretAccessGate.HasMasterPassword
+            ? "Secret access is unlocked"
+            : "Secret access is unlocked; no master password is set";
+
+    public IBrush SecretLockBrush => SecretAccessLocked ? Brushes.Gold : Brushes.Gray;
 
     public bool IsChecklistActive => _completionSession.State.IsChecklistActive;
 
@@ -111,12 +154,12 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
-    public bool HandleInputKey(CommandInputKey key)
+    public async Task<bool> HandleInputKeyAsync(CommandInputKey key)
     {
         if (key == CommandInputKey.Enter)
         {
             TryExpandTypedShortcut();
-            return ExecuteCommand();
+            return await ExecuteCommandAsync();
         }
 
         if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
@@ -220,7 +263,7 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         return action is null ? string.Empty : $"Usage: {action.Usage}";
     }
 
-    private bool ExecuteCommand()
+    private async Task<bool> ExecuteCommandAsync()
     {
         var expansion = _variableExpander.Expand(CommandText);
         if (expansion.UnresolvedVariables.Count > 0)
@@ -255,13 +298,22 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
-        if (!_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
+        CommandExecutionResult executionResult;
+        if (string.Equals(parsedCommand.Definition.Kind, "secret", StringComparison.OrdinalIgnoreCase))
+        {
+            executionResult = await _secretCommandModel.ExecuteAsync(parsedCommand);
+            RefreshSecretAccessState();
+        }
+        else if (_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
+        {
+            executionResult = commandExecutor.Execute(parsedCommand);
+        }
+        else
         {
             StatusMessage = $"Command kind '{parsedCommand.Definition.Kind}' is not supported.";
             return false;
         }
 
-        var executionResult = commandExecutor.Execute(parsedCommand);
         StatusMessage = executionResult.Message;
         if (!executionResult.Succeeded)
         {
@@ -270,5 +322,21 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
 
         CommandText = string.Empty;
         return true;
+    }
+
+    private void RefreshSecretAccessState()
+    {
+        SecretAccessLocked = _secretAccessGate.HasMasterPassword && !_secretAccessGate.IsUnlocked;
+        OnPropertyChanged(nameof(SecretLockTooltip));
+    }
+
+    private static Avalonia.Input.Platform.IClipboard? GetSystemClipboard()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            return desktop.MainWindow?.Clipboard;
+        }
+
+        return null;
     }
 }

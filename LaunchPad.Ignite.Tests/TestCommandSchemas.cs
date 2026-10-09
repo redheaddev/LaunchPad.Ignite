@@ -22,7 +22,7 @@ internal static class TestCommandSchemas
                 ],
                 new CommandExecutionDefinition(CommandExecutionMode.TargetPerValue, ["pipelineId"]))])]);
 
-    public static CommandSchema SecretList(ListSelectionMode mode = ListSelectionMode.Normal)
+    public static CommandSchema SecretList(ListSelectionMode mode = ListSelectionMode.Multiple)
         => new(
             [],
             [new CommandDefinition(

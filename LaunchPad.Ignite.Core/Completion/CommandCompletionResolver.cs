@@ -218,7 +218,7 @@ internal sealed class CommandCompletionResolver
             tokenStart,
             candidates,
             false,
-            ListSelectionMode.Normal,
+            ListSelectionMode.Multiple,
             candidates.Length > 0 && command.Actions
                 .Where(action => !string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase))
                 .Any(action => action.Arguments.Any(argument => !argument.Optional)),
@@ -230,7 +230,7 @@ internal sealed class CommandCompletionResolver
         string prefix,
         int tokenStart,
         IReadOnlyList<string> candidates)
-        => new(kind, prefix, tokenStart, candidates, false, ListSelectionMode.Normal, false, false);
+        => new(kind, prefix, tokenStart, candidates, false, ListSelectionMode.Multiple, false, false);
 
     private static CompletionResolution None(int tokenStart, bool awaitingSeparator = false)
         => CreateResolution(CompletionKind.None, string.Empty, tokenStart, Array.Empty<string>()) with

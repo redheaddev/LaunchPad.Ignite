@@ -60,6 +60,10 @@
                                Foreground="#FF94A3B8" VerticalAlignment="Center" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="{Binding SecretLockIcon}"
+                               Foreground="{Binding SecretLockBrush}"
+                               ToolTip.Tip="{Binding SecretLockTooltip}"
+                               FontSize="16" VerticalAlignment="Center" Margin="4,0,8,0" />
                     <Button Classes="header-action" Content="?" ToolTip.Tip="Help" />
                     <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export" />
                     <Button Classes="header-action" Content="⚙" ToolTip.Tip="Settings" />

@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private bool _shiftPressed;
     private bool _metaPressed;
     private bool _activationKeyPressed;
+    private bool _secretDialogIsOpen;
 
     public MainWindow()
     {
@@ -175,10 +176,26 @@ public partial class MainWindow : Window
 
     private void MainWindow_Deactivated(object? sender, EventArgs e)
     {
-        Hide();
+        if (!_secretDialogIsOpen)
+        {
+            Hide();
+        }
     }
 
-    private void MainWindow_KeyDown(object? sender, KeyEventArgs e)
+    internal async Task<string?> ShowSecretEntryDialogAsync(SecretEntryWindow dialog)
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<string?>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    private async void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel)
         {
@@ -187,7 +204,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Escape)
         {
-            viewModel.HandleInputKey(CommandInputKey.Escape);
+            await viewModel.HandleInputKeyAsync(CommandInputKey.Escape);
             Hide();
             e.Handled = true;
             return;
@@ -225,7 +242,7 @@ public partial class MainWindow : Window
         if (inputKey is not null)
         {
             var previousText = viewModel.CommandText;
-            viewModel.HandleInputKey(inputKey.Value);
+            await viewModel.HandleInputKeyAsync(inputKey.Value);
             e.Handled = true;
             Dispatcher.UIThread.Post(() =>
             {
