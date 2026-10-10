@@ -121,6 +121,52 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task<bool> ConfirmVariableOverwriteAsync(string name)
+    {
+        var dialog = new Window
+        {
+            Title = "Overwrite variable?",
+            Width = 420,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"A variable named '{name}' already exists. Overwrite it?",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Overwrite", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     internal async Task<string?> PickCommandPackFileAsync()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

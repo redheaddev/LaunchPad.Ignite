@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System;
+using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
@@ -169,23 +170,77 @@ public class CommandModelTests
     }
 
     [Fact]
-    public void VariableCommandAddsBareAndNamespacedVariablesAndUpdatesExpansion()
+    public async Task VariableCommandSetsBareAndNamespacedVariablesAndUpdatesExpansion()
     {
         using var directory = new TemporaryDirectory();
         var userPath = Path.Combine(directory.Path, "user-commands.json");
         var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
         var expander = new CommandTextVariableExpander(loader.Load().Variables);
-        var model = new VariableCommandModel(loader, schema => expander.UpdateVariables(schema.Variables));
+        var confirmations = new List<string>();
+        var model = new VariableCommandModel(
+            loader,
+            schema => expander.UpdateVariables(schema.Variables),
+            name =>
+            {
+                confirmations.Add(name);
+                return Task.FromResult(true);
+            });
         var parser = CreateVariableParser();
 
-        var bareResult = model.Execute(ParseVariableCommand(parser, "variable add region west"));
-        var namespacedResult = model.Execute(ParseVariableCommand(parser, "variable add ado:orgUrl https://example.test"));
+        var bareResult = await model.ExecuteAsync(ParseVariableCommand(parser, "variable set region west"));
+        var updatedBareResult = await model.ExecuteAsync(ParseVariableCommand(parser, "variable set region east"));
+        var namespacedResult = await model.ExecuteAsync(ParseVariableCommand(parser, "variable set ado:orgUrl https://example.test"));
 
         Assert.True(bareResult.Succeeded);
+        Assert.True(updatedBareResult.Succeeded);
         Assert.True(namespacedResult.Succeeded);
-        Assert.Equal("west", expander.Expand("$region").ExpandedText);
+        Assert.Equal("east", expander.Expand("$region").ExpandedText);
         Assert.Equal("https://example.test", expander.Expand("$ado:orgUrl").ExpandedText);
         Assert.Equal(2, loader.Load().Variables.Count);
+        Assert.Equal("east", Assert.Single(loader.Load().Variables, variable => variable.Name == "region").Value);
+        Assert.Equal(["region"], confirmations);
+    }
+
+    [Fact]
+    public async Task VariableCommandKeepsExistingValueWhenOverwriteIsCancelled()
+    {
+        using var directory = new TemporaryDirectory();
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), Path.Combine(directory.Path, "user-commands.json"));
+        var parser = CreateVariableParser();
+        var original = new VariableCommandModel(loader, _ => { });
+        Assert.True(original.Execute(ParseVariableCommand(parser, "variable set region west")).Succeeded);
+
+        var confirmations = 0;
+        var model = new VariableCommandModel(loader, _ => { }, _ =>
+        {
+            confirmations++;
+            return Task.FromResult(false);
+        });
+        var result = await model.ExecuteAsync(ParseVariableCommand(parser, "variable set region east"));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("cancelled", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, confirmations);
+        Assert.Equal("west", Assert.Single(loader.Load().Variables).Value);
+    }
+
+    [Fact]
+    public async Task VariableCommandAddsNewVariableWithoutAskingForConfirmation()
+    {
+        using var directory = new TemporaryDirectory();
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), Path.Combine(directory.Path, "user-commands.json"));
+        var confirmations = 0;
+        var model = new VariableCommandModel(loader, _ => { }, _ =>
+        {
+            confirmations++;
+            return Task.FromResult(true);
+        });
+
+        var result = await model.ExecuteAsync(ParseVariableCommand(CreateVariableParser(), "variable set region west"));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, confirmations);
+        Assert.Equal("west", Assert.Single(loader.Load().Variables).Value);
     }
 
     [Fact]
@@ -198,7 +253,7 @@ public class CommandModelTests
         var model = new VariableCommandModel(loader, schema => expander.UpdateVariables(schema.Variables));
         var parser = CreateVariableParser();
 
-        Assert.True(model.Execute(ParseVariableCommand(parser, "variable add team:repo https://example.test/repo")).Succeeded);
+        Assert.True(model.Execute(ParseVariableCommand(parser, "variable set team:repo https://example.test/repo")).Succeeded);
         var result = model.Execute(ParseVariableCommand(parser, "variable remove team:repo"));
 
         Assert.True(result.Succeeded);
@@ -215,7 +270,7 @@ public class CommandModelTests
         var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
         var model = new VariableCommandModel(loader, _ => { });
 
-        var result = model.Execute(ParseVariableCommand(CreateVariableParser(), "variable add team:one:repo value"));
+        var result = model.Execute(ParseVariableCommand(CreateVariableParser(), "variable set team:one:repo value"));
 
         Assert.False(result.Succeeded);
         Assert.Empty(loader.Load().Variables);

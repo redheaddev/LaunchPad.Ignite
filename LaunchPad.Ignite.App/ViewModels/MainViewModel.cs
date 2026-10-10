@@ -122,17 +122,21 @@ public partial class MainViewModel : ViewModelBase
             schema.Functions);
         var parser = new CommandLineParser(catalog, valueProvider);
         var urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
+        var variableCommandModel = new VariableCommandModel(
+            schemaLoader,
+            updatedSchema =>
+            {
+                _variableExpander.UpdateVariables(updatedSchema.Variables);
+                _urlCommandModel.UpdateVariables(updatedSchema.Variables);
+                ApplyCompletionState(_completionSession.UpdateVariables(updatedSchema.Variables));
+            },
+            ConfirmVariableOverwrite);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
             ["exit"] = new ExitCommandModel(ShutdownApplication),
-            ["variable"] = new VariableCommandModel(schemaLoader, updatedSchema =>
-            {
-                _variableExpander.UpdateVariables(updatedSchema.Variables);
-                _urlCommandModel.UpdateVariables(updatedSchema.Variables);
-                ApplyCompletionState(_completionSession.UpdateVariables(updatedSchema.Variables));
-            })
+            ["variable"] = variableCommandModel
         };
         commandExecutors["extension"] = new ExtensionCommandModel(
             _extensionStateStore,
@@ -179,6 +183,12 @@ public partial class MainViewModel : ViewModelBase
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow
                 ? mainWindow.ConfirmCommandPackReplacementAsync(id)
+                : Task.FromResult(false);
+
+    private static Task<bool> ConfirmVariableOverwrite(string name)
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow
+                ? mainWindow.ConfirmVariableOverwriteAsync(name)
                 : Task.FromResult(false);
 
     [ObservableProperty]
@@ -638,6 +648,7 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
             executionResult = commandExecutor switch
             {
                 ExtensionCommandModel extensionCommandModel => await extensionCommandModel.ExecuteAsync(parsedCommand),
+                VariableCommandModel variableCommandModel => await variableCommandModel.ExecuteAsync(parsedCommand),
                 UrlCommandModel urlCommandModel => urlCommandModel.Execute(parsedCommand, newWindow || parsedWithNewWindowOption),
                 _ => commandExecutor.Execute(parsedCommand)
             };

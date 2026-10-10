@@ -81,7 +81,7 @@ public sealed class CommandSchemaLoader
         return Merge(_appSchema, userSchema);
     }
 
-    public CommandSchema AddVariable(string name, string value)
+    public CommandSchema SetVariable(string name, string value)
     {
         EnsureUserCommandsFileExists();
         var variable = ParseVariable(name, value);
@@ -92,6 +92,13 @@ public sealed class CommandSchemaLoader
             .ToArray();
         WriteSchema(userSchema with { Variables = variables });
         return Load();
+    }
+
+    public bool ContainsVariable(string name)
+    {
+        var variable = ParseVariable(name, null);
+        return Load().Variables.Any(existing =>
+            string.Equals(existing.QualifiedName, variable.QualifiedName, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool RemoveVariable(string name, out CommandSchema schema)
