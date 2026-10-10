@@ -345,6 +345,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            await viewModel.HandleInputKeyAsync(CommandInputKey.Enter, newWindow: true);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.End
             && !e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))

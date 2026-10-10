@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
@@ -295,6 +296,24 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void UrlCommandModelForwardsNewWindowRequestForParsedCommand()
+    {
+        var action = new CommandActionDefinition("default", "", "", "https://example.test", []);
+        var parsedCommand = new ParsedCommand(
+            new CommandDefinition("example", "url", "", [action]),
+            action,
+            new Dictionary<string, string>());
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var result = model.Execute(parsedCommand, newWindow: true);
+
+        Assert.True(result.Succeeded);
+        Assert.True(opener.NewWindowRequested);
+        Assert.Equal("https://example.test/", Assert.Single(opener.Targets).Value);
+    }
+
+    [Fact]
     public void UrlCommandModelOpensDirectHttpsUrl()
     {
         var opener = new RecordingUrlTargetOpener();
@@ -306,6 +325,31 @@ public class CommandModelTests
         Assert.True(result.Succeeded);
         Assert.Equal("Opened URL.", result.Message);
         Assert.Equal("https://dev.azure.com/saifcorporation", Assert.Single(opener.Targets).Value);
+    }
+
+    [Fact]
+    public void UrlCommandModelForwardsNewWindowRequestForDirectUrl()
+    {
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var handled = model.TryExecuteDirectUrl("https://example.test", out var result, newWindow: true);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.True(opener.NewWindowRequested);
+    }
+
+    [Theory]
+    [InlineData("https://example.test --new-window", "https://example.test", true)]
+    [InlineData("example --new-window argument", "example  argument", true)]
+    [InlineData("example --new-windowish", "example --new-windowish", false)]
+    public void TryRemoveNewWindowOptionOnlyRemovesTheOptionToken(string input, string expected, bool expectedRemoved)
+    {
+        var removed = UrlCommandModel.TryRemoveNewWindowOption(input, out var commandText);
+
+        Assert.Equal(expectedRemoved, removed);
+        Assert.Equal(expected, commandText);
     }
 
     [Fact]
@@ -410,9 +454,13 @@ public class CommandModelTests
     private sealed class RecordingUrlTargetOpener : IUrlTargetOpener
     {
         public List<UrlTarget> Targets { get; } = [];
+        public bool NewWindowRequested { get; private set; }
 
-        public void Open(IEnumerable<UrlTarget> targets)
-            => Targets.AddRange(targets);
+        public void Open(IEnumerable<UrlTarget> targets, bool newWindow = false)
+        {
+            Targets.AddRange(targets);
+            NewWindowRequested = newWindow;
+        }
     }
 
     private sealed class RecordingProcessStarter : IProcessStarter

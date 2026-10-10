@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
@@ -23,7 +24,7 @@ public sealed class UrlCommandModel : ICommandModel
     public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
         => _targetBuilder.UpdateVariables(variables);
 
-    public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result)
+    public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result, bool newWindow = false)
     {
         var candidate = text.Trim();
         if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
@@ -36,7 +37,7 @@ public sealed class UrlCommandModel : ICommandModel
 
         try
         {
-            _targetOpener.Open([new UrlTarget(uri.AbsoluteUri)]);
+            _targetOpener.Open([new UrlTarget(uri.AbsoluteUri)], newWindow);
             result = new CommandExecutionResult(true, "Opened URL.");
         }
         catch (Exception exception)
@@ -48,6 +49,9 @@ public sealed class UrlCommandModel : ICommandModel
     }
 
     public CommandExecutionResult Execute(ParsedCommand command)
+        => Execute(command, newWindow: false);
+
+    public CommandExecutionResult Execute(ParsedCommand command, bool newWindow)
     {
         var targetResult = _targetBuilder.Build(command);
         if (!targetResult.Succeeded)
@@ -57,7 +61,7 @@ public sealed class UrlCommandModel : ICommandModel
 
         try
         {
-            _targetOpener.Open(targetResult.Targets);
+            _targetOpener.Open(targetResult.Targets, newWindow);
             return new CommandExecutionResult(
                 true,
                 targetResult.Targets.Count == 1 ? "Opened URL." : $"Opened {targetResult.Targets.Count} URLs.");
@@ -66,5 +70,27 @@ public sealed class UrlCommandModel : ICommandModel
         {
             return new CommandExecutionResult(false, $"Unable to open URL: {exception.Message}");
         }
+    }
+
+    public static bool TryRemoveNewWindowOption(string text, out string commandText)
+    {
+        var tokens = new CommandLineTokenizer().Tokenize(text)
+            .Where(token => string.Equals(token.Value, "--new-window", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(token => token.Start)
+            .ToArray();
+        if (tokens.Length == 0)
+        {
+            commandText = text;
+            return false;
+        }
+
+        commandText = text;
+        foreach (var token in tokens)
+        {
+            commandText = commandText.Remove(token.Start, token.Length);
+        }
+
+        commandText = commandText.Trim();
+        return true;
     }
 }

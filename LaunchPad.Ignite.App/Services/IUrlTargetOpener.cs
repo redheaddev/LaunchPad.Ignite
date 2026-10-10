@@ -5,5 +5,5 @@ namespace LaunchPad.Ignite.App.Services;
 
 public interface IUrlTargetOpener
 {
-    void Open(IEnumerable<UrlTarget> targets);
+    void Open(IEnumerable<UrlTarget> targets, bool newWindow = false);
 }

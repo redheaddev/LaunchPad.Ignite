@@ -265,7 +265,7 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
-    public async Task<bool> HandleInputKeyAsync(CommandInputKey key)
+    public async Task<bool> HandleInputKeyAsync(CommandInputKey key, bool newWindow = false)
     {
         if (key == CommandInputKey.Enter)
         {
@@ -274,7 +274,7 @@ public partial class MainViewModel : ViewModelBase
                 TryExpandTypedShortcut();
             }
 
-            return await ExecuteCommandAsync();
+            return await ExecuteCommandAsync(newWindow);
         }
 
         if (_isExtensionListVisible
@@ -522,7 +522,7 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         return action is null ? string.Empty : $"Usage: {action.Usage}";
     }
 
-    private async Task<bool> ExecuteCommandAsync()
+    private async Task<bool> ExecuteCommandAsync(bool newWindow = false)
     {
         if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
         {
@@ -575,7 +575,21 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
             return true;
         }
 
-        if (_urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult))
+        var hasNewWindowOption = UrlCommandModel.TryRemoveNewWindowOption(expandedText, out var textWithoutNewWindowOption);
+        if (_urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult, newWindow))
+        {
+            SetStatusMessage(directUrlResult.Message);
+            if (!directUrlResult.Succeeded)
+            {
+                return false;
+            }
+
+            CommandText = string.Empty;
+            return true;
+        }
+
+        if (hasNewWindowOption
+            && _urlCommandModel.TryExecuteDirectUrl(textWithoutNewWindowOption, out directUrlResult, newWindow: true))
         {
             SetStatusMessage(directUrlResult.Message);
             if (!directUrlResult.Succeeded)
@@ -588,6 +602,18 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
 
         var parseResult = _parser.Parse(expandedText);
+        var parsedWithNewWindowOption = false;
+        if (hasNewWindowOption)
+        {
+            var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
+            if (optionFreeParseResult.Status == CommandParseStatus.Valid
+                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.Kind, "url", StringComparison.OrdinalIgnoreCase))
+            {
+                parseResult = optionFreeParseResult;
+                parsedWithNewWindowOption = true;
+            }
+        }
+
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
             SetStatusMessage("Command is incomplete.");
@@ -609,9 +635,12 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
         else if (_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
         {
-            executionResult = commandExecutor is ExtensionCommandModel extensionCommandModel
-                ? await extensionCommandModel.ExecuteAsync(parsedCommand)
-                : commandExecutor.Execute(parsedCommand);
+            executionResult = commandExecutor switch
+            {
+                ExtensionCommandModel extensionCommandModel => await extensionCommandModel.ExecuteAsync(parsedCommand),
+                UrlCommandModel urlCommandModel => urlCommandModel.Execute(parsedCommand, newWindow || parsedWithNewWindowOption),
+                _ => commandExecutor.Execute(parsedCommand)
+            };
         }
         else
         {
