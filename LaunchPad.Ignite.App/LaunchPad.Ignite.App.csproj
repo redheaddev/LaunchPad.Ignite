@@ -11,10 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Defaults\user-commands.json">
-      <TargetPath>defaults\user-commands.json</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <AvaloniaXaml Remove="Defaults\**" />
+    <Compile Remove="Defaults\**" />
+    <EmbeddedResource Remove="Defaults\**" />
+    <None Remove="Defaults\**" />
   </ItemGroup>
 
   <ItemGroup>

@@ -56,9 +56,32 @@ public class CommandCompletionSessionTests
 
         var state = session.UpdateInputText("pipe");
         Assert.Equal(["ado:pipeline"], state.Items.Select(item => item.Value));
+        Assert.Equal("line", state.GhostText);
 
         state = session.UpdateInputText("git");
         Assert.Equal(["git:status"], state.Items.Select(item => item.Value));
+        Assert.Equal(":status", state.GhostText);
+    }
+
+    [Fact]
+    public void CommandNamePrefixShowsGhostTextWithoutNamespacePrefix()
+    {
+        var schema = new CommandSchema(
+            [],
+            [new CommandDefinition(
+                "artifacts",
+                "url",
+                string.Empty,
+                [new CommandActionDefinition("default", string.Empty, string.Empty, "https://example.test", [])],
+                "ado")]);
+        var session = new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new CommandSchemaValueProvider(schema));
+
+        var state = session.UpdateInputText("ar");
+
+        Assert.Equal(["ado:artifacts"], state.Items.Select(item => item.Value));
+        Assert.Equal("tifacts", state.GhostText);
     }
 
     [Fact]

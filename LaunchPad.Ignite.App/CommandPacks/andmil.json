@@ -1,7 +1,9 @@
 {
-  "lists": [],
-  "variables": [],
-  "commands": [
+  "id": "andmil",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
     {
       "name": "adusers",
       "namespace": "",
@@ -814,5 +816,6 @@
         }
       ]
     }
-  ]
+    ]
+  }
 }

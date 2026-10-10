@@ -11,6 +11,7 @@ using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
+using LaunchPad.Ignite.App.Views;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,15 +31,24 @@ public partial class MainViewModel : ViewModelBase
     private CommandTextFunctionExpander _functionExpander = null!;
     private readonly CommandLineTokenizer _tokenizer = new();
     private IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors = null!;
+    private IReadOnlyDictionary<string, string> _commandSources = null!;
     private UrlCommandModel _urlCommandModel = null!;
+    private DirectFilePathHandler _directFilePathHandler = null!;
+    private CommandArgumentPathCompletion _argumentPathCompletion = null!;
+    private CommandArgumentPathContext? _activeArgumentPathContext;
     private readonly SecretCommandModel _secretCommandModel;
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
     private readonly ExtensionStateStore _extensionStateStore;
     private LoadedExtensions _extensions = null!;
+    private IReadOnlyList<LoadedCommandPackInfo> _commandPacks = null!;
     private readonly ISecretStore _secretStore;
     private readonly IProcessStarter _processStarter;
     private bool _isExtensionListVisible;
+    private bool _isDirectPathCompletionActive;
+    private IReadOnlyList<string> _directPathSuggestions = Array.Empty<string>();
+    private int _directPathHighlightedIndex;
+    private bool _directPathReplacesWholeInput;
     private bool _syncingInput;
 
     public MainViewModel()
@@ -53,6 +63,8 @@ public partial class MainViewModel : ViewModelBase
             new AvaloniaSecretEntryDialogService(),
             new AvaloniaClipboardService(GetSystemClipboard),
             new SystemSecretTerminalLauncher(_processStarter));
+        _directFilePathHandler = new DirectFilePathHandler(_processStarter);
+        _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
         InitializeCommandRuntime();
         _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
@@ -64,19 +76,31 @@ public partial class MainViewModel : ViewModelBase
     {
         var extensions = new ExtensionLoader(_extensionStateStore).Load();
         var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
-        var schemaLoader = new CommandSchemaLoader(extensions.Schema);
-        var schema = schemaLoader.Load();
+        var commandPacks = new CommandPackLoader(_extensionStateStore)
+            .LoadWithSources(extensions.Schema, extensionIds);
+        var commandPackIds = commandPacks.Packs.Select(pack => pack.Id).ToArray();
+        var componentIds = extensionIds.Concat(commandPackIds).ToArray();
+        var appSchema = commandPacks.Schema;
+        var commandSources = extensions.CommandSources
+            .Concat(commandPacks.CommandSources)
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var schemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
+        var schema = commandPacks.FilterDisabledCommands(schemaLoader.Load());
+
         var commands = schema.Commands
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command.Name, ExitCommandModel.Definition.Name, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(command.QualifiedName, ExtensionCommandModel.Definition.QualifiedName, StringComparison.OrdinalIgnoreCase))
             .Append(VariableCommandModel.Definition);
         commands = commands.Append(ExtensionCommandModel.Definition);
 
         schema = schema with
         {
-            Commands = commands.Append(SecretCommandDefinition.Definition).ToArray()
+            Commands = commands.Append(SecretCommandDefinition.Definition)
+                .Append(ExitCommandModel.Definition)
+                .ToArray()
         };
-        var builtInKinds = new[] { "shell", "variable", "secret" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "exit" };
         builtInKinds = [.. builtInKinds, "extension"];
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(builtInKinds));
@@ -86,7 +110,8 @@ public partial class MainViewModel : ViewModelBase
             schema,
             new CompositeArgumentValueProvider(
                 new SecretNamesArgumentValueProvider(_secretStore),
-                new ExtensionIdsArgumentValueProvider(extensionIds)));
+                new ExtensionIdsArgumentValueProvider(extensionIds),
+                new InstalledComponentIdsArgumentValueProvider(componentIds, _extensionStateStore)));
         var functionExpander = new CommandTextFunctionExpander(
             schema.Functions,
             new RegisteredCommandFunctionExecutor(extensionFunctionExecutors: extensions.FunctionExecutors));
@@ -101,6 +126,7 @@ public partial class MainViewModel : ViewModelBase
         {
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
+            ["exit"] = new ExitCommandModel(ShutdownApplication),
             ["variable"] = new VariableCommandModel(schemaLoader, updatedSchema =>
             {
                 _variableExpander.UpdateVariables(updatedSchema.Variables);
@@ -111,7 +137,10 @@ public partial class MainViewModel : ViewModelBase
         commandExecutors["extension"] = new ExtensionCommandModel(
             _extensionStateStore,
             extensionIds,
-            InitializeCommandRuntime);
+            InitializeCommandRuntime,
+            commandPackIds: commandPackIds,
+            commandPackLoader: new CommandPackLoader(_extensionStateStore),
+            confirmPackReplacement: ConfirmCommandPackReplacement);
 
         foreach (var (kind, executor) in extensions.Executors)
         {
@@ -122,6 +151,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _extensions = extensions;
+        _commandPacks = commandPacks.Packs;
         _catalog = catalog;
         _variableExpander = variableExpander;
         _shortcutResolver = shortcutResolver;
@@ -130,8 +160,26 @@ public partial class MainViewModel : ViewModelBase
         _parser = parser;
         _urlCommandModel = urlCommandModel;
         _commandExecutors = commandExecutors;
+        _commandSources = commandSources;
         ApplyCompletionState(_completionSession.State);
     }
+
+    public async Task ImportCommandPackAsync(string path)
+    {
+        var command = new ParsedCommand(
+            ExtensionCommandModel.Definition,
+            ExtensionCommandModel.Definition.Actions.Single(action => action.Name == "pack-install"),
+            new Dictionary<string, string> { ["json-path"] = path });
+        var model = (ExtensionCommandModel)_commandExecutors["extension"];
+        var result = await model.ExecuteAsync(command);
+        SetStatusMessage(result.Message);
+    }
+
+    private static Task<bool> ConfirmCommandPackReplacement(string id)
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow
+                ? mainWindow.ConfirmCommandPackReplacementAsync(id)
+                : Task.FromResult(false);
 
     [ObservableProperty]
     private string _commandText = string.Empty;
@@ -205,7 +253,10 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCommandExpansionPreview => !string.IsNullOrEmpty(CommandExpansionPreview);
 
-    public bool CanComplete => _isExtensionListVisible || _completionSession.State.CanComplete;
+    public bool CanComplete => _isExtensionListVisible
+        || (_isDirectPathCompletionActive
+            ? _directPathSuggestions.Count > 0
+            : _completionSession.State.CanComplete);
 
     public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
 
@@ -238,6 +289,12 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
+        if (_isDirectPathCompletionActive && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down)
+        {
+            HandleDirectPathCompletionKey(key);
+            return false;
+        }
+
         ApplyCompletionState(_completionSession.HandleKey(key));
         return false;
     }
@@ -267,6 +324,29 @@ public partial class MainViewModel : ViewModelBase
         }
 
         UpdateCommandExpansionPreview(state.InputText);
+        if (_directFilePathHandler.TryGetCompletionPath(state.InputText, out var directPath))
+        {
+            _activeArgumentPathContext = null;
+            ApplyDirectPathCompletion(
+                directPath,
+                replacesWholeInput: true,
+                resetHighlight: true);
+            return;
+        }
+
+        if (_argumentPathCompletion.TryGetContext(state.InputText, _catalog, _tokenizer, out var pathContext))
+        {
+            _activeArgumentPathContext = pathContext;
+            ApplyDirectPathCompletion(
+                pathContext.Path,
+                replacesWholeInput: false,
+                resetHighlight: true);
+            return;
+        }
+
+        _activeArgumentPathContext = null;
+        _isDirectPathCompletionActive = false;
+        _directPathSuggestions = Array.Empty<string>();
         CompletionGhostText = state.InputText.Length == 0 ? string.Empty : state.GhostText;
         UsageText = GetUsageText(CommandText);
         var tokens = _tokenizer.Tokenize(state.InputText);
@@ -281,7 +361,10 @@ public partial class MainViewModel : ViewModelBase
                 && isCommandCompletion
                 && _catalog.TryGetCommand(item.Value, out var command))
             {
-                displayText = $"{item.Value} [{command.Kind}]";
+                var sourceLabel = _commandSources.TryGetValue(command.QualifiedName, out var sourceId)
+                    ? $" [{sourceId}]"
+                    : string.Empty;
+                displayText = $"{item.Value} [{command.Kind}]{sourceLabel}";
             }
 
             return new CompletionOptionViewModel(displayText, item.IsHighlighted, item.IsSelected);
@@ -292,11 +375,98 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanExpandTypedShortcut));
     }
 
+    private void ApplyDirectPathCompletion(
+        string path,
+        bool replacesWholeInput,
+        bool resetHighlight)
+    {
+        _isDirectPathCompletionActive = true;
+        _directPathReplacesWholeInput = replacesWholeInput;
+        _directPathSuggestions = _directFilePathHandler.GetSuggestions(path);
+        if (resetHighlight || _directPathHighlightedIndex >= _directPathSuggestions.Count)
+        {
+            _directPathHighlightedIndex = 0;
+        }
+
+        CompletionGhostText = string.Empty;
+        UsageText = "Files and folders";
+        CompletionItems = _directPathSuggestions
+            .Select((path, index) => new CompletionOptionViewModel(
+                path,
+                index == _directPathHighlightedIndex,
+                false))
+            .ToArray();
+        OnPropertyChanged(nameof(IsChecklistActive));
+        OnPropertyChanged(nameof(HasCompletionOptions));
+        OnPropertyChanged(nameof(CanComplete));
+        OnPropertyChanged(nameof(CanExpandTypedShortcut));
+    }
+
+    private void HandleDirectPathCompletionKey(CommandInputKey key)
+    {
+        if (_directPathSuggestions.Count == 0)
+        {
+            return;
+        }
+
+        if (key == CommandInputKey.Tab)
+        {
+            if (DirectFilePathCompletion.TrySelectSuggestion(
+                _directPathSuggestions,
+                _directPathHighlightedIndex,
+                out var selectedPath))
+            {
+                if (_directPathReplacesWholeInput)
+                {
+                    CommandText = _directFilePathHandler.GetSuggestionText(selectedPath);
+                    if (CommandText.Length > selectedPath.Length
+                        && Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                        && desktop.MainWindow is MainWindow mainWindow)
+                    {
+                        mainWindow.SetPendingCaretIndex(CommandText.Length - 1);
+                    }
+                }
+                else
+                {
+                    CommandText = CommandArgumentPathCompletion.ReplaceValue(
+                        CommandText,
+                        _activeArgumentPathContext!,
+                        selectedPath);
+                }
+            }
+
+            return;
+        }
+
+        var offset = key == CommandInputKey.Up ? -1 : 1;
+        _directPathHighlightedIndex = (_directPathHighlightedIndex + offset + _directPathSuggestions.Count)
+            % _directPathSuggestions.Count;
+        ApplyDirectPathCompletion(
+            _directPathSuggestions.Count > 0 ? GetCurrentDirectPathText() : string.Empty,
+            _directPathReplacesWholeInput,
+            resetHighlight: false);
+    }
+
+    private string GetCurrentDirectPathText()
+    {
+        if (_directPathReplacesWholeInput)
+        {
+            return _directFilePathHandler.TryGetCompletionPath(CommandText, out var currentPath)
+                ? currentPath
+                : CommandText;
+        }
+
+        var context = _activeArgumentPathContext!;
+        var currentToken = CommandText.Substring(context.TokenStart, context.TokenLength);
+        var equalsIndex = currentToken.IndexOf('=');
+        return (equalsIndex >= 0 ? currentToken[(equalsIndex + 1)..] : currentToken).Trim('"');
+    }
+
     private void ShowExtensionList()
     {
-        var displayLines = ExtensionCommandModel.FormatList(_extensions.Extensions, _extensionStateStore)
+        var displayLines = ExtensionCommandModel.FormatList(_extensions.Extensions, _commandPacks)
             .Split(Environment.NewLine, StringSplitOptions.None);
-        UsageText = "Installed extensions";
+        UsageText = "Installed extensions and command packs";
         CompletionItems = displayLines
             .Select(line => new CompletionOptionViewModel(line, false, false))
             .ToArray();
@@ -356,7 +526,7 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
     {
         if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
         {
-            SetStatusMessage(ExtensionCommandModel.FormatList(_extensions.Extensions, _extensionStateStore), isValueOutput: true);
+            SetStatusMessage(ExtensionCommandModel.FormatList(_extensions.Extensions, _commandPacks), isValueOutput: true);
             CommandText = string.Empty;
             return true;
         }
@@ -389,6 +559,18 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         if (isPrintCommand)
         {
             SetStatusMessage(expandedText, isValueOutput: true);
+            CommandText = string.Empty;
+            return true;
+        }
+
+        if (_directFilePathHandler.TryOpen(expandedText, out var directFileResult))
+        {
+            SetStatusMessage(directFileResult.Message);
+            if (!directFileResult.Succeeded)
+            {
+                return false;
+            }
+
             CommandText = string.Empty;
             return true;
         }
@@ -427,7 +609,9 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         }
         else if (_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
         {
-            executionResult = commandExecutor.Execute(parsedCommand);
+            executionResult = commandExecutor is ExtensionCommandModel extensionCommandModel
+                ? await extensionCommandModel.ExecuteAsync(parsedCommand)
+                : commandExecutor.Execute(parsedCommand);
         }
         else
         {
@@ -449,6 +633,14 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
     {
         IsValueOutput = isValueOutput;
         StatusMessage = message;
+    }
+
+    private static void ShutdownApplication()
+    {
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktopLifetime)
+        {
+            desktopLifetime.Shutdown();
+        }
     }
 
     private string FormatExtensionList()

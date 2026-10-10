@@ -65,7 +65,8 @@
                                ToolTip.Tip="{Binding SecretLockTooltip}"
                                FontSize="16" VerticalAlignment="Center" Margin="4,0,8,0" />
                     <Button Classes="header-action" Content="?" ToolTip.Tip="Help" />
-                    <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export" />
+                    <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export"
+                            Click="ImportExportButton_Click" />
                     <Button Classes="header-action" Content="⚙" ToolTip.Tip="Settings" />
                 </StackPanel>
             </Grid>
@@ -75,18 +76,20 @@
                 <Grid ClipToBounds="True" ColumnDefinitions="12,*">
                     <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandText}"
                              FontFamily="Cascadia Mono, Consolas"
-                             FontSize="22" Foreground="Transparent"
+                              FontSize="22" Foreground="#FFE2E8F0"
                              Background="Transparent" BorderThickness="0" Padding="12,0,0,0"
+                             TextWrapping="NoWrap"
+                             ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                              VerticalContentAlignment="Center"
                              CaretBrush="#FF67E8F9" />
                     <TextBlock Grid.Column="1" Text="Enter a command" IsVisible="{Binding IsCommandTextEmpty}"
                                IsHitTestVisible="False" VerticalAlignment="Center"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
                                Foreground="#FF64748B" />
-                    <TextBlock Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
+                    <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
-                               TextWrapping="NoWrap">
-                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="#FFE2E8F0"/><Run Text="{Binding CompletionGhostText}" Foreground="#FF64748B"/></TextBlock.Inlines>
+                               TextWrapping="NoWrap" ClipToBounds="True">
+                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="#FF64748B"/></TextBlock.Inlines>
                     </TextBlock>
                 </Grid>
             </Border>

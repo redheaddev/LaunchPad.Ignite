@@ -50,6 +50,7 @@ public class ExtensionLoaderTests
         var executor = extensions.Executors["sample"];
 
         Assert.True(catalog.TryGetCommand("sample:sample", out _));
+        Assert.Equal("sample", extensions.CommandSources["sample:sample"]);
         Assert.Equal("sample:endpoint", Assert.Single(extensions.Schema.Variables).QualifiedName);
         Assert.Equal("dev", Assert.Single(extensions.Schema.Lists).Values[0]);
         var result = executor.Execute(new ParsedCommand(command, action, new Dictionary<string, string>()));

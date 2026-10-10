@@ -372,9 +372,10 @@ public sealed class CommandCompletionSession
         var ghostCandidate = _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple
             ? items.FirstOrDefault(item => !item.IsSelected)
             : highlighted;
-        if (ghostCandidate is not null && ghostCandidate.Value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        if (ghostCandidate is not null
+            && TryGetGhostSuffix(ghostCandidate.Value, prefix, out var ghostSuffix))
         {
-            ghostText = ghostCandidate.Value[prefix.Length..];
+            ghostText = ghostSuffix;
             if (_resolution.IsChecklist
                 && _resolution.ListMode == ListSelectionMode.Multiple
                 && _selectedValues.Count > 0
@@ -390,5 +391,28 @@ public sealed class CommandCompletionSession
             items,
             _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple,
             CanComplete: _resolution.AwaitingSeparator || items.Count > 0);
+    }
+
+    private bool TryGetGhostSuffix(string candidate, string prefix, out string suffix)
+    {
+        if (candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            suffix = candidate[prefix.Length..];
+            return true;
+        }
+
+        if (_resolution.Kind == CompletionKind.Command)
+        {
+            var separatorIndex = candidate.IndexOf(':');
+            var commandName = separatorIndex >= 0 ? candidate[(separatorIndex + 1)..] : candidate;
+            if (commandName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                suffix = commandName[prefix.Length..];
+                return true;
+            }
+        }
+
+        suffix = string.Empty;
+        return false;
     }
 }

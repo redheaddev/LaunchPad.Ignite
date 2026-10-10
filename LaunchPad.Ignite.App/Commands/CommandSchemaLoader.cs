@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,6 +22,7 @@ public sealed class CommandSchemaLoader
     private readonly string _userCommandsPath;
     private readonly string _defaultUserCommandsPath;
     private readonly string _migrationMarkerPath;
+    private readonly HashSet<string> _packedCommandNames;
 
     public CommandSchemaLoader(CommandSchema appSchema)
         : this(
@@ -29,6 +31,18 @@ public sealed class CommandSchemaLoader
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "LaunchPad.Ignite",
                 "user-commands.json"))
+    {
+    }
+
+    public CommandSchemaLoader(CommandSchema appSchema, IEnumerable<string> packedCommandNames)
+        : this(
+            appSchema,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LaunchPad.Ignite",
+                "user-commands.json"),
+            Path.Combine(AppContext.BaseDirectory, "defaults", "user-commands.json"),
+            packedCommandNames)
     {
     }
 
@@ -41,11 +55,21 @@ public sealed class CommandSchemaLoader
     }
 
     public CommandSchemaLoader(CommandSchema appSchema, string userCommandsPath, string defaultUserCommandsPath)
+        : this(appSchema, userCommandsPath, defaultUserCommandsPath, [])
+    {
+    }
+
+    public CommandSchemaLoader(
+        CommandSchema appSchema,
+        string userCommandsPath,
+        string defaultUserCommandsPath,
+        IEnumerable<string> packedCommandNames)
     {
         _appSchema = appSchema;
         _userCommandsPath = userCommandsPath;
         _defaultUserCommandsPath = defaultUserCommandsPath;
         _migrationMarkerPath = userCommandsPath + ".legacy-migrated";
+        _packedCommandNames = packedCommandNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public CommandSchema Load()
@@ -53,6 +77,7 @@ public sealed class CommandSchemaLoader
         EnsureUserCommandsFileExists();
         MigrateLegacyCommandsOnce();
         var userSchema = ReadSchema(_userCommandsPath);
+        RemovePackedCommands(userSchema);
         return Merge(_appSchema, userSchema);
     }
 
@@ -115,6 +140,7 @@ public sealed class CommandSchemaLoader
         var defaultSchema = ReadSchema(_defaultUserCommandsPath);
         var userCommands = userSchema.Commands ?? [];
         var defaultCommands = defaultSchema.Commands ?? [];
+        userCommands = userCommands.Where(command => !_packedCommandNames.Contains(command.QualifiedName)).ToArray();
         var userLists = userSchema.Lists ?? [];
         var defaultLists = defaultSchema.Lists ?? [];
         var userVariables = userSchema.Variables ?? [];
@@ -122,7 +148,8 @@ public sealed class CommandSchemaLoader
         var userFunctions = userSchema.Functions ?? [];
         var defaultFunctions = defaultSchema.Functions ?? [];
         var commands = userCommands
-            .Concat(defaultCommands.Where(defaultCommand => !userCommands.Any(userCommand =>
+            .Concat(defaultCommands.Where(defaultCommand => !_packedCommandNames.Contains(defaultCommand.QualifiedName)
+                && !userCommands.Any(userCommand =>
                 string.Equals(userCommand.QualifiedName, defaultCommand.QualifiedName, StringComparison.OrdinalIgnoreCase))))
             .ToArray();
         var lists = userLists
@@ -144,6 +171,22 @@ public sealed class CommandSchemaLoader
             Functions = functions
         });
         File.WriteAllText(_migrationMarkerPath, string.Empty);
+    }
+
+    private void RemovePackedCommands(CommandSchema userSchema)
+    {
+        if (_packedCommandNames.Count == 0)
+        {
+            return;
+        }
+
+        var commands = (userSchema.Commands ?? [])
+            .Where(command => !_packedCommandNames.Contains(command.QualifiedName))
+            .ToArray();
+        if (commands.Length != userSchema.Commands.Count)
+        {
+            WriteSchema(userSchema with { Commands = commands });
+        }
     }
 
     private static CommandSchema ReadSchema(string path)

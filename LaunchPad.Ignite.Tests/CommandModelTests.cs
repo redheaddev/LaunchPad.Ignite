@@ -106,6 +106,68 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void LoaderRemovesPackedCommandsFromUserFileAndPreservesOtherCommands()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var defaultsPath = Path.Combine(directory.Path, "defaults.json");
+        File.WriteAllText(userPath, """
+            {
+              "lists": [], "variables": [], "functions": [],
+              "commands": [
+                { "name": "status", "namespace": "tools", "kind": "url", "description": "edited override", "actions": [] },
+                { "name": "local", "kind": "url", "description": "keep me", "actions": [] }
+              ]
+            }
+            """);
+        File.WriteAllText(defaultsPath, """
+            {
+              "lists": [], "variables": [], "functions": [],
+              "commands": [
+                { "name": "status", "namespace": "tools", "kind": "url", "description": "bundled copy", "actions": [] },
+                { "name": "legacy", "kind": "url", "description": "keep migration", "actions": [] }
+              ]
+            }
+            """);
+        var loader = new CommandSchemaLoader(
+            new CommandSchema([], []),
+            userPath,
+            defaultsPath,
+            ["tools:status"]);
+
+        var loaded = loader.Load();
+        var persisted = File.ReadAllText(userPath);
+
+        Assert.DoesNotContain(loaded.Commands, command => command.QualifiedName == "tools:status");
+        Assert.Contains(loaded.Commands, command => command.Name == "local");
+        Assert.Contains(loaded.Commands, command => command.Name == "legacy");
+        Assert.DoesNotContain("tools:status", persisted);
+        Assert.Contains("local", persisted);
+        Assert.Contains("legacy", persisted);
+    }
+
+    [Fact]
+    public void UserCommandsRemainIndependentWhenNoPackCommandsAreProvided()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        File.WriteAllText(userPath, """
+            {
+              "lists": [], "variables": [], "functions": [],
+              "commands": [
+                { "name": "local", "kind": "url", "description": "Local command", "actions": [] }
+              ]
+            }
+            """);
+
+        var loaded = new CommandSchemaLoader(new CommandSchema([], []), userPath, Path.Combine(directory.Path, "missing-defaults.json"))
+            .Load();
+
+        Assert.Equal("local", Assert.Single(loaded.Commands).QualifiedName);
+        Assert.Contains("local", File.ReadAllText(userPath));
+    }
+
+    [Fact]
     public void VariableCommandAddsBareAndNamespacedVariablesAndUpdatesExpansion()
     {
         using var directory = new TemporaryDirectory();

@@ -1,0 +1,326 @@
+using System;
+using System.IO;
+using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.Core.Schema;
+
+namespace LaunchPad.Ignite.Tests;
+
+public class CommandPackLoaderTests
+{
+    [Fact]
+    public void LoadsCommandsWithDefaultAndCommandSpecificNamespaces()
+    {
+        using var directory = new TemporaryDirectory();
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "schema": {
+                "lists": [],
+                "variables": [{ "name": "host", "value": "https://example.test" }],
+                "commands": [
+                  { "name": "status", "kind": "url", "description": "Default namespace", "actions": [{ "name": "default", "usage": "tools:status", "targetTemplate": "https://example.test/status", "arguments": [] }] },
+                  { "name": "log", "namespace": "git", "kind": "url", "description": "Explicit namespace", "actions": [{ "name": "default", "usage": "git:log", "targetTemplate": "https://example.test/log", "arguments": [] }] }
+                ],
+                "functions": []
+              }
+            }
+            """);
+
+        var schema = new CommandPackLoader([directory.Path]).Load();
+
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "tools:status");
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "git:log");
+        Assert.Equal("tools:host", Assert.Single(schema.Variables).QualifiedName);
+    }
+
+    [Fact]
+    public void UserPackOverridesBundledPackWithSameId()
+    {
+        using var bundledDirectory = new TemporaryDirectory();
+        using var userDirectory = new TemporaryDirectory();
+        WritePack(bundledDirectory.Path, "sample", "sample", "sample", "same", "Bundled");
+        WritePack(userDirectory.Path, "sample", "sample", "sample", "same", "User");
+        WritePack(userDirectory.Path, "extra", "extra", "extra", "only-user", "Additional");
+
+        var schema = new CommandPackLoader([bundledDirectory.Path, userDirectory.Path]).Load();
+
+        Assert.Equal(2, schema.Commands.Count);
+        Assert.Equal("User", Assert.Single(schema.Commands, command => command.Name == "same").Description);
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "extra:only-user");
+    }
+
+    [Fact]
+    public void AllowsMultiplePacksToShareNamespaceWhenCommandNamesDoNotCollide()
+    {
+        using var firstDirectory = new TemporaryDirectory();
+        using var secondDirectory = new TemporaryDirectory();
+        WritePack(firstDirectory.Path, "git-core", "git-core", "git", "status", "Status");
+        WritePack(secondDirectory.Path, "git-extra", "git-extra", "git", "log", "Log");
+
+        var schema = new CommandPackLoader([firstDirectory.Path, secondDirectory.Path]).Load();
+
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "git:status");
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "git:log");
+    }
+
+    [Fact]
+    public void RejectsDuplicateQualifiedCommandsAcrossPacks()
+    {
+        using var firstDirectory = new TemporaryDirectory();
+        using var secondDirectory = new TemporaryDirectory();
+        WritePack(firstDirectory.Path, "first", "first", "git", "status", "First");
+        WritePack(secondDirectory.Path, "second", "second", "git", "status", "Second");
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            new CommandPackLoader([firstDirectory.Path, secondDirectory.Path]).Load());
+
+        Assert.Contains("duplicate command 'git:status'", exception.Message);
+    }
+
+    [Fact]
+    public void RejectsCommandCollisionWithExistingExtensionSchema()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "git-tools", "git-tools", "git", "status", "Pack status");
+        var existingCommand = new CommandDefinition(
+            "status",
+            "url",
+            "Extension status",
+            [new CommandActionDefinition("default", "", "git:status", "https://example.test", [])],
+            "git");
+        var existingSchema = new CommandSchema([], [existingCommand]);
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            new CommandPackLoader([directory.Path]).Load(existingSchema));
+
+        Assert.Contains("duplicate command 'git:status'", exception.Message);
+    }
+
+    [Fact]
+    public void RejectsManifestIdThatDoesNotMatchFilename()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "file-id", "manifest-id", "manifest-id", "status", "Status");
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("filename requires ID 'file-id'", exception.Message);
+    }
+
+    [Fact]
+    public void AllowsGlobalCommandsAndTracksPackId()
+    {
+        using var directory = new TemporaryDirectory();
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "schema": {
+                "lists": [],
+                "commands": [{ "name": "status", "kind": "url", "description": "Status", "actions": [{ "name": "default", "usage": "status", "targetTemplate": "https://example.test", "arguments": [] }] }]
+              }
+            }
+            """);
+
+        var loaded = new CommandPackLoader([directory.Path]).LoadWithSources();
+
+        Assert.Equal("status", Assert.Single(loaded.Schema.Commands).QualifiedName);
+        Assert.Equal("tools", loaded.CommandSources["status"]);
+    }
+
+    [Fact]
+    public void DisabledPackRemainsInInventoryButDoesNotContributeSchema()
+    {
+        using var directory = new TemporaryDirectory();
+        var packsDirectory = Directory.CreateDirectory(Path.Combine(directory.Path, "packs")).FullName;
+        WritePack(packsDirectory, "tools", "tools", "tools", "status", "Status");
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json"));
+        stateStore.SetEnabled("tools", enabled: false);
+
+        var loaded = new CommandPackLoader([packsDirectory], stateStore).LoadWithSources();
+
+        Assert.Empty(loaded.Schema.Commands);
+        Assert.Empty(loaded.CommandSources);
+        Assert.Equal(new LoadedCommandPackInfo("tools", false), Assert.Single(loaded.Packs));
+        Assert.Contains("tools:status", loaded.DisabledCommandNames);
+        Assert.Contains("tools:status", loaded.PackedCommandNames);
+
+        var migratedCommand = new CommandDefinition(
+            "status",
+            "url",
+            "Persisted copy",
+            [new CommandActionDefinition("default", "", "tools:status", "https://example.test", [])],
+            "tools");
+        var filteredSchema = loaded.FilterDisabledCommands(new CommandSchema([], [migratedCommand]));
+        Assert.Empty(filteredSchema.Commands);
+    }
+
+    [Fact]
+    public void RejectsCommandPackIdThatConflictsWithExtensionId()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "tools", "tools", "tools", "status", "Status");
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            new CommandPackLoader([directory.Path]).LoadWithSources(existingComponentIds: ["tools"]));
+
+        Assert.Contains("conflicts with an extension ID", exception.Message);
+    }
+
+    [Fact]
+    public void InstallsValidatedPackIntoProfileDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(directory.Path, "download.json");
+        var installDirectory = Path.Combine(directory.Path, "profile", "packs");
+        WriteManifest(directory.Path, "download.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "schema": {
+                "lists": [],
+                "variables": [],
+                "commands": [{ "name": "status", "kind": "url", "description": "Status", "actions": [{ "name": "default", "usage": "tools:status", "targetTemplate": "https://example.test", "arguments": [] }] }],
+                "functions": []
+              }
+            }
+            """);
+
+        var id = CommandPackLoader.InstallPack(sourcePath, installDirectory, replaceExisting: false);
+        var loaded = new CommandPackLoader([installDirectory]).LoadWithSources();
+
+        Assert.Equal("tools", id);
+        Assert.True(File.Exists(Path.Combine(installDirectory, "tools.json")));
+        Assert.Equal("tools:status", Assert.Single(loaded.Schema.Commands).QualifiedName);
+    }
+
+    [Fact]
+    public void PackReplacementRequiresExplicitApproval()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(directory.Path, "download.json");
+        var installDirectory = Path.Combine(directory.Path, "profile", "packs");
+        WritePack(installDirectory, "tools", "tools", "tools", "old", "Old");
+        WritePack(directory.Path, "replacement", "tools", "tools", "new", "New");
+        File.Copy(Path.Combine(directory.Path, "replacement.json"), sourcePath, overwrite: true);
+        var existingContents = File.ReadAllText(Path.Combine(installDirectory, "tools.json"));
+
+        Assert.Throws<IOException>(() => CommandPackLoader.InstallPack(sourcePath, installDirectory, replaceExisting: false));
+
+        Assert.Equal(existingContents, File.ReadAllText(Path.Combine(installDirectory, "tools.json")));
+    }
+
+    [Fact]
+    public void LoadsAnAuthoredPackFromItsInstalledProfileDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "andmil", "andmil", null, "adusers", "Launch adusers");
+
+        var loaded = new CommandPackLoader([directory.Path]).LoadWithSources();
+
+        Assert.Equal("andmil:adusers", Assert.Single(loaded.Schema.Commands).QualifiedName);
+        Assert.Equal("andmil", loaded.CommandSources["andmil:adusers"]);
+    }
+
+    [Fact]
+    public void RejectsCustomCommandKinds()
+    {
+        using var directory = new TemporaryDirectory();
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "schema": {
+                "lists": [],
+                "commands": [{ "name": "custom", "kind": "plugin", "description": "Custom", "actions": [{ "name": "default", "usage": "tools:custom", "targetTemplate": "custom", "arguments": [] }] }]
+              }
+            }
+            """);
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("unsupported command kind 'plugin'", exception.Message);
+    }
+
+    [Fact]
+    public void RejectsScriptFunctions()
+    {
+        using var directory = new TemporaryDirectory();
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "schema": {
+                "lists": [],
+                "commands": [],
+                "functions": [{ "name": "lookup", "kind": "script", "parameters": [], "interpreter": "pwsh", "scriptPath": "lookup.ps1" }]
+              }
+            }
+            """);
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("built-in httpGet kind", exception.Message);
+    }
+
+    [Fact]
+    public void RejectsUnknownManifestFieldsInsteadOfIgnoringPotentialCodeReferences()
+    {
+        using var directory = new TemporaryDirectory();
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "assembly": "plugin.dll",
+              "schema": { "lists": [], "commands": [] }
+            }
+            """);
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("is invalid", exception.Message);
+    }
+
+    private static void WritePack(
+        string root,
+        string fileId,
+        string manifestId,
+        string? packNamespace,
+        string commandName,
+        string description)
+    {
+        Directory.CreateDirectory(root);
+        var namespaceProperty = packNamespace is null ? string.Empty : $"\"namespace\": \"{packNamespace}\",";
+        var commandNamespace = packNamespace ?? manifestId;
+        var json = $$"""
+            {
+              "id": "{{manifestId}}",
+              {{namespaceProperty}}
+              "schema": {
+                "lists": [],
+                "commands": [{ "name": "{{commandName}}", "namespace": "{{commandNamespace}}", "kind": "url", "description": "{{description}}", "actions": [{ "name": "default", "usage": "{{commandNamespace}}:{{commandName}}", "targetTemplate": "https://example.test", "arguments": [] }] }]
+              }
+            }
+            """;
+        WriteManifest(root, $"{fileId}.json", json);
+    }
+
+    private static void WriteManifest(string root, string fileName, string content)
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, fileName), content);
+    }
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        public TemporaryDirectory()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
+}

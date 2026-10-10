@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Linq;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Services;
@@ -13,19 +14,30 @@ public sealed class ExtensionCommandModel : ICommandModel
 {
     private readonly ExtensionStateStore _stateStore;
     private readonly HashSet<string> _extensionIds;
+    private readonly HashSet<string> _commandPackIds;
+    private readonly HashSet<string> _componentIds;
     private readonly Action? _stateChanged;
     private readonly ExtensionPackageManager _packageManager;
+    private readonly CommandPackLoader _commandPackLoader;
+    private readonly Func<string, Task<bool>>? _confirmPackReplacement;
 
     public ExtensionCommandModel(
         ExtensionStateStore stateStore,
         IEnumerable<string> extensionIds,
         Action? stateChanged = null,
-        ExtensionPackageManager? packageManager = null)
+        ExtensionPackageManager? packageManager = null,
+        IEnumerable<string>? commandPackIds = null,
+        CommandPackLoader? commandPackLoader = null,
+        Func<string, Task<bool>>? confirmPackReplacement = null)
     {
         _stateStore = stateStore;
         _extensionIds = extensionIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _commandPackIds = (commandPackIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _componentIds = _extensionIds.Concat(_commandPackIds).ToHashSet(StringComparer.OrdinalIgnoreCase);
         _stateChanged = stateChanged;
         _packageManager = packageManager ?? new ExtensionPackageManager();
+        _commandPackLoader = commandPackLoader ?? new CommandPackLoader(stateStore);
+        _confirmPackReplacement = confirmPackReplacement;
     }
 
     public string Kind => "extension";
@@ -33,7 +45,7 @@ public sealed class ExtensionCommandModel : ICommandModel
     public static CommandDefinition Definition { get; } = new(
             "extension",
             "extension",
-            "Manage installed extensions",
+            "Manage installed extensions and command packs",
             [
                 new CommandActionDefinition(
                     "install",
@@ -41,6 +53,12 @@ public sealed class ExtensionCommandModel : ICommandModel
                     "extension install <zip-path>",
                     "extension install",
                     [new CommandArgumentDefinition("zip-path")]),
+                new CommandActionDefinition(
+                    "pack-install",
+                    "Install a command pack from a JSON manifest",
+                    "extension pack-install <json-path>",
+                    "extension pack-install",
+                    [new CommandArgumentDefinition("json-path")]),
                 new CommandActionDefinition(
                     "uninstall",
                     "Uninstall a user-installed extension immediately",
@@ -52,21 +70,21 @@ public sealed class ExtensionCommandModel : ICommandModel
                         ListMode: ListSelectionMode.Multiple)]),
                 new CommandActionDefinition(
                     "enable",
-                    "Enable an extension immediately",
+                    "Enable an extension or command pack immediately",
                     "extension enable <id>",
                     "extension enable",
                     [new CommandArgumentDefinition(
                         "id",
-                        Ref: ExtensionIdsArgumentValueProvider.Reference,
+                        Ref: InstalledComponentIdsArgumentValueProvider.EnableReference,
                         ListMode: ListSelectionMode.Multiple)]),
                 new CommandActionDefinition(
                     "disable",
-                    "Disable an extension immediately",
+                    "Disable an extension or command pack immediately",
                     "extension disable <id>",
                     "extension disable",
                     [new CommandArgumentDefinition(
                         "id",
-                        Ref: ExtensionIdsArgumentValueProvider.Reference,
+                        Ref: InstalledComponentIdsArgumentValueProvider.DisableReference,
                         ListMode: ListSelectionMode.Multiple)])
             ]);
 
@@ -82,6 +100,26 @@ public sealed class ExtensionCommandModel : ICommandModel
             Environment.NewLine,
             entries.Select(extension =>
                 $"{extension.Id} | {extension.Version} [{(stateStore.IsEnabled(extension.Id) ? "enabled" : "disabled")}]"));
+    }
+
+    public static string FormatList(
+        IEnumerable<LoadedExtensionInfo> extensions,
+        IEnumerable<LoadedCommandPackInfo> commandPacks)
+    {
+        var entries = extensions
+            .Select(extension => (extension.Id, Version: extension.Version, Type: "extension", extension.Enabled))
+            .Concat(commandPacks.Select(pack => (pack.Id, Version: "manifest", Type: "pack", pack.Enabled)))
+            .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (entries.Length == 0)
+        {
+            return "No extensions or command packs installed.";
+        }
+
+        return string.Join(
+            Environment.NewLine,
+            entries.Select(entry =>
+                $"{entry.Id} | {entry.Version} [{entry.Type}] [{(entry.Enabled ? "enabled" : "disabled")}]"));
     }
 
     public CommandExecutionResult Execute(ParsedCommand command)
@@ -105,16 +143,16 @@ public sealed class ExtensionCommandModel : ICommandModel
         var ids = command.Arguments["id"].Split(',').Select(id => id.Trim()).ToArray();
         if (ids.Length == 0 || ids.Any(string.IsNullOrWhiteSpace))
         {
-            return new CommandExecutionResult(false, "At least one extension ID is required.");
+            return new CommandExecutionResult(false, "At least one component ID is required.");
         }
 
         var enabled = string.Equals(command.Action.Name, "enable", StringComparison.OrdinalIgnoreCase);
         var state = enabled ? "enabled" : "disabled";
-        var extensionNames = FormatExtensionNames(ids);
-        var unknownId = ids.FirstOrDefault(id => !_extensionIds.Contains(id));
+        var componentNames = FormatComponentNames(ids);
+        var unknownId = ids.FirstOrDefault(id => !_componentIds.Contains(id));
         if (unknownId is not null)
         {
-            return new CommandExecutionResult(false, $"Extension '{unknownId}' was not found.");
+            return new CommandExecutionResult(false, $"Installed component '{unknownId}' was not found.");
         }
 
         var disabledIds = _stateStore.GetDisabledExtensionIds();
@@ -124,14 +162,14 @@ public sealed class ExtensionCommandModel : ICommandModel
         if (previousStates.Values.All(previousState => previousState == enabled))
         {
             var verb = ids.Length == 1 ? "is" : "are";
-            return new CommandExecutionResult(true, $"{extensionNames} {verb} already {state}.");
+            return new CommandExecutionResult(true, $"{componentNames} {verb} already {state}.");
         }
 
         try
         {
             _stateStore.SetEnabled(ids, enabled);
             _stateChanged?.Invoke();
-            return new CommandExecutionResult(true, $"{extensionNames} {state}.");
+            return new CommandExecutionResult(true, $"{componentNames} {state}.");
         }
         catch (Exception exception)
         {
@@ -143,10 +181,71 @@ public sealed class ExtensionCommandModel : ICommandModel
             {
                 return new CommandExecutionResult(
                     false,
-                    $"Unable to update {extensionNames}: {exception.Message} State rollback also failed: {rollbackException.Message}");
+                    $"Unable to update {componentNames}: {exception.Message} State rollback also failed: {rollbackException.Message}");
             }
 
-            return new CommandExecutionResult(false, $"Unable to update {extensionNames}: {exception.Message}");
+            return new CommandExecutionResult(false, $"Unable to update {componentNames}: {exception.Message}");
+        }
+    }
+
+    public async Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command)
+    {
+        if (!string.Equals(command.Action.Name, "pack-install", StringComparison.OrdinalIgnoreCase))
+        {
+            return Execute(command);
+        }
+
+        string? installedId = null;
+        var installedPackPath = string.Empty;
+        var previousManifest = Array.Empty<byte>();
+        var hadPreviousManifest = false;
+        try
+        {
+            var sourcePath = command.Arguments["json-path"];
+            var id = CommandPackLoader.ValidateManifestFile(sourcePath);
+            var destination = _commandPackLoader.GetInstalledPackPath(id);
+            var replaceExisting = false;
+            if (System.IO.File.Exists(destination))
+            {
+                if (_confirmPackReplacement is null || !await _confirmPackReplacement(id))
+                {
+                    return new CommandExecutionResult(false, $"Import of command pack '{id}' was cancelled.");
+                }
+
+                replaceExisting = true;
+                previousManifest = System.IO.File.ReadAllBytes(destination);
+                hadPreviousManifest = true;
+            }
+
+            installedPackPath = destination;
+            installedId = _commandPackLoader.InstallPack(sourcePath, replaceExisting);
+            _stateChanged?.Invoke();
+            return new CommandExecutionResult(true, $"Command pack '{id}' installed.");
+        }
+        catch (Exception exception)
+        {
+            if (installedId is not null)
+            {
+                try
+                {
+                    if (hadPreviousManifest)
+                    {
+                        System.IO.File.WriteAllBytes(installedPackPath, previousManifest);
+                    }
+                    else if (System.IO.File.Exists(installedPackPath))
+                    {
+                        System.IO.File.Delete(installedPackPath);
+                    }
+                }
+                catch (Exception rollbackException)
+                {
+                    return new CommandExecutionResult(
+                        false,
+                        $"Unable to install command pack: {exception.Message} Rollback also failed: {rollbackException.Message}");
+                }
+            }
+
+            return new CommandExecutionResult(false, $"Unable to install command pack: {exception.Message}");
         }
     }
 
@@ -232,4 +331,23 @@ public sealed class ExtensionCommandModel : ICommandModel
         => ids.Count == 1
             ? $"Extension '{ids[0]}'"
             : $"Extensions '{string.Join("', '", ids)}'";
+
+    private string FormatComponentNames(IReadOnlyList<string> ids)
+    {
+        if (ids.All(_extensionIds.Contains))
+        {
+            return FormatExtensionNames(ids);
+        }
+
+        if (ids.All(_commandPackIds.Contains))
+        {
+            return ids.Count == 1
+                ? $"Command pack '{ids[0]}'"
+                : $"Command packs '{string.Join("', '", ids)}'";
+        }
+
+        return ids.Count == 1
+            ? $"Installed component '{ids[0]}'"
+            : $"Installed components '{string.Join("', '", ids)}'";
+    }
 }

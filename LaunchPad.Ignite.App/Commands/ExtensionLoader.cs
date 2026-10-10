@@ -15,7 +15,11 @@ public sealed record LoadedExtensions(
     CommandSchema Schema,
     IReadOnlyDictionary<string, ICommandExecutor> Executors,
     IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
-    IReadOnlyList<LoadedExtensionInfo> Extensions);
+    IReadOnlyList<LoadedExtensionInfo> Extensions)
+{
+    public IReadOnlyDictionary<string, string> CommandSources { get; init; }
+        = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+}
 
 public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled);
 
@@ -103,15 +107,20 @@ public sealed class ExtensionLoader
         var commands = new List<CommandDefinition>();
         var variables = new List<CommandVariableDefinition>();
         var functions = new List<CommandFunctionDefinition>();
+        var commandSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
             lists.AddRange(manifest.Schema.Lists);
-            commands.AddRange(manifest.Schema.Commands.Select(command => command with
+            foreach (var command in manifest.Schema.Commands.Select(command => command with
             {
                 Namespace = command.Namespace ?? manifest.Namespace
-            }));
+            }))
+            {
+                commandSources.TryAdd(command.QualifiedName, manifest.Id);
+                commands.Add(command);
+            }
             variables.AddRange(manifest.Schema.Variables.Select(variable => variable with { Namespace = manifest.Namespace }));
             var extensionFunctions = manifest.Schema.Functions
                 .Select(function => LoadFunction(function, manifest, extensionDirectory))
@@ -150,7 +159,10 @@ public sealed class ExtensionLoader
         {
             Variables = variables,
             Functions = functions
-        }, executors, functionExecutors, extensionInfo);
+        }, executors, functionExecutors, extensionInfo)
+        {
+            CommandSources = commandSources
+        };
     }
 
     private static string[] GetDefaultExtensionRoots()
