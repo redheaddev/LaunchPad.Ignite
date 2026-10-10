@@ -67,7 +67,8 @@ public sealed record CommandArgumentDefinition(
     string? Ref = null,
     string? InputType = null,
     ListSelectionMode ListMode = ListSelectionMode.Multiple,
-    bool AllowCustomValues = false);
+    bool AllowCustomValues = false,
+    bool Sensitive = false);
 
 public sealed record CommandExecutionDefinition(
     CommandExecutionMode Mode,

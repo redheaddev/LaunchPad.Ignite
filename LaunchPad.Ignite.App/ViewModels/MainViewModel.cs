@@ -40,6 +40,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
     private readonly ExtensionStateStore _extensionStateStore;
+    private readonly ProfileCommandLogger _commandLogger;
     private LoadedExtensions _extensions = null!;
     private IReadOnlyList<LoadedCommandPackInfo> _commandPacks = null!;
     private readonly ISecretStore _secretStore;
@@ -53,6 +54,8 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
+        _commandLogger = new ProfileCommandLogger();
+        _commandLogger.StartSession();
         _extensionStateStore = new ExtensionStateStore();
         _secretStore = PlatformSecretStore.Create();
         _processStarter = new SystemProcessStarter();
@@ -533,6 +536,22 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
     }
 
     private async Task<bool> ExecuteCommandAsync(bool newWindow = false)
+    {
+        var submittedText = CommandText;
+        var runTime = DateTimeOffset.Now;
+        var succeeded = false;
+        try
+        {
+            succeeded = await ExecuteCommandCoreAsync(newWindow);
+            return succeeded;
+        }
+        finally
+        {
+            _commandLogger.RecordCommand(submittedText, succeeded, _catalog, runTime);
+        }
+    }
+
+    private async Task<bool> ExecuteCommandCoreAsync(bool newWindow = false)
     {
         if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
         {
