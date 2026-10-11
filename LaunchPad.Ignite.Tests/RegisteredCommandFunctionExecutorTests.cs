@@ -3,11 +3,83 @@ using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Schema;
 using LaunchPad.Ignite.Extensions.Weather;
+using LaunchPad.Ignite.Extensions.Ado;
 
 namespace LaunchPad.Ignite.Tests;
 
 public class RegisteredCommandFunctionExecutorTests
 {
+    [Fact]
+    public async Task AdoPullRequestCommandResolvesRepositoryWithPatAndOpensResolvedUrl()
+    {
+        var handler = new StubHttpMessageHandler("{\"repository\":{\"project\":{\"name\":\"Claims Team\"},\"name\":\"claims/api\"}}");
+        using var client = new HttpClient(handler);
+        var openedUrls = new List<string>();
+        var executor = new AdoPullRequestCommandExecutor(client);
+        executor.Configure(
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["orgUrl"] = "https://dev.azure.com/example/",
+                ["patSecretName"] = "azdo_token"
+            },
+            name => (name == "azdo_token", name == "azdo_token" ? "secret-token" : string.Empty),
+            openedUrls.Add);
+        var command = CreateAdoPullRequestCommand("42");
+
+        var result = await executor.ExecuteAsync(command);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("Opened pull request 42", result.Message);
+        Assert.Equal("https://dev.azure.com/example/Claims%20Team/_git/claims%2Fapi/pullrequest/42", Assert.Single(openedUrls));
+        var requestUri = Assert.Single(handler.RequestUris);
+        Assert.Equal("https://dev.azure.com/example/_apis/git/pullrequests/42?api-version=6.0", requestUri.AbsoluteUri);
+        Assert.Equal("Basic", handler.AuthorizationScheme);
+        Assert.Equal(Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes(":secret-token")), handler.AuthorizationParameter);
+    }
+
+    [Fact]
+    public async Task AdoPullRequestCommandReportsMissingPatWithoutSendingRequest()
+    {
+        var handler = new StubHttpMessageHandler("{}");
+        using var client = new HttpClient(handler);
+        var executor = new AdoPullRequestCommandExecutor(client);
+        executor.Configure(
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["orgUrl"] = "https://dev.azure.com/example",
+                ["patSecretName"] = "missing"
+            },
+            _ => (false, string.Empty),
+            _ => { });
+        var command = CreateAdoPullRequestCommand("42");
+
+        var result = await executor.ExecuteAsync(command);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("Verify secret 'missing'", result.Message);
+        Assert.Empty(handler.RequestUris);
+    }
+
+    private static LaunchPad.Ignite.Core.Parsing.ParsedCommand CreateAdoPullRequestCommand(string pullRequestId)
+    {
+        var action = new LaunchPad.Ignite.Core.Schema.CommandActionDefinition(
+            "default",
+            "",
+            "ado:pr <pullRequestId>",
+            "",
+            [new("pullRequestId")]);
+        var definition = new LaunchPad.Ignite.Core.Schema.CommandDefinition(
+            "pr",
+            "adoPr",
+            "Open a pull request",
+            [action],
+            "ado");
+        return new LaunchPad.Ignite.Core.Parsing.ParsedCommand(
+            definition,
+            action,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["pullRequestId"] = pullRequestId });
+    }
+
     [Fact]
     public async Task HttpGetFunctionEscapesParametersAndSelectsJsonValue()
     {
@@ -118,12 +190,16 @@ public class RegisteredCommandFunctionExecutorTests
         }
 
         public List<Uri> RequestUris { get; } = [];
+        public string? AuthorizationScheme { get; private set; }
+        public string? AuthorizationParameter { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestUris.Add(request.RequestUri!);
+            AuthorizationScheme = request.Headers.Authorization?.Scheme;
+            AuthorizationParameter = request.Headers.Authorization?.Parameter;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(_getResponseBody(request))

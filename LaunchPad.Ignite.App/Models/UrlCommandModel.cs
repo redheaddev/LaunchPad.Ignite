@@ -24,6 +24,9 @@ public sealed class UrlCommandModel : ICommandModel
     public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
         => _targetBuilder.UpdateVariables(variables);
 
+    public UrlTargetBuildResult BuildPreview(ParsedCommand command)
+        => _targetBuilder.Build(command);
+
     public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result, bool newWindow = false)
     {
         var candidate = text.Trim();

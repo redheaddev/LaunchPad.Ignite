@@ -38,6 +38,49 @@ public sealed class CommandSchemaValidator
             {
                 errors.Add($"List '{list.Name}' contains duplicate values.");
             }
+
+            if (list.Default is not null
+                && !list.Values.Contains(list.Default, StringComparer.OrdinalIgnoreCase))
+            {
+                errors.Add($"List '{list.Name}' default '{list.Default}' must match one of its values.");
+            }
+        }
+
+        var settingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var setting in schema.Settings)
+        {
+            if (string.IsNullOrWhiteSpace(setting.Name)
+                || setting.Name.Contains(':')
+                || !settingNames.Add(setting.QualifiedName))
+            {
+                errors.Add($"Setting name '{setting.QualifiedName}' is empty or duplicated.");
+            }
+
+            if (string.IsNullOrWhiteSpace(setting.Label)
+                || string.IsNullOrWhiteSpace(setting.Description)
+                || string.IsNullOrWhiteSpace(setting.DefaultValue))
+            {
+                errors.Add($"Setting '{setting.QualifiedName}' requires a label, description, and non-empty default value.");
+            }
+
+            if (setting.Type is not ("text" or "password" or "directory" or "boolean" or "secretName" or "select"))
+            {
+                errors.Add($"Setting '{setting.QualifiedName}' has unsupported type '{setting.Type}'.");
+            }
+
+            if (setting.Type == "select"
+                && (setting.Options is null
+                    || setting.Options.Count == 0
+                    || !setting.Options.Contains(setting.DefaultValue, StringComparer.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Select setting '{setting.QualifiedName}' must provide options containing its default value.");
+            }
+
+            if (setting.Namespace is not null
+                && (string.IsNullOrWhiteSpace(setting.Namespace) || setting.Namespace.Contains(':')))
+            {
+                errors.Add($"Setting '{setting.Name}' has an invalid namespace '{setting.Namespace}'.");
+            }
         }
 
         var variableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

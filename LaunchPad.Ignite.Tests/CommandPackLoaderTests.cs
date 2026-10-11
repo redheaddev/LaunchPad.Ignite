@@ -35,6 +35,19 @@ public class CommandPackLoaderTests
     }
 
     [Fact]
+    public void PreservesExtensionSettingsWhenLoadingCommandPacks()
+    {
+        using var directory = new TemporaryDirectory();
+        var setting = new CommandSettingDefinition(
+            "orgUrl", "Organization URL", "ADO organization", "https://dev.azure.com/example", Namespace: "ado");
+        var existingSchema = new CommandSchema([], []) { Settings = [setting] };
+
+        var loaded = new CommandPackLoader([directory.Path]).Load(existingSchema);
+
+        Assert.Equal(setting, Assert.Single(loaded.Settings));
+    }
+
+    [Fact]
     public void UserPackOverridesBundledPackWithSameId()
     {
         using var bundledDirectory = new TemporaryDirectory();

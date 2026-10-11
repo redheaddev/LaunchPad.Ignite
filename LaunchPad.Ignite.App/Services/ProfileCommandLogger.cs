@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -22,6 +24,70 @@ public sealed class ProfileCommandLogger
     public void StartSession()
     {
         TryAppend("log.txt", $"========== Session started {DateTimeOffset.Now:O} ==========");
+    }
+
+    public IReadOnlyList<CommandHistoryEntry> ReadHistoryEntries()
+    {
+        try
+        {
+            var historyPath = Path.Combine(_profileDirectory, "history.txt");
+            if (!File.Exists(historyPath))
+            {
+                return [];
+            }
+
+            return File.ReadLines(historyPath)
+                .Select(ParseHistoryLine)
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.CommandText))
+                .Reverse()
+                .GroupBy(entry => entry.CommandText, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    public static IReadOnlyList<CommandHistoryEntry> FilterHistoryEntries(
+        IReadOnlyList<CommandHistoryEntry> historyEntries,
+        string inputText)
+        => historyEntries
+            .Where(entry => entry.CommandText.StartsWith(inputText, StringComparison.OrdinalIgnoreCase))
+            .Take(1)
+            .ToArray();
+
+    public static string FormatHistoryAge(DateTimeOffset? runTime, DateTimeOffset now)
+    {
+        if (runTime is null)
+        {
+            return string.Empty;
+        }
+
+        var age = now - runTime.Value;
+        if (age < TimeSpan.Zero)
+        {
+            age = TimeSpan.Zero;
+        }
+
+        if (age < TimeSpan.FromMinutes(1))
+        {
+            return "now";
+        }
+
+        if (age < TimeSpan.FromHours(1))
+        {
+            return $"{Math.Max(1, (int)age.TotalMinutes)}m";
+        }
+
+        return age < TimeSpan.FromDays(7)
+            ? $"{(int)age.TotalHours}h"
+            : $"{(int)age.TotalDays}d";
     }
 
     public void RecordCommand(
@@ -70,10 +136,9 @@ public sealed class ProfileCommandLogger
             return commandText;
         }
 
-        var redactAllArguments = string.Equals(command.Kind, "secret", StringComparison.OrdinalIgnoreCase);
         var suppliedArguments = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var nextPositionalIndex = 0;
-        var redactedTokens = new System.Collections.Generic.List<CommandLineToken>();
+        var redactedTokens = new System.Collections.Generic.List<(CommandLineToken Token, string Replacement)>();
         foreach (var token in tokens.Skip(argumentStartIndex))
         {
             var equalsIndex = token.Value.IndexOf('=');
@@ -104,9 +169,12 @@ public sealed class ProfileCommandLogger
                 }
             }
 
-            if (redactAllArguments || argument?.Sensitive == true)
+            if (IsSensitiveArgument(argument))
             {
-                redactedTokens.Add(token);
+                var replacement = equalsIndex >= 0
+                    ? $"{token.Value[..(equalsIndex + 1)]}[REDACTED]"
+                    : "[REDACTED]";
+                redactedTokens.Add((token, replacement));
             }
         }
 
@@ -116,13 +184,35 @@ public sealed class ProfileCommandLogger
         }
 
         var result = new StringBuilder(commandText);
-        foreach (var token in redactedTokens.OrderByDescending(token => token.Start))
+        foreach (var (token, replacement) in redactedTokens.OrderByDescending(item => item.Token.Start))
         {
             result.Remove(token.Start, token.Length);
-            result.Insert(token.Start, "[REDACTED]");
+            result.Insert(token.Start, replacement);
         }
 
         return result.ToString();
+    }
+
+    private static bool IsSensitiveArgument(CommandArgumentDefinition? argument)
+        => argument is not null
+            && (argument.Sensitive
+                || argument.Name.Contains("password", StringComparison.OrdinalIgnoreCase)
+                || argument.Name.Contains("passwd", StringComparison.OrdinalIgnoreCase));
+
+    private static CommandHistoryEntry ParseHistoryLine(string line)
+    {
+        var separator = line.IndexOf(' ');
+        if (separator > 0
+            && DateTimeOffset.TryParse(
+                line[..separator],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var runTime))
+        {
+            return new CommandHistoryEntry(line[(separator + 1)..], runTime);
+        }
+
+        return new CommandHistoryEntry(line, null);
     }
 
     private void TryAppend(string fileName, string line)
@@ -140,3 +230,5 @@ public sealed class ProfileCommandLogger
         }
     }
 }
+
+public sealed record CommandHistoryEntry(string CommandText, DateTimeOffset? RunTime);

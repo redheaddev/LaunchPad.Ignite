@@ -118,6 +118,7 @@ public sealed class CommandPackLoader
         var commands = schema.Commands.ToList();
         var variables = schema.Variables.ToList();
         var functions = schema.Functions.ToList();
+        var settings = schema.Settings.ToList();
         var listNames = lists.Select(GetListKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var commandNames = commands.Select(command => command.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var variableNames = variables.Select(variable => variable.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -180,7 +181,8 @@ public sealed class CommandPackLoader
         return new LoadedCommandPacks(new CommandSchema(lists, commands)
         {
             Variables = variables,
-            Functions = functions
+            Functions = functions,
+            Settings = settings
         }, commandSources, packs, disabledCommandNames, packedCommandNames);
     }
 

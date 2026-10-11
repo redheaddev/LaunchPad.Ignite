@@ -25,10 +25,18 @@ public sealed class CommandSchemaValueProvider : IArgumentValueProvider
         var name = reference[(separator + 1)..];
         if (string.Equals(type, "enum", StringComparison.OrdinalIgnoreCase))
         {
-            return _schema.Lists.FirstOrDefault(list =>
+            var list = _schema.Lists.FirstOrDefault(list =>
                 string.Equals(list.Type, "enum", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(list.Name, name, StringComparison.OrdinalIgnoreCase))?.Values
-                ?? Array.Empty<string>();
+                && string.Equals(list.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (list is null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return list.Default is null
+                ? list.Values
+                : new[] { list.Default }.Concat(list.Values.Where(value =>
+                    !string.Equals(value, list.Default, StringComparison.OrdinalIgnoreCase))).ToArray();
         }
 
         return string.Equals(type, "list", StringComparison.OrdinalIgnoreCase)

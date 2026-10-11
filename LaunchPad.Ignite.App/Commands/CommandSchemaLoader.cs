@@ -264,11 +264,15 @@ public sealed class CommandSchemaLoader
             .Where(function => !userFunctionNames.Contains(function.QualifiedName))
             .Concat(userSchema.Functions)
             .ToArray();
+        var settings = appSchema.Settings
+            .Concat(userSchema.Settings)
+            .ToArray();
 
         return new CommandSchema(lists, commands)
         {
             Variables = variables,
-            Functions = functions
+            Functions = functions,
+            Settings = settings
         };
     }
 

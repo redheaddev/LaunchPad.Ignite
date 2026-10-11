@@ -26,7 +26,7 @@ public class ProfileCommandLoggerTests
         Assert.Equal(2, log.Split("Session started").Length - 1);
         Assert.Contains("[SUCCESS] tool safe [REDACTED]", log);
         Assert.Contains("[FAILED] tool safe [REDACTED]", log);
-        Assert.DoesNotContain("api-key", log);
+        Assert.Contains("[FAILED] secret set api-key", log);
         Assert.Equal(1, history.Length);
         AssertHistoryEntry(history[0], "tool safe [REDACTED]");
     }
@@ -37,15 +37,54 @@ public class ProfileCommandLoggerTests
         using var directory = new TemporaryDirectory();
         var logger = new ProfileCommandLogger(directory.Path);
 
-        logger.RecordCommand("tool safe clear-text-secret", succeeded: true, CreateCatalog());
+        var catalog = CreateCatalog();
+        logger.RecordCommand("tool safe clear-text-secret", succeeded: true, catalog);
+        logger.RecordCommand("tool safe password=clear-text-secret", succeeded: true, catalog);
 
         var log = File.ReadAllText(Path.Combine(directory.Path, "log.txt"));
-        var history = File.ReadAllText(Path.Combine(directory.Path, "history.txt"));
+        var history = File.ReadAllLines(Path.Combine(directory.Path, "history.txt"));
 
         Assert.DoesNotContain("clear-text-secret", log);
-        Assert.DoesNotContain("clear-text-secret", history);
+        Assert.DoesNotContain("clear-text-secret", string.Join(Environment.NewLine, history));
         Assert.Contains("tool safe [REDACTED]", log);
-        AssertHistoryEntry(File.ReadAllLines(Path.Combine(directory.Path, "history.txt")).Single(), "tool safe [REDACTED]");
+        Assert.Contains("tool safe password=[REDACTED]", log);
+        AssertHistoryEntry(history[0], "tool safe [REDACTED]");
+        AssertHistoryEntry(history[1], "tool safe password=[REDACTED]");
+    }
+
+    [Fact]
+    public void ReadsHistoryNewestFirstAndFiltersByTypedPrefix()
+    {
+        using var directory = new TemporaryDirectory();
+        File.WriteAllLines(Path.Combine(directory.Path, "history.txt"),
+        [
+            "2025-01-01T00:00:00.0000000+00:00 alpha old",
+            "2025-01-02T00:00:00.0000000+00:00 beta recent",
+            "2025-01-03T00:00:00.0000000+00:00 alpha new",
+            "2025-01-04T00:00:00.0000000+00:00 alpha [REDACTED]",
+            "2025-01-05T00:00:00.0000000+00:00 alpha new",
+            "legacy command"
+        ]);
+        var logger = new ProfileCommandLogger(directory.Path);
+
+        var history = logger.ReadHistoryEntries();
+        var filtered = ProfileCommandLogger.FilterHistoryEntries(history, "ALPHA");
+
+        Assert.Equal(
+            ["legacy command", "alpha new", "alpha [REDACTED]", "beta recent", "alpha old"],
+            history.Select(entry => entry.CommandText));
+        Assert.Equal(["alpha new"], filtered.Select(entry => entry.CommandText));
+        Assert.Equal(DateTimeOffset.Parse("2025-01-05T00:00:00.0000000+00:00"), history[1].RunTime);
+    }
+
+    [Fact]
+    public void FormatsHistoryAgeInHours()
+    {
+        var now = new DateTimeOffset(2025, 1, 2, 1, 0, 0, TimeSpan.Zero);
+
+        var age = ProfileCommandLogger.FormatHistoryAge(now - TimeSpan.FromHours(25), now);
+
+        Assert.Equal("25h", age);
     }
 
     private static void AssertHistoryEntry(string entry, string expectedCommand)

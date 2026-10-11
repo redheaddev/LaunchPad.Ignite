@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using System.ComponentModel;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Completion;
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     private readonly TextBox _commandBox;
     private readonly ItemsControl _completionList;
     private readonly TextBlock _commandTextOverlay;
+    private readonly TextBlock _usageTextBlock;
     private ScrollViewer? _commandScrollViewer;
     private MainViewModel? _shortcutViewModel;
     private Task? _hotKeyTask;
@@ -49,12 +51,111 @@ public partial class MainWindow : Window
             ?? throw new InvalidOperationException("Completion list control was not found.");
         _commandTextOverlay = this.FindControl<TextBlock>("CommandTextOverlay")
             ?? throw new InvalidOperationException("Command text overlay was not found.");
+        _usageTextBlock = this.FindControl<TextBlock>("UsageTextBlock")
+            ?? throw new InvalidOperationException("Usage text control was not found.");
+        DataContextChanged += (_, _) =>
+        {
+            if (DataContext is INotifyPropertyChanged viewModel)
+            {
+                viewModel.PropertyChanged += (_, args) =>
+                {
+                    if (args.PropertyName is nameof(MainViewModel.UsageText) or nameof(MainViewModel.UsageCommandText))
+                    {
+                        UpdateUsageText();
+                    }
+                };
+            }
+
+            UpdateUsageText();
+        };
         _globalHook.KeyPressed += GlobalHook_KeyPressed;
         _globalHook.KeyReleased += GlobalHook_KeyReleased;
         Deactivated += MainWindow_Deactivated;
+        Activated += MainWindow_Activated;
         AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
         Opened += MainWindow_Opened;
         Closed += MainWindow_Closed;
+    }
+
+    private void UpdateUsageText()
+    {
+        _usageTextBlock.Inlines.Clear();
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(viewModel.UsageText))
+        {
+            _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run("Usage: —"));
+            return;
+        }
+
+        if (string.IsNullOrEmpty(viewModel.UsageCommandText))
+        {
+            _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(viewModel.UsageText));
+            return;
+        }
+
+        var commandText = viewModel.UsageCommandText;
+        var prefix = "Usage: ";
+        _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(prefix));
+        var position = 0;
+        var firstArgument = commandText.IndexOf('<');
+        var commandAndActionEnd = firstArgument < 0
+            ? commandText.Length
+            : firstArgument > 0 && commandText[firstArgument - 1] == '['
+                ? firstArgument - 1
+                : firstArgument;
+        if (commandAndActionEnd > 0)
+        {
+            _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(commandText[..commandAndActionEnd])
+            {
+                Foreground = new SolidColorBrush(Color.Parse("#FF86EFAC"))
+            });
+            position = commandAndActionEnd;
+        }
+
+        while (position < commandText.Length)
+        {
+            var opening = commandText.IndexOf('<', position);
+            if (opening < 0)
+            {
+                _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(commandText[position..]));
+                break;
+            }
+
+            var optional = opening > 0 && commandText[opening - 1] == '[';
+            var placeholderStart = optional ? opening - 1 : opening;
+            if (placeholderStart > position)
+            {
+                _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(commandText[position..placeholderStart]));
+            }
+
+            var closing = commandText.IndexOf('>', opening + 1);
+            if (closing < 0)
+            {
+                _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(commandText[opening..]));
+                break;
+            }
+
+            var placeholderEnd = optional && closing + 1 < commandText.Length && commandText[closing + 1] == ']'
+                ? closing + 2
+                : closing + 1;
+            var run = new Avalonia.Controls.Documents.Run(commandText[opening..(closing + 1)])
+            {
+                Foreground = optional
+                    ? new SolidColorBrush(Color.Parse("#FF94A3B8"))
+                    : new SolidColorBrush(Color.Parse("#FF86EFAC"))
+            };
+            if (optional)
+            {
+                run.Text = commandText[placeholderStart..placeholderEnd];
+            }
+
+            _usageTextBlock.Inlines.Add(run);
+            position = placeholderEnd;
+        }
     }
 
     internal void SetPendingCaretIndex(int caretIndex) => _pendingCaretIndex = caretIndex;
@@ -201,6 +302,24 @@ public partial class MainWindow : Window
         await viewModel.ImportCommandPackAsync(path);
         _commandBox.Text = viewModel.CommandText;
         _commandBox.CaretIndex = viewModel.CommandText.Length;
+    }
+
+    private async void SettingsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            await new SettingsWindow(viewModel.CreateSettingsViewModel()).ShowDialog(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
     }
 
     private static Button CreateDialogButton(string label, bool result)
@@ -357,6 +476,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MainWindow_Activated(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() => _commandBox.Focus(), DispatcherPriority.Input);
+    }
+
     internal async Task<string?> ShowSecretEntryDialogAsync(SecretEntryWindow dialog)
     {
         _secretDialogIsOpen = true;
@@ -400,7 +524,8 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.End
             && !e.KeyModifiers.HasFlag(KeyModifiers.Control)
-            && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            && !e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+            && !e.KeyModifiers.HasFlag(KeyModifiers.Alt))
         {
             ResetPathSelection();
             var end = _commandBox.Text?.Length ?? 0;
@@ -428,7 +553,16 @@ public partial class MainWindow : Window
         }
 
         CommandInputKey? inputKey = null;
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            inputKey = e.Key switch
+            {
+                Key.Home when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.First,
+                Key.End when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Last,
+                _ => null
+            };
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             inputKey = e.Key switch
             {
@@ -447,6 +581,8 @@ public partial class MainWindow : Window
                 Key.Space when viewModel.IsChecklistActive => CommandInputKey.Space,
                 Key.Up when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Up,
                 Key.Down when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Down,
+                Key.PageUp when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.PageUp,
+                Key.PageDown when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.PageDown,
                 _ => null
             };
         }

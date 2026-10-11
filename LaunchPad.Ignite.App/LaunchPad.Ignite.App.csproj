@@ -18,7 +18,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Defaults\app-settings.json" />
     <Content Include="Defaults\user-commands.json" />
+    <Content Include="Defaults\app-settings.json">
+      <TargetPath>app-settings.json</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
@@ -37,5 +42,15 @@
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
     <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Ado\LaunchPad.Ignite.Extensions.Ado.csproj" ReferenceOutputAssembly="false" />
+    <Content Include="..\LaunchPad.Ignite.Extensions.Ado\extension.json">
+      <Link>extensions\ado\extension.json</Link>
+      <TargetPath>extensions\ado\extension.json</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
+
+  <Target Name="CopyAdoExtensionAssemblyAfterBuild" AfterTargets="Build">
+    <MakeDir Directories="$(OutputPath)extensions\ado" />
+    <Copy SourceFiles="$(SolutionDir)LaunchPad.Ignite.Extensions.Ado\bin\$(Configuration)\net8.0\LaunchPad.Ignite.Extensions.Ado.dll" DestinationFiles="$(OutputPath)extensions\ado\LaunchPad.Ignite.Extensions.Ado.dll" />
+  </Target>
 </Project>

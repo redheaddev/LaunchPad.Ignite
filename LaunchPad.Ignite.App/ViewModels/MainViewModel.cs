@@ -31,6 +31,7 @@ public partial class MainViewModel : ViewModelBase
     private CommandTextFunctionExpander _functionExpander = null!;
     private readonly CommandLineTokenizer _tokenizer = new();
     private IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors = null!;
+    private IReadOnlyDictionary<string, IAsyncCommandExecutor> _asyncCommandExecutors = null!;
     private IReadOnlyDictionary<string, string> _commandSources = null!;
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
@@ -41,9 +42,14 @@ public partial class MainViewModel : ViewModelBase
     private readonly DispatcherTimer _secretAccessStateTimer;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
+    private IReadOnlyList<CommandHistoryEntry> _historyCommands = Array.Empty<CommandHistoryEntry>();
+    private string _historyInputText = string.Empty;
+    private int _highlightedCompletionIndex;
     private LoadedExtensions _extensions = null!;
     private IReadOnlyList<LoadedCommandPackInfo> _commandPacks = null!;
     private readonly ISecretStore _secretStore;
+    private readonly ProfileSettingsStore _profileSettingsStore;
+    private readonly IReadOnlyList<CommandSettingDefinition> _applicationSettings;
     private readonly IProcessStarter _processStarter;
     private bool _isExtensionListVisible;
     private bool _isDirectPathCompletionActive;
@@ -56,8 +62,11 @@ public partial class MainViewModel : ViewModelBase
     {
         _commandLogger = new ProfileCommandLogger();
         _commandLogger.StartSession();
+        _historyCommands = _commandLogger.ReadHistoryEntries();
         _extensionStateStore = new ExtensionStateStore();
         _secretStore = PlatformSecretStore.Create();
+        _profileSettingsStore = new ProfileSettingsStore();
+        _applicationSettings = new ApplicationSettingsLoader().Load();
         _processStarter = new SystemProcessStarter();
         _secretAccessGate = new SecretAccessGate();
         _secretCommandModel = new SecretCommandModel(
@@ -89,6 +98,19 @@ public partial class MainViewModel : ViewModelBase
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         var schemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
         var schema = commandPacks.FilterDisabledCommands(schemaLoader.Load());
+        var settings = _applicationSettings.Concat(schema.Settings).ToArray();
+        var runtimeBaseVariables = schema.Variables.ToArray();
+        schema = schema with
+        {
+            Settings = settings,
+            Variables = GetEffectiveVariables(schema.Variables, settings)
+        };
+        var urlTargetOpener = new SystemUrlTargetOpener();
+        extensions.ConfigureCommandExecutors(
+            schema.Variables,
+            _profileSettingsStore.GetValues(),
+            name => TryGetSecret(name),
+            url => urlTargetOpener.Open([new UrlTarget(url)]));
 
         var commands = schema.Commands
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
@@ -106,7 +128,7 @@ public partial class MainViewModel : ViewModelBase
         var builtInKinds = new[] { "shell", "variable", "secret", "exit" };
         builtInKinds = [.. builtInKinds, "extension"];
 
-        var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(builtInKinds));
+        var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
         var shortcutResolver = new ShortcutResolver(schema.Commands);
         var valueProvider = new CommandSchemaValueProvider(
@@ -124,14 +146,27 @@ public partial class MainViewModel : ViewModelBase
             schema.Variables,
             schema.Functions);
         var parser = new CommandLineParser(catalog, valueProvider);
-        var urlCommandModel = new UrlCommandModel(new SystemUrlTargetOpener(), schema.Variables);
+        var urlCommandModel = new UrlCommandModel(urlTargetOpener, schema.Variables);
         var variableCommandModel = new VariableCommandModel(
             schemaLoader,
             updatedSchema =>
             {
-                _variableExpander.UpdateVariables(updatedSchema.Variables);
-                _urlCommandModel.UpdateVariables(updatedSchema.Variables);
-                ApplyCompletionState(_completionSession.UpdateVariables(updatedSchema.Variables));
+                var customVariableNames = updatedSchema.Variables
+                    .Select(variable => variable.QualifiedName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var updatedVariables = runtimeBaseVariables
+                    .Where(variable => !customVariableNames.Contains(variable.QualifiedName))
+                    .Concat(updatedSchema.Variables)
+                    .ToArray();
+                var effectiveVariables = GetEffectiveVariables(updatedVariables, settings);
+                _variableExpander.UpdateVariables(effectiveVariables);
+                _urlCommandModel.UpdateVariables(effectiveVariables);
+                extensions.ConfigureCommandExecutors(
+                    effectiveVariables,
+                    _profileSettingsStore.GetValues(),
+                    name => TryGetSecret(name),
+                    url => urlTargetOpener.Open([new UrlTarget(url)]));
+                ApplyCompletionState(_completionSession.UpdateVariables(effectiveVariables));
             },
             ConfirmVariableOverwrite);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
@@ -141,6 +176,7 @@ public partial class MainViewModel : ViewModelBase
             ["exit"] = new ExitCommandModel(ShutdownApplication),
             ["variable"] = variableCommandModel
         };
+        var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         commandExecutors["extension"] = new ExtensionCommandModel(
             _extensionStateStore,
             extensionIds,
@@ -157,6 +193,14 @@ public partial class MainViewModel : ViewModelBase
             }
         }
 
+        foreach (var (kind, executor) in extensions.AsyncExecutors)
+        {
+            if (commandExecutors.ContainsKey(kind) || !asyncCommandExecutors.TryAdd(kind, executor))
+            {
+                throw new InvalidOperationException($"Command kind '{kind}' is already registered.");
+            }
+        }
+
         _extensions = extensions;
         _commandPacks = commandPacks.Packs;
         _catalog = catalog;
@@ -167,9 +211,29 @@ public partial class MainViewModel : ViewModelBase
         _parser = parser;
         _urlCommandModel = urlCommandModel;
         _commandExecutors = commandExecutors;
+        _asyncCommandExecutors = asyncCommandExecutors;
         _commandSources = commandSources;
         ApplyCompletionState(_completionSession.State);
     }
+
+    private IReadOnlyList<CommandVariableDefinition> GetEffectiveVariables(
+        IEnumerable<CommandVariableDefinition> variables,
+        IReadOnlyList<CommandSettingDefinition> settings)
+    {
+        var settingNames = settings
+            .Select(setting => setting.QualifiedName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return variables
+            .Where(variable => !settingNames.Contains(variable.QualifiedName))
+            .Concat(settings.Select(setting => new CommandVariableDefinition(
+                setting.Name,
+                _profileSettingsStore.GetValue(setting.QualifiedName, setting.DefaultValue),
+                setting.Namespace)))
+            .ToArray();
+    }
+
+    public SettingsViewModel CreateSettingsViewModel()
+        => new(_applicationSettings, _extensions, _profileSettingsStore, _extensionStateStore, InitializeCommandRuntime);
 
     public async Task ImportCommandPackAsync(string path)
     {
@@ -208,6 +272,13 @@ public partial class MainViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasUsageText))]
     [ObservableProperty]
     private string _usageText = string.Empty;
+
+    public string UsageCommandText { get; private set; } = string.Empty;
+
+    [NotifyPropertyChangedFor(nameof(HasTargetPreview))]
+    [NotifyPropertyChangedFor(nameof(TargetPreviewDisplay))]
+    [ObservableProperty]
+    private string _targetPreview = string.Empty;
 
     [ObservableProperty]
     private string _statusMessage = "Start typing to see commands";
@@ -252,6 +323,10 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasUsageText => !string.IsNullOrEmpty(UsageText);
 
+    public bool HasTargetPreview => !string.IsNullOrWhiteSpace(TargetPreview);
+
+    public string TargetPreviewDisplay => HasTargetPreview ? TargetPreview : "—";
+
     public string CommandExpansionPreview
     {
         get => _commandExpansionPreview;
@@ -269,7 +344,7 @@ public partial class MainViewModel : ViewModelBase
     public bool CanComplete => _isExtensionListVisible
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
-            : _completionSession.State.CanComplete);
+            : _completionSession.State.CanComplete || GetHistorySuggestions(CommandText).Count > 0);
 
     public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
 
@@ -277,6 +352,8 @@ public partial class MainViewModel : ViewModelBase
         => _shortcutResolver.TryExpandChord(chord, out expansion!);
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
+
+    public bool ShowCommandPlaceholder => IsCommandTextEmpty && string.IsNullOrEmpty(CompletionGhostText);
 
     public async Task<bool> HandleInputKeyAsync(CommandInputKey key, bool newWindow = false)
     {
@@ -292,19 +369,61 @@ public partial class MainViewModel : ViewModelBase
 
         if (_isExtensionListVisible
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
                 or CommandInputKey.SelectAll or CommandInputKey.DeselectAll)
         {
             return false;
         }
 
-        if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
+        if (_isDirectPathCompletionActive
+            && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last)
         {
+            HandleDirectPathCompletionKey(key);
             return false;
         }
 
-        if (_isDirectPathCompletionActive && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down)
+        var historySuggestions = GetHistorySuggestions(CommandText);
+        if (historySuggestions.Count > 0
+            && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last)
         {
-            HandleDirectPathCompletionKey(key);
+            var regularCount = _completionSession.State.Items.Count;
+            var historyCount = historySuggestions.Count;
+            if (key == CommandInputKey.Tab)
+            {
+                if (_highlightedCompletionIndex < historyCount)
+                {
+                    CommandText = historySuggestions[_highlightedCompletionIndex].CommandText;
+                }
+                else
+                {
+                    SelectRegularCompletion(_highlightedCompletionIndex - historyCount);
+                    ApplyCompletionState(_completionSession.HandleKey(CommandInputKey.Tab));
+                }
+            }
+            else
+            {
+                var totalCount = historyCount + regularCount;
+                _highlightedCompletionIndex = key switch
+                {
+                    CommandInputKey.First => 0,
+                    CommandInputKey.Last => totalCount - 1,
+                    _ => MoveCompletionIndex(_highlightedCompletionIndex, key, totalCount)
+                };
+                if (_highlightedCompletionIndex >= historyCount)
+                {
+                    SelectRegularCompletion(_highlightedCompletionIndex - historyCount);
+                }
+
+                ApplyCompletionState(_completionSession.State);
+            }
+
+            return false;
+        }
+
+        if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
+        {
             return false;
         }
 
@@ -315,6 +434,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnCommandTextChanged(string value)
     {
         OnPropertyChanged(nameof(IsCommandTextEmpty));
+        OnPropertyChanged(nameof(ShowCommandPlaceholder));
         UpdateCommandExpansionPreview(value);
         if (!_syncingInput)
         {
@@ -326,9 +446,18 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    partial void OnCompletionGhostTextChanged(string value)
+        => OnPropertyChanged(nameof(ShowCommandPlaceholder));
+
     private void ApplyCompletionState(CommandCompletionState state)
     {
         _isExtensionListVisible = false;
+        if (!string.Equals(_historyInputText, state.InputText, StringComparison.Ordinal))
+        {
+            _historyInputText = state.InputText;
+            _highlightedCompletionIndex = 0;
+        }
+
         if (!string.Equals(CommandText, state.InputText, StringComparison.Ordinal))
         {
             _syncingInput = true;
@@ -337,6 +466,26 @@ public partial class MainViewModel : ViewModelBase
         }
 
         UpdateCommandExpansionPreview(state.InputText);
+        var historySuggestions = GetHistorySuggestions(state.InputText);
+        var selectedHistoryIndex = _highlightedCompletionIndex < historySuggestions.Count
+            ? _highlightedCompletionIndex
+            : -1;
+        var selectedCommandText = selectedHistoryIndex >= 0
+            ? historySuggestions[selectedHistoryIndex].CommandText
+            : historySuggestions.Count > 0
+                ? GetRegularCompletionValue(state, _highlightedCompletionIndex - historySuggestions.Count)
+                : state.Items.FirstOrDefault(item => item.IsHighlighted)?.Value;
+        var tokens = _tokenizer.Tokenize(state.InputText);
+        var isCommandCompletion = tokens.Count == 0
+            || (tokens.Count == 1 && !_tokenizer.EndsWithWhitespace(state.InputText));
+        var inputIsExactCommand = tokens.Count == 1
+            && _catalog.TryGetCommand(tokens[0].Value, out _);
+        var previewCommandText = selectedHistoryIndex >= 0
+            ? historySuggestions[selectedHistoryIndex].CommandText
+            : isCommandCompletion && !inputIsExactCommand && selectedCommandText is not null
+                ? selectedCommandText
+                : state.InputText;
+        TargetPreview = GetCommandTargetPreview(previewCommandText);
         if (_directFilePathHandler.TryGetCompletionPath(state.InputText, out var directPath))
         {
             _activeArgumentPathContext = null;
@@ -360,32 +509,148 @@ public partial class MainViewModel : ViewModelBase
         _activeArgumentPathContext = null;
         _isDirectPathCompletionActive = false;
         _directPathSuggestions = Array.Empty<string>();
-        CompletionGhostText = state.InputText.Length == 0 ? string.Empty : state.GhostText;
-        UsageText = GetUsageText(CommandText);
-        var tokens = _tokenizer.Tokenize(state.InputText);
-        var isCommandCompletion = tokens.Count == 0
-            || (tokens.Count == 1 && !_tokenizer.EndsWithWhitespace(state.InputText));
-        CompletionItems = state.Items.Select(item =>
-        {
-            var displayText = state.IsChecklistActive
-                ? $"{(item.IsSelected ? "[x]" : "[ ]")} {item.Value}"
-                : item.DisplayText ?? item.Value;
-            if (!state.IsChecklistActive
-                && isCommandCompletion
-                && _catalog.TryGetCommand(item.Value, out var command))
+        CompletionGhostText = selectedHistoryIndex >= 0
+            ? historySuggestions[selectedHistoryIndex].CommandText[state.InputText.Length..]
+            : state.InputText.Length == 0 ? string.Empty : state.GhostText;
+        var usage = GetUsageText(previewCommandText);
+        UsageText = usage.Text;
+        UsageCommandText = usage.CommandText;
+        OnPropertyChanged(nameof(UsageCommandText));
+        var regularItems = state.Items
+            .Select((item, index) =>
             {
-                var sourceLabel = _commandSources.TryGetValue(command.QualifiedName, out var sourceId)
-                    ? $" [{sourceId}]"
-                    : string.Empty;
-                displayText = $"{item.Value} [{command.Kind}]{sourceLabel}";
-            }
+                var displayText = state.IsChecklistActive
+                    ? $"{(item.IsSelected ? "[x]" : "[ ]")} {item.Value}"
+                    : item.DisplayText ?? item.Value;
+                var cyanText = string.Empty;
+                var kindText = string.Empty;
+                if (!state.IsChecklistActive
+                    && isCommandCompletion
+                    && _catalog.TryGetCommand(item.Value, out var command))
+                {
+                    var sourceLabel = _commandSources.TryGetValue(command.QualifiedName, out var sourceId)
+                        ? $" [{sourceId}]"
+                        : string.Empty;
+                    displayText = item.Value;
+                    cyanText = sourceLabel;
+                    kindText = $" · {command.Kind.ToUpperInvariant()}";
+                }
 
-            return new CompletionOptionViewModel(displayText, item.IsHighlighted, item.IsSelected);
-        }).ToArray();
+                var isHighlighted = historySuggestions.Count == 0
+                    ? item.IsHighlighted
+                    : _highlightedCompletionIndex >= historySuggestions.Count
+                        && _highlightedCompletionIndex - historySuggestions.Count == index;
+                return new CompletionOptionViewModel(displayText, isHighlighted, item.IsSelected, cyanText, kindText);
+            });
+        var historyItems = historySuggestions.Select((entry, index) =>
+        {
+            var age = ProfileCommandLogger.FormatHistoryAge(entry.RunTime, DateTimeOffset.Now);
+            var ageLabel = age.Length == 0 ? string.Empty : $" [{age}]";
+            return new CompletionOptionViewModel(
+                $"[history] {entry.CommandText}",
+                index == selectedHistoryIndex,
+                false,
+                ageLabel);
+        });
+        CompletionItems = historyItems.Concat(regularItems).ToArray();
         OnPropertyChanged(nameof(IsChecklistActive));
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
         OnPropertyChanged(nameof(CanExpandTypedShortcut));
+    }
+
+    private IReadOnlyList<CommandHistoryEntry> GetHistorySuggestions(string inputText)
+        => ProfileCommandLogger.FilterHistoryEntries(_historyCommands, inputText);
+
+    private static string? GetRegularCompletionValue(CommandCompletionState state, int index)
+        => index >= 0 && index < state.Items.Count ? state.Items[index].Value : null;
+
+    private static int MoveCompletionIndex(int index, CommandInputKey key, int count)
+    {
+        var offset = key switch
+        {
+            CommandInputKey.Up => -1,
+            CommandInputKey.Down => 1,
+            CommandInputKey.PageUp => -5,
+            CommandInputKey.PageDown => 5,
+            _ => 0
+        };
+        return (index + offset % count + count) % count;
+    }
+
+    private string GetCommandTargetPreview(string commandText)
+    {
+        var tokens = _tokenizer.Tokenize(commandText);
+        if (tokens.Count == 0 || !_catalog.TryGetCommand(tokens[0].Value, out var command))
+        {
+            return string.Empty;
+        }
+
+        CommandActionDefinition? action = null;
+        if (tokens.Count > 1 && _catalog.TryGetAction(command, tokens[1].Value, out var explicitAction))
+        {
+            action = explicitAction;
+        }
+
+        if (action is null && !_catalog.TryGetDefaultAction(command, out action!))
+        {
+            action = command.Actions.FirstOrDefault();
+        }
+
+        if (action is null)
+        {
+            return string.Empty;
+        }
+
+        var parseResult = _parser.Parse(commandText);
+        if (parseResult.Status == CommandParseStatus.Valid
+            && parseResult.ParsedCommand is { Definition.Kind: var kind } parsedCommand
+            && string.Equals(kind, "url", StringComparison.OrdinalIgnoreCase))
+        {
+            var targetResult = _urlCommandModel.BuildPreview(parsedCommand);
+            if (targetResult.Succeeded && targetResult.Targets.Count > 0)
+            {
+                var firstTarget = targetResult.Targets[0].Value;
+                return targetResult.Targets.Count == 1
+                    ? firstTarget
+                    : $"{firstTarget} (+{targetResult.Targets.Count - 1} more)";
+            }
+        }
+
+        var target = Environment.ExpandEnvironmentVariables(_variableExpander.Expand(action.TargetTemplate).ExpandedText);
+        if (parseResult.Status == CommandParseStatus.Valid && parseResult.ParsedCommand is { } parsed)
+        {
+            foreach (var argument in parsed.Arguments)
+            {
+                target = target.Replace(
+                    $"<{argument.Key}>",
+                    argument.Value,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return target;
+    }
+
+    private void SelectRegularCompletion(int targetIndex)
+    {
+        var items = _completionSession.State.Items;
+        if (targetIndex < 0 || targetIndex >= items.Count)
+        {
+            return;
+        }
+
+        var currentIndex = items.ToList().FindIndex(item => item.IsHighlighted);
+        if (currentIndex < 0)
+        {
+            currentIndex = 0;
+        }
+
+        var steps = (targetIndex - currentIndex + items.Count) % items.Count;
+        for (var index = 0; index < steps; index++)
+        {
+            _completionSession.HandleKey(CommandInputKey.Down);
+        }
     }
 
     private void ApplyDirectPathCompletion(
@@ -393,6 +658,7 @@ public partial class MainViewModel : ViewModelBase
         bool replacesWholeInput,
         bool resetHighlight)
     {
+        TargetPreview = string.Empty;
         _isDirectPathCompletionActive = true;
         _directPathReplacesWholeInput = replacesWholeInput;
         _directPathSuggestions = _directFilePathHandler.GetSuggestions(path);
@@ -403,6 +669,8 @@ public partial class MainViewModel : ViewModelBase
 
         CompletionGhostText = string.Empty;
         UsageText = "Files and folders";
+        UsageCommandText = string.Empty;
+        OnPropertyChanged(nameof(UsageCommandText));
         CompletionItems = _directPathSuggestions
             .Select((path, index) => new CompletionOptionViewModel(
                 path,
@@ -451,9 +719,13 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var offset = key == CommandInputKey.Up ? -1 : 1;
-        _directPathHighlightedIndex = (_directPathHighlightedIndex + offset + _directPathSuggestions.Count)
-            % _directPathSuggestions.Count;
+        var suggestionCount = _directPathSuggestions.Count;
+        _directPathHighlightedIndex = key switch
+        {
+            CommandInputKey.First => 0,
+            CommandInputKey.Last => suggestionCount - 1,
+            _ => MoveCompletionIndex(_directPathHighlightedIndex, key, suggestionCount)
+        };
         ApplyDirectPathCompletion(
             _directPathSuggestions.Count > 0 ? GetCurrentDirectPathText() : string.Empty,
             _directPathReplacesWholeInput,
@@ -477,9 +749,12 @@ public partial class MainViewModel : ViewModelBase
 
     private void ShowExtensionList()
     {
+        TargetPreview = string.Empty;
         var displayLines = ExtensionCommandModel.FormatList(_extensions.Extensions, _commandPacks)
             .Split(Environment.NewLine, StringSplitOptions.None);
         UsageText = "Installed extensions and command packs";
+        UsageCommandText = string.Empty;
+        OnPropertyChanged(nameof(UsageCommandText));
         CompletionItems = displayLines
             .Select(line => new CompletionOptionViewModel(line, false, false))
             .ToArray();
@@ -514,25 +789,34 @@ public partial class MainViewModel : ViewModelBase
             : string.Empty;
     }
 
-public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighlighted, bool IsSelected);
+public sealed record CompletionOptionViewModel(
+    string DisplayText,
+    bool IsHighlighted,
+    bool IsSelected,
+    string CyanText = "",
+    string KindText = "");
 
-    private string GetUsageText(string inputText)
+    private (string Text, string CommandText) GetUsageText(string inputText)
     {
         var tokens = _tokenizer.Tokenize(inputText);
         if (tokens.Count == 0 || !_catalog.TryGetCommand(tokens[0].Value, out var command))
         {
-            return string.Empty;
+            return (string.Empty, string.Empty);
         }
 
-        var action = command.Actions.FirstOrDefault(candidate =>
-            string.Equals(candidate.Name, "default", StringComparison.OrdinalIgnoreCase));
+        var action = command.Actions.FirstOrDefault();
         if (tokens.Count > 1 && _catalog.TryGetAction(command, tokens[1].Value, out var explicitAction)
             && !string.Equals(explicitAction.Name, "default", StringComparison.OrdinalIgnoreCase))
         {
             action = explicitAction;
         }
 
-        return action is null ? string.Empty : $"Usage: {action.Usage}";
+        if (action is null)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        return ($"Usage: {action.Usage}", action.Usage);
     }
 
     private async Task<bool> ExecuteCommandAsync(bool newWindow = false)
@@ -548,7 +832,15 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
         finally
         {
             _commandLogger.RecordCommand(submittedText, succeeded, _catalog, runTime);
+            _historyCommands = _commandLogger.ReadHistoryEntries();
+            ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
         }
+    }
+
+    private (bool Found, string Value) TryGetSecret(string name)
+    {
+        var found = _secretStore.TryGet(name, out var value);
+        return (found, value);
     }
 
     private async Task<bool> ExecuteCommandCoreAsync(bool newWindow = false)
@@ -671,6 +963,10 @@ public sealed record CompletionOptionViewModel(string DisplayText, bool IsHighli
                 UrlCommandModel urlCommandModel => urlCommandModel.Execute(parsedCommand, newWindow || parsedWithNewWindowOption),
                 _ => commandExecutor.Execute(parsedCommand)
             };
+        }
+        else if (_asyncCommandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var asyncCommandExecutor))
+        {
+            executionResult = await asyncCommandExecutor.ExecuteAsync(parsedCommand);
         }
         else
         {

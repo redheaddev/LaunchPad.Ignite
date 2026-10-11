@@ -6,6 +6,7 @@ public sealed record CommandSchema(
 {
     public IReadOnlyList<CommandVariableDefinition> Variables { get; init; } = [];
     public IReadOnlyList<CommandFunctionDefinition> Functions { get; init; } = [];
+    public IReadOnlyList<CommandSettingDefinition> Settings { get; init; } = [];
 }
 
 public sealed record CommandVariableDefinition(
@@ -37,7 +38,21 @@ public sealed record CommandFunctionParameterDefinition(
 public sealed record CommandListDefinition(
     string Type,
     string Name,
-    IReadOnlyList<string> Values);
+    IReadOnlyList<string> Values,
+    string? Default = null);
+
+public sealed record CommandSettingDefinition(
+    string Name,
+    string Label,
+    string Description,
+    string DefaultValue,
+    string Type = "text",
+    bool SecretReference = false,
+    string? Namespace = null,
+    IReadOnlyList<string>? Options = null)
+{
+    public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
+}
 
 public sealed record CommandDefinition(
     string Name,

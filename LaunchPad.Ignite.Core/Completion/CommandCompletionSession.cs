@@ -5,6 +5,7 @@ namespace LaunchPad.Ignite.Core.Completion;
 
 public sealed class CommandCompletionSession
 {
+    private const int PageSize = 5;
     private readonly CommandCatalog _catalog;
     private readonly IArgumentValueProvider _valueProvider;
     private readonly CommandCompletionResolver _resolver;
@@ -65,6 +66,18 @@ public sealed class CommandCompletionSession
                 break;
             case CommandInputKey.Down:
                 MoveHighlight(1);
+                break;
+            case CommandInputKey.PageUp:
+                MoveHighlight(-PageSize);
+                break;
+            case CommandInputKey.PageDown:
+                MoveHighlight(PageSize);
+                break;
+            case CommandInputKey.First:
+                MoveHighlightToBoundary(last: false);
+                break;
+            case CommandInputKey.Last:
+                MoveHighlightToBoundary(last: true);
                 break;
             case CommandInputKey.SelectAll:
                 SelectAll();
@@ -198,6 +211,13 @@ public sealed class CommandCompletionSession
             _highlightedIndex = (_highlightedIndex + offset + items.Count) % items.Count;
         }
 
+        State = BuildState();
+    }
+
+    private void MoveHighlightToBoundary(bool last)
+    {
+        var items = GetVisibleItems();
+        _highlightedIndex = items.Count == 0 ? -1 : last ? items.Count - 1 : 0;
         State = BuildState();
     }
 

@@ -17,8 +17,59 @@ public sealed record LoadedExtensions(
     IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
     IReadOnlyList<LoadedExtensionInfo> Extensions)
 {
+    public IReadOnlyDictionary<string, IAsyncCommandExecutor> AsyncExecutors { get; init; }
+        = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyDictionary<string, string> CommandSources { get; init; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public void ConfigureCommandExecutors(
+        IEnumerable<CommandVariableDefinition> variables,
+        IReadOnlyDictionary<string, string> settingValues,
+        Func<string, (bool Found, string Value)> tryGetSecret,
+        Action<string> openUrl)
+    {
+        var settingsByNamespace = variables
+            .GroupBy(variable => variable.Namespace ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyDictionary<string, string>)group.ToDictionary(
+                    variable => variable.Name,
+                    variable => variable.Value,
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+        var profileValues = settingValues;
+        var definitionsByNamespace = Schema.Settings
+            .GroupBy(setting => setting.Namespace ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var executor in Executors.Values.Cast<object>().Concat(AsyncExecutors.Values))
+        {
+            if (executor is not IExtensionCommandContextAware contextAware)
+            {
+                continue;
+            }
+
+            var extensionNamespace = contextAware.Namespace;
+            var settings = settingsByNamespace.TryGetValue(extensionNamespace, out var namespaceSettings)
+                ? namespaceSettings
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (definitionsByNamespace.TryGetValue(extensionNamespace, out var settingDefinitions))
+            {
+                var configuredSettings = settings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                foreach (var setting in settingDefinitions)
+                {
+                    configuredSettings[setting.Name] = profileValues.GetValueOrDefault(setting.QualifiedName, setting.DefaultValue);
+                }
+
+                settings = configuredSettings;
+            }
+            contextAware.Configure(settings, tryGetSecret, openUrl);
+        }
+    }
 }
 
 public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled);
@@ -107,8 +158,12 @@ public sealed class ExtensionLoader
         var commands = new List<CommandDefinition>();
         var variables = new List<CommandVariableDefinition>();
         var functions = new List<CommandFunctionDefinition>();
+        var settings = manifests.Values
+            .SelectMany(entry => entry.Manifest.Schema.Settings.Select(setting => setting with { Namespace = entry.Manifest.Namespace }))
+            .ToList();
         var commandSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
+        var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
@@ -125,7 +180,7 @@ public sealed class ExtensionLoader
             var extensionFunctions = manifest.Schema.Functions
                 .Select(function => LoadFunction(function, manifest, extensionDirectory))
                 .ToArray();
-            var registeredFunctionNames = LoadExecutors(manifest, extensionDirectory, executors, functionExecutors);
+            var registeredFunctionNames = LoadExecutors(manifest, extensionDirectory, executors, asyncExecutors, functionExecutors);
             var extensionFunctionNames = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var function in extensionFunctions)
             {
@@ -158,10 +213,12 @@ public sealed class ExtensionLoader
         return new LoadedExtensions(new CommandSchema(lists, commands)
         {
             Variables = variables,
-            Functions = functions
+            Functions = functions,
+            Settings = settings
         }, executors, functionExecutors, extensionInfo)
         {
-            CommandSources = commandSources
+            CommandSources = commandSources,
+            AsyncExecutors = asyncExecutors
         };
     }
 
@@ -174,6 +231,22 @@ public sealed class ExtensionLoader
                 "LaunchPad.Ignite",
                 "extensions")
         ];
+
+    private static IEnumerable<object> ExecutorsForNamespace(
+        string kind,
+        IReadOnlyDictionary<string, ICommandExecutor> executors,
+        IReadOnlyDictionary<string, IAsyncCommandExecutor> asyncExecutors)
+    {
+        if (executors.TryGetValue(kind, out var executor))
+        {
+            yield return executor;
+        }
+
+        if (asyncExecutors.TryGetValue(kind, out var asyncExecutor))
+        {
+            yield return asyncExecutor;
+        }
+    }
 
     private static CommandFunctionDefinition LoadFunction(
         CommandFunctionDefinition function,
@@ -255,6 +328,7 @@ public sealed class ExtensionLoader
         ExtensionManifest manifest,
         string extensionDirectory,
         IDictionary<string, ICommandExecutor> executors,
+        IDictionary<string, IAsyncCommandExecutor> asyncExecutors,
         IDictionary<string, ICommandFunctionExecutor> functionExecutors)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
@@ -281,6 +355,7 @@ public sealed class ExtensionLoader
             .Where(type => !type.IsAbstract
                 && !type.IsInterface
                 && (typeof(ICommandExecutor).IsAssignableFrom(type)
+                    || typeof(IAsyncCommandExecutor).IsAssignableFrom(type)
                     || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)))
             .ToArray();
         if (executorTypes.Length == 0)
@@ -296,6 +371,14 @@ public sealed class ExtensionLoader
             if (instance is ICommandExecutor commandExecutor
                 && (string.IsNullOrWhiteSpace(commandExecutor.Kind)
                     || !executors.TryAdd(commandExecutor.Kind, commandExecutor)))
+            {
+                throw new InvalidDataException($"Extension '{manifest.Id}' has an invalid or duplicate command executor '{executorType.FullName}'.");
+            }
+
+            if (instance is IAsyncCommandExecutor asyncCommandExecutor
+                && (string.IsNullOrWhiteSpace(asyncCommandExecutor.Kind)
+                    || executors.ContainsKey(asyncCommandExecutor.Kind)
+                    || !asyncExecutors.TryAdd(asyncCommandExecutor.Kind, asyncCommandExecutor)))
             {
                 throw new InvalidDataException($"Extension '{manifest.Id}' has an invalid or duplicate command executor '{executorType.FullName}'.");
             }

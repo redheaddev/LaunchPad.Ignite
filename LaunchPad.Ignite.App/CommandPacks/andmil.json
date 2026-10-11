@@ -793,28 +793,6 @@
           "arguments": []
         }
       ]
-    },
-    {
-      "name": "workitem",
-      "namespace": "",
-      "kind": "url",
-      "description": "Open an Azure DevOps work item by project and ID",
-      "actions": [
-        {
-          "name": "default",
-          "description": "",
-          "usage": "workitem <project> <id>",
-          "targetTemplate": "https://dev.azure.com/saifcorporation/<project>/_workitems/edit/<id>",
-          "arguments": [
-            {
-              "name": "project"
-            },
-            {
-              "name": "id"
-            }
-          ]
-        }
-      ]
     }
     ]
   }

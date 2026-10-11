@@ -42,6 +42,35 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void PageAndBoundaryKeysMoveTheHighlightedCompletion()
+    {
+        var schema = new CommandSchema(
+            [],
+            Enumerable.Range(0, 12)
+                .Select(index => new CommandDefinition(
+                    $"command{index:D2}",
+                    "url",
+                    string.Empty,
+                    [new CommandActionDefinition("default", string.Empty, string.Empty, "https://example.test", [])]))
+                .ToArray());
+        var session = new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new CommandSchemaValueProvider(schema));
+
+        var state = session.HandleKey(CommandInputKey.PageDown);
+        Assert.Equal("command05", state.Items.Single(item => item.IsHighlighted).Value);
+
+        state = session.HandleKey(CommandInputKey.PageUp);
+        Assert.Equal("command00", state.Items.Single(item => item.IsHighlighted).Value);
+
+        state = session.HandleKey(CommandInputKey.Last);
+        Assert.Equal("command11", state.Items.Single(item => item.IsHighlighted).Value);
+
+        state = session.HandleKey(CommandInputKey.First);
+        Assert.Equal("command00", state.Items.Single(item => item.IsHighlighted).Value);
+    }
+
+    [Fact]
     public void NamespacedCommandSuggestionsMatchNamespaceOrCommandName()
     {
         var schema = new CommandSchema(

@@ -312,6 +312,25 @@ public class CommandModelTests
         Assert.Equal("https://user.test", Assert.Single(schema.Variables).Value);
     }
 
+    [Fact]
+    public void LoaderPreservesExtensionVariablesWhenUserVariableIsAdded()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var appSchema = new CommandSchema([], [])
+        {
+            Variables = [new CommandVariableDefinition("orgUrl", "https://dev.azure.com/example", "ado")]
+        };
+        File.WriteAllText(userPath + ".legacy-migrated", string.Empty);
+        var loader = new CommandSchemaLoader(appSchema, userPath);
+
+        var updatedSchema = loader.SetVariable("team", "alpha");
+
+        Assert.Contains(updatedSchema.Variables, variable =>
+            variable.QualifiedName == "ado:orgUrl" && variable.Value == "https://dev.azure.com/example");
+        Assert.Contains(updatedSchema.Variables, variable => variable.QualifiedName == "team" && variable.Value == "alpha");
+    }
+
     private static CommandLineParser CreateVariableParser()
     {
         var schema = new CommandSchema([], [VariableCommandModel.Definition]);

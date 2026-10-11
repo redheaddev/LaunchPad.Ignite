@@ -8,6 +8,10 @@ public enum CommandInputKey
     Escape,
     Up,
     Down,
+    PageUp,
+    PageDown,
+    First,
+    Last,
     SelectAll,
     DeselectAll,
     Clear
