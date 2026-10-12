@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
@@ -49,6 +50,46 @@ public class SecretCommandModelTests
         Assert.True(result.Succeeded);
         Assert.Equal(secretValue, dialog.DisplayedSecret);
         Assert.DoesNotContain(secretValue, result.Message);
+    }
+
+    [Fact]
+    public void ThemeCommandPersistsAndAppliesSelectedTheme()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var theme = ColorThemeService.ToProfileTheme(ColorTheme.Default with { Id = "custom-night", Name = "Night" });
+        store.SetTheme(theme);
+        var applied = (ColorTheme?)null;
+        var schema = new CommandSchema([], [ThemeCommandDefinition.Definition]);
+        var parsed = new CommandLineParser(
+            new CommandCatalog(schema, ["theme"]),
+            new ThemeNamesArgumentValueProvider(store)).Parse("theme Night");
+
+        Assert.Equal(CommandParseStatus.Valid, parsed.Status);
+        var result = new ThemeCommandModel(store, selected => applied = selected).Execute(parsed.ParsedCommand!);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("custom-night", store.GetValue("app:colorTheme", "default"));
+        Assert.Equal("custom-night", applied!.Id);
+    }
+
+    [Fact]
+    public void AsteriskCommandListsSecretNamesWithoutReadingOrReturningValues()
+    {
+        var store = new FakeSecretStore(("zebra", "hidden-zebra"), ("alpha", "hidden-alpha"));
+        var schema = new CommandSchema([], [SecretListCommandDefinition.Definition]);
+        var catalog = new CommandCatalog(schema, ["secretList"]);
+        var parseResult = new CommandLineParser(catalog, new DictionaryArgumentValueProvider(
+            new Dictionary<string, IReadOnlyList<string>>())).Parse("*");
+        var model = new SecretListCommandModel(store);
+
+        Assert.Equal(CommandParseStatus.Valid, parseResult.Status);
+        var result = model.Execute(parseResult.ParsedCommand!);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal($"alpha{Environment.NewLine}zebra", result.Message);
+        Assert.DoesNotContain("hidden-alpha", result.Message);
+        Assert.DoesNotContain("hidden-zebra", result.Message);
     }
 
     [Fact]

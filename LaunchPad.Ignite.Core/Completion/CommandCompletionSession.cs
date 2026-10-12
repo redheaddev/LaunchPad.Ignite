@@ -46,9 +46,22 @@ public sealed class CommandCompletionSession
         }
 
         _inputText = inputText;
+        if (ShouldOpenListImmediately(_inputText))
+        {
+            _inputText += ' ';
+        }
+
         _preferredHighlightValue = null;
         Recalculate(resetSelection: true);
         return State;
+    }
+
+    private bool ShouldOpenListImmediately(string inputText)
+    {
+        return string.Equals(inputText, "*", StringComparison.Ordinal)
+            && _catalog.TryGetCommand("*", out var command)
+            && _catalog.TryGetDefaultAction(command, out var action)
+            && action.Arguments.Any(argument => argument.Ref?.StartsWith("list:", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     public CommandCompletionState HandleKey(CommandInputKey key)
@@ -144,16 +157,21 @@ public sealed class CommandCompletionSession
                     .FirstOrDefault(value => !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase));
             }
 
-            ReplaceCurrentArgument(string.Join(',', _selectedValues));
+            ReplaceCurrentArgument(string.Join(',', _selectedValues.Select(FormatListValue)));
             Recalculate(resetSelection: false);
             return;
         }
 
         var appendSpace = ShouldAppendSpace(selectedItem);
-        _inputText = _inputText[.._resolution.TokenStart] + selectedItem + (appendSpace ? " " : string.Empty);
+        _inputText = _inputText[.._resolution.TokenStart] + FormatListValue(selectedItem) + (appendSpace ? " " : string.Empty);
         _preferredHighlightValue = null;
         Recalculate(resetSelection: true);
     }
+
+    private static string FormatListValue(string value)
+        => value.Any(char.IsWhiteSpace)
+            ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
+            : value;
 
     private bool ShouldAppendSpace(string candidate)
     {

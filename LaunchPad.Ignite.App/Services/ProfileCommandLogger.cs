@@ -62,6 +62,60 @@ public sealed class ProfileCommandLogger
             .Take(1)
             .ToArray();
 
+    public bool RemoveHistoryEntry(string commandText)
+    {
+        try
+        {
+            var historyPath = Path.Combine(_profileDirectory, "history.txt");
+            if (!File.Exists(historyPath))
+            {
+                return false;
+            }
+
+            var lines = File.ReadAllLines(historyPath);
+            var updatedLines = lines.Where(line =>
+                !string.Equals(ParseHistoryLine(line).CommandText, commandText, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (updatedLines.Length == lines.Length)
+            {
+                return false;
+            }
+
+            File.WriteAllLines(historyPath, updatedLines);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    public bool ClearHistory()
+    {
+        try
+        {
+            var historyPath = Path.Combine(_profileDirectory, "history.txt");
+            if (!File.Exists(historyPath))
+            {
+                return true;
+            }
+
+            File.WriteAllText(historyPath, string.Empty);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     public static string FormatHistoryAge(DateTimeOffset? runTime, DateTimeOffset now)
     {
         if (runTime is null)

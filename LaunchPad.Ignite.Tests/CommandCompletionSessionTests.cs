@@ -1,6 +1,7 @@
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Schema;
+using LaunchPad.Ignite.App.Commands;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -289,6 +290,82 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void AcceptingSingleListItemWithSpacesWrapsItInQuotes()
+    {
+        var session = CreateListSession(
+            ListSelectionMode.Single,
+            ["team project", "other"]);
+        session.UpdateInputText("list ");
+
+        var state = session.HandleKey(CommandInputKey.Tab);
+
+        Assert.Equal("list \"team project\"", state.InputText);
+        Assert.False(state.IsChecklistActive);
+    }
+
+    [Fact]
+    public void AcceptingMultipleListItemsWithSpacesQuotesEachCsvValue()
+    {
+        var session = CreateListSession(
+            ListSelectionMode.Multiple,
+            ["team project", "other value"]);
+        session.UpdateInputText("list ");
+
+        var state = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("list \"team project\"", state.InputText);
+        state = session.HandleKey(CommandInputKey.Tab);
+
+        Assert.Equal("list \"team project\",\"other value\"", state.InputText);
+    }
+
+    [Fact]
+    public void TypingAsteriskImmediatelyShowsSecretChecklist()
+    {
+        var session = new CommandCompletionSession(
+            new CommandCatalog(new CommandSchema([], [SecretListCommandDefinition.Definition]), ["secretList"]),
+            TestCommandSchemas.CreateSecretListProvider());
+
+        var state = session.UpdateInputText("*");
+
+        Assert.True(state.IsChecklistActive);
+        Assert.Equal(["token1", "token2", "token3"], state.Items.Select(item => item.Value));
+
+        state = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("* token1", state.InputText);
+        Assert.True(state.IsChecklistActive);
+    }
+
+    [Fact]
+    public void ThemeCommandProvidesSingleChoiceListOfSavedThemeNames()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new LaunchPad.Ignite.App.Services.ProfileSettingsStore(
+            System.IO.Path.Combine(directory.Path, "settings.json"));
+        store.SetTheme(LaunchPad.Ignite.App.Services.ColorThemeService.ToProfileTheme(
+            LaunchPad.Ignite.App.Services.ColorTheme.Default with { Id = "custom-night", Name = "Night" }));
+        var session = new CommandCompletionSession(
+            new CommandCatalog(new CommandSchema([], [ThemeCommandDefinition.Definition]), ["theme"]),
+            new LaunchPad.Ignite.App.Services.ThemeNamesArgumentValueProvider(store));
+
+        var state = session.UpdateInputText("theme ");
+
+        Assert.False(state.IsChecklistActive);
+        Assert.Equal("Default", state.GhostText);
+        state = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("theme Default", state.InputText);
+        Assert.False(state.IsChecklistActive);
+    }
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+
+        public TemporaryDirectory() => Directory.CreateDirectory(Path);
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
+
+    [Fact]
     public void SelectAllIncludesValuesHiddenByCurrentFilter()
     {
         var session = CreateSecretListSession();
@@ -324,4 +401,18 @@ public class CommandCompletionSessionTests
         => new(
             new CommandCatalog(TestCommandSchemas.SecretList()),
             TestCommandSchemas.CreateSecretListProvider());
+
+    private static CommandCompletionSession CreateListSession(ListSelectionMode mode, IReadOnlyList<string> values)
+    {
+        var schema = new CommandSchema(
+            [],
+            [new CommandDefinition("list", "url", "", [new CommandActionDefinition(
+                "default", "", "list <list:values>", "https://example.test", [new CommandArgumentDefinition("values", Ref: "list:values", ListMode: mode)])])]);
+        return new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new DictionaryArgumentValueProvider(new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["list:values"] = values
+            }));
+    }
 }

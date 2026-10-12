@@ -14,6 +14,7 @@ using LaunchPad.Ignite.Core.Schema;
 using LaunchPad.Ignite.App.Views;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -79,6 +80,7 @@ public partial class MainViewModel : ViewModelBase
             new SystemSecretTerminalLauncher(_processStarter));
         _directFilePathHandler = new DirectFilePathHandler(_processStarter);
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
+        new ProfileAdoExtensionInstaller().Install();
         InitializeCommandRuntime();
         _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
@@ -101,11 +103,16 @@ public partial class MainViewModel : ViewModelBase
         var schemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
         var schema = commandPacks.FilterDisabledCommands(schemaLoader.Load());
         var settings = _applicationSettings.Concat(schema.Settings).ToArray();
-        var runtimeBaseVariables = schema.Variables.ToArray();
+        var profileBackupService = new ProfileBackupService();
+        var profileVariable = new CommandVariableDefinition("profile", profileBackupService.ProfileDirectory);
+        var runtimeBaseVariables = schema.Variables
+            .Where(variable => !string.Equals(variable.QualifiedName, profileVariable.QualifiedName, StringComparison.OrdinalIgnoreCase))
+            .Append(profileVariable)
+            .ToArray();
         schema = schema with
         {
             Settings = settings,
-            Variables = GetEffectiveVariables(schema.Variables, settings)
+            Variables = GetEffectiveVariables(runtimeBaseVariables, settings)
         };
         var urlTargetOpener = new SystemUrlTargetOpener();
         extensions.ConfigureCommandExecutors(
@@ -124,10 +131,14 @@ public partial class MainViewModel : ViewModelBase
         schema = schema with
         {
             Commands = commands.Append(SecretCommandDefinition.Definition)
+                .Append(SecretListCommandDefinition.Definition)
+                .Append(ThemeCommandDefinition.Definition)
+                .Append(ProfileBackupCommandDefinitions.Backup)
+                .Append(ProfileBackupCommandDefinitions.Restore)
                 .Append(ExitCommandModel.Definition)
                 .ToArray()
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "exit" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore" };
         builtInKinds = [.. builtInKinds, "extension"];
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
@@ -137,6 +148,8 @@ public partial class MainViewModel : ViewModelBase
             schema,
             new CompositeArgumentValueProvider(
                 new SecretNamesArgumentValueProvider(_secretStore),
+                new ThemeNamesArgumentValueProvider(_profileSettingsStore),
+                new ProfileBackupFilesArgumentValueProvider(profileBackupService),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
                 new InstalledComponentIdsArgumentValueProvider(componentIds, _extensionStateStore)));
         var functionExpander = new CommandTextFunctionExpander(
@@ -175,10 +188,16 @@ public partial class MainViewModel : ViewModelBase
         {
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
+            ["secretList"] = new SecretListCommandModel(_secretStore),
+            ["theme"] = new ThemeCommandModel(_profileSettingsStore, ColorThemeService.Apply),
+            ["profileBackup"] = new ProfileBackupCommandModel(profileBackupService),
             ["exit"] = new ExitCommandModel(ShutdownApplication),
             ["variable"] = variableCommandModel
         };
-        var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
+        var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore)
+        };
         commandExecutors["extension"] = new ExtensionCommandModel(
             _extensionStateStore,
             extensionIds,
@@ -252,6 +271,12 @@ public partial class MainViewModel : ViewModelBase
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow
                 ? mainWindow.ConfirmCommandPackReplacementAsync(id)
+                : Task.FromResult(false);
+
+    private static Task<bool> ConfirmProfileRestore(string fileName)
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow
+                ? mainWindow.ConfirmProfileRestoreAsync(fileName)
                 : Task.FromResult(false);
 
     private static Task<bool> ConfirmVariableOverwrite(string name)
@@ -353,6 +378,38 @@ public partial class MainViewModel : ViewModelBase
 
     public bool TryGetKeyboardShortcutExpansion(KeyboardShortcutChord chord, out string expansion)
         => _shortcutResolver.TryExpandChord(chord, out expansion!);
+
+    public bool DeleteSelectedHistoryEntry()
+    {
+        var historySuggestions = GetHistorySuggestions(CommandText);
+        if (_highlightedCompletionIndex < 0 || _highlightedCompletionIndex >= historySuggestions.Count)
+        {
+            return false;
+        }
+
+        if (!_commandLogger.RemoveHistoryEntry(historySuggestions[_highlightedCompletionIndex].CommandText))
+        {
+            return false;
+        }
+
+        _historyCommands = _commandLogger.ReadHistoryEntries();
+        _highlightedCompletionIndex = 0;
+        ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+        return true;
+    }
+
+    public bool ClearHistory()
+    {
+        if (!_commandLogger.ClearHistory())
+        {
+            return false;
+        }
+
+        _historyCommands = Array.Empty<CommandHistoryEntry>();
+        _highlightedCompletionIndex = 0;
+        ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+        return true;
+    }
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
@@ -860,6 +917,26 @@ public sealed record CompletionOptionViewModel(
         {
             SetStatusMessage("A value expression is required.");
             return false;
+        }
+
+        var isMathCommand = MathExpressionParser.TryParse(CommandText, out var mathExpression);
+        if (isMathCommand)
+        {
+            if (string.IsNullOrWhiteSpace(mathExpression))
+            {
+                SetStatusMessage("A math expression is required.");
+                return false;
+            }
+
+            if (!MathExpressionParser.TryEvaluate(mathExpression, out var value))
+            {
+                SetStatusMessage("Invalid math expression.");
+                return false;
+            }
+
+            SetStatusMessage($"={value.ToString("G", CultureInfo.InvariantCulture)}", isValueOutput: true);
+            CommandText = string.Empty;
+            return true;
         }
 
         var expansion = _variableExpander.Expand(isPrintCommand ? printExpression : CommandText);

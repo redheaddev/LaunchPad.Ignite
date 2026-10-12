@@ -301,6 +301,98 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task<bool> ConfirmProfileRestoreAsync(string fileName)
+    {
+        var dialog = new Window
+        {
+            Title = "Restore profile?",
+            Width = 460,
+            Height = 190,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"Restore '{fileName}'? Current profile files will first be saved to a backup, then overwritten.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Back up and restore", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    private async Task<bool> ConfirmClearHistoryAsync()
+    {
+        var dialog = new Window
+        {
+            Title = "Clear command history?",
+            Width = 420,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Delete all command history? This cannot be undone.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Delete all", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     internal async Task<string?> PickCommandPackFileAsync()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -597,6 +689,24 @@ public partial class MainWindow : Window
         }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
+            if (e.Key == Key.Delete)
+            {
+                if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                {
+                    if (await ConfirmClearHistoryAsync())
+                    {
+                        viewModel.ClearHistory();
+                    }
+                }
+                else
+                {
+                    viewModel.DeleteSelectedHistoryEntry();
+                }
+
+                e.Handled = true;
+                return;
+            }
+
             inputKey = e.Key switch
             {
                 Key.A when viewModel.IsChecklistActive => CommandInputKey.SelectAll,

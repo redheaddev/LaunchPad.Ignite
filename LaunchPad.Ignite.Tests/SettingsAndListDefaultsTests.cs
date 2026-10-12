@@ -62,6 +62,28 @@ public sealed class SettingsAndListDefaultsTests
     }
 
     [Fact]
+    public void ThemeNamesArgumentValueProvider_ListsSavedThemesByName()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        store.SetTheme(ColorThemeService.ToProfileTheme(ColorTheme.Default with
+        {
+            Id = "custom-zeta",
+            Name = "Zeta"
+        }));
+        store.SetTheme(ColorThemeService.ToProfileTheme(ColorTheme.Default with
+        {
+            Id = "custom-alpha",
+            Name = "Alpha"
+        }));
+
+        var provider = new ThemeNamesArgumentValueProvider(store);
+
+        Assert.Equal(["Default", "Zeta", "Alpha"], provider.GetValues("list:themes"));
+        Assert.Empty(provider.GetValues("list:secrets"));
+    }
+
+    [Fact]
     public void ThemeReferenceUrl_CanBeAddedToExistingThemeAndCleared()
     {
         using var directory = new TemporaryDirectory();

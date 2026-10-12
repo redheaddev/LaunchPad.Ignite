@@ -78,6 +78,47 @@ public class ProfileCommandLoggerTests
     }
 
     [Fact]
+    public void RemovesAllMatchingHistoryEntriesWithoutChangingOtherEntries()
+    {
+        using var directory = new TemporaryDirectory();
+        var historyPath = Path.Combine(directory.Path, "history.txt");
+        File.WriteAllLines(historyPath,
+        [
+            "2025-01-01T00:00:00.0000000+00:00 alpha old",
+            "2025-01-02T00:00:00.0000000+00:00 beta retained",
+            "2025-01-03T00:00:00.0000000+00:00 ALPHA OLD"
+        ]);
+        var logger = new ProfileCommandLogger(directory.Path);
+
+        var removed = logger.RemoveHistoryEntry("alpha old");
+
+        Assert.True(removed);
+        Assert.Equal(
+            ["2025-01-02T00:00:00.0000000+00:00 beta retained"],
+            File.ReadAllLines(historyPath));
+        Assert.False(logger.RemoveHistoryEntry("missing"));
+    }
+
+    [Fact]
+    public void ClearsPersistedHistory()
+    {
+        using var directory = new TemporaryDirectory();
+        var historyPath = Path.Combine(directory.Path, "history.txt");
+        File.WriteAllLines(historyPath,
+        [
+            "2025-01-01T00:00:00.0000000+00:00 alpha",
+            "2025-01-02T00:00:00.0000000+00:00 beta"
+        ]);
+        var logger = new ProfileCommandLogger(directory.Path);
+
+        var cleared = logger.ClearHistory();
+
+        Assert.True(cleared);
+        Assert.Empty(File.ReadAllLines(historyPath));
+        Assert.Empty(logger.ReadHistoryEntries());
+    }
+
+    [Fact]
     public void FormatsHistoryAgeInHours()
     {
         var now = new DateTimeOffset(2025, 1, 2, 1, 0, 0, TimeSpan.Zero);
