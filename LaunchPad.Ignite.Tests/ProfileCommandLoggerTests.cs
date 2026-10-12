@@ -80,11 +80,13 @@ public class ProfileCommandLoggerTests
 
         var history = logger.ReadHistoryEntries();
         var filtered = ProfileCommandLogger.FilterHistoryEntries(history, "ALPHA");
+        var prefixFiltered = ProfileCommandLogger.FilterHistoryEntriesByPrefix(history, "ALPHA");
 
         Assert.Equal(
             ["legacy command", "alpha new", "alpha [REDACTED]", "beta recent", "alpha old"],
             history.Select(entry => entry.CommandText));
         Assert.Equal(["alpha new"], filtered.Select(entry => entry.CommandText));
+        Assert.Equal(["alpha new", "alpha [REDACTED]", "alpha old"], prefixFiltered.Select(entry => entry.CommandText));
         Assert.Equal(DateTimeOffset.Parse("2025-01-05T00:00:00.0000000+00:00"), history[1].RunTime);
     }
 

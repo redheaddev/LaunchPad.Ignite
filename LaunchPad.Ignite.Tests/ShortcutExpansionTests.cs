@@ -14,6 +14,17 @@ public class ShortcutExpansionTests
         Assert.Equal("ctrl+alt+p", first.ToString());
     }
 
+    [Fact]
+    public void ParsesNumpadKeysSeparatelyFromRegularDigits()
+    {
+        Assert.True(KeyboardShortcutChord.TryParse("alt+num+8", out var numpad));
+        Assert.True(KeyboardShortcutChord.TryParse("alt+8", out var regular));
+
+        Assert.Equal("alt+num+8", numpad.ToString());
+        Assert.Equal("num8", numpad.Key);
+        Assert.NotEqual(numpad, regular);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -21,6 +32,8 @@ public class ShortcutExpansionTests
     [InlineData("ctrl+ctrl+p")]
     [InlineData("ctrl+alt+pp")]
     [InlineData("ctrl++p")]
+    [InlineData("alt+num")]
+    [InlineData("alt+8+num+2")]
     public void RejectsInvalidKeyboardChords(string? value)
     {
         Assert.False(KeyboardShortcutChord.TryParse(value, out _));
@@ -39,6 +52,28 @@ public class ShortcutExpansionTests
         Assert.True(KeyboardShortcutChord.TryParse("alt+ctrl+p", out var chord));
         Assert.True(resolver.TryExpandChord(chord, out var chordExpansion));
         Assert.Equal("ado:pipeline customer ", chordExpansion);
+    }
+
+    [Fact]
+    public void FiltersShortcutAliasesByCaseInsensitivePrefix()
+    {
+        var resolver = new ShortcutResolver(
+        [
+            CreateShortcut("plc", "ado:pipeline customer ", null),
+            CreateShortcut("plr", "ado:pull-request ", null),
+            CreateShortcut("weather", "weather forecast ", null),
+            CreateCommand("pipeline", null)
+        ]);
+
+        var matches = resolver.GetAliasExpansions("PL");
+
+        Assert.Equal(
+            new[]
+            {
+                new KeyValuePair<string, string>("plc", "ado:pipeline customer "),
+                new KeyValuePair<string, string>("plr", "ado:pull-request ")
+            },
+            matches);
     }
 
     [Fact]
@@ -74,6 +109,23 @@ public class ShortcutExpansionTests
     }
 
     [Fact]
+    public void ResolvesActionKeyboardChordToCommandAndAction()
+    {
+        var action = new CommandActionDefinition("start", "", "", "start", [])
+        {
+            KeyboardShortcut = "alt+num+8",
+            ExecuteOnKeyboardShortcut = true
+        };
+        var resolver = new ShortcutResolver([new CommandDefinition("media", "url", "", [action])]);
+
+        Assert.True(KeyboardShortcutChord.TryParse("alt+num+8", out var chord));
+        Assert.True(resolver.TryExpandChord(chord, out var expansion, out var executeImmediately));
+
+        Assert.Equal("media start ", expansion);
+        Assert.True(executeImmediately);
+    }
+
+    [Fact]
     public void ValidatesShortcutCommandShapeAndUniqueChords()
     {
         var schema = new CommandSchema([],
@@ -90,6 +142,25 @@ public class ShortcutExpansionTests
     }
 
     [Fact]
+    public void ValidatesActionKeyboardShortcutSyntaxAndUniqueness()
+    {
+        var command = new CommandDefinition(
+            "media",
+            "url",
+            "",
+            [
+                new CommandActionDefinition("start", "", "", "start", []) { KeyboardShortcut = "alt+num+8" },
+                new CommandActionDefinition("stop", "", "", "stop", []) { KeyboardShortcut = "alt+num+8" },
+                new CommandActionDefinition("next", "", "", "next", []) { KeyboardShortcut = "invalid" }
+            ]);
+
+        var errors = new CommandSchemaValidator().Validate(new CommandSchema([], [command]));
+
+        Assert.Contains(errors, error => error.Contains("assigned more than once", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("invalid keyboard shortcut 'invalid'", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RejectsArgumentsOnShortcutCommands()
     {
         var shortcut = CreateShortcut("plc", "ado:pipeline customer ", null);
@@ -98,6 +169,47 @@ public class ShortcutExpansionTests
         var errors = new CommandSchemaValidator().Validate(new CommandSchema([], [shortcut with { Actions = [action] }]));
 
         Assert.Contains(errors, error => error.Contains("no arguments or execution", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void KeyboardChordResolutionDefaultsToNonImmediateExecution()
+    {
+        var shortcut = CreateShortcut("plc", "ado:pipeline customer ", "ctrl+alt+p");
+        var resolver = new ShortcutResolver([shortcut]);
+
+        Assert.True(KeyboardShortcutChord.TryParse("ctrl+alt+p", out var chord));
+        Assert.True(resolver.TryExpandChord(chord, out var expansion));
+
+        // Keyboard chord expansion should not be immediate by default
+        Assert.False(resolver.TryExpandChord(chord, out expansion, out var executeImmediately));
+        Assert.False(executeImmediately);
+
+        // But it should still provide the correct expansion text
+        Assert.Equal("ado:pipeline customer ", expansion);
+    }
+
+    [Fact]
+    public void ImmediateExecutionFlagCanBeConfiguredForCommands()
+    {
+        var commandWithImmediateExecution = new CommandDefinition(
+            "pipeline",
+            "url",
+            "ADO pipelines",
+            [new CommandActionDefinition("default", "", "", "https://example.test", [])],
+            Namespace: "ado",
+            KeyboardShortcut: "ctrl+alt+p",
+            ExecuteOnKeyboardShortcut: true);
+        var resolver = new ShortcutResolver([commandWithImmediateExecution]);
+
+        Assert.True(KeyboardShortcutChord.TryParse("ctrl+alt+p", out var chord));
+        Assert.True(resolver.TryExpandChord(chord, out var expansion));
+
+        // Immediate execution should be true for this command
+        Assert.True(resolver.TryExpandChord(chord, out expansion, out var executeImmediately));
+        Assert.True(executeImmediately);
+
+        // Expansion text should remain consistent
+        Assert.Equal("ado:pipeline ", expansion);
     }
 
     private static CommandDefinition CreateShortcut(string name, string expansion, string? keyboardShortcut)

@@ -35,7 +35,9 @@ public class ExtensionLoaderTests
                     "description": "",
                     "usage": "sample:sample",
                     "targetTemplate": "sample:",
-                    "arguments": []
+                    "arguments": [],
+                    "keyboardShortcut": "ctrl+alt+m",
+                    "executeOnKeyboardShortcut": true
                   }]
                 }],
                 "functions": [{ "name": "lookup", "parameters": [{ "name": "value" }] }]
@@ -53,6 +55,8 @@ public class ExtensionLoaderTests
         Assert.Equal("sample", extensions.CommandSources["sample:sample"]);
         Assert.Equal("sample:endpoint", Assert.Single(extensions.Schema.Variables).QualifiedName);
         Assert.Equal("dev", Assert.Single(extensions.Schema.Lists).Values[0]);
+        Assert.Equal("ctrl+alt+m", action.KeyboardShortcut);
+        Assert.True(action.ExecuteOnKeyboardShortcut);
         var result = executor.Execute(new ParsedCommand(command, action, new Dictionary<string, string>()));
         Assert.True(result.Succeeded);
         Assert.Equal("Executed by extension.", result.Message);

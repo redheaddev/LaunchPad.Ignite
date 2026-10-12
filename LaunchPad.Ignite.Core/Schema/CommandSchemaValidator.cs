@@ -165,6 +165,18 @@ public sealed class CommandSchemaValidator
                     errors.Add($"Action name '{action.Name}' in command '{command.Name}' is empty or duplicated.");
                 }
 
+                if (action.KeyboardShortcut is not null)
+                {
+                    if (!KeyboardShortcutChord.TryParse(action.KeyboardShortcut, out var actionChord))
+                    {
+                        errors.Add($"Action '{action.Name}' in command '{command.Name}' has an invalid keyboard shortcut '{action.KeyboardShortcut}'.");
+                    }
+                    else if (!keyboardShortcuts.Add(actionChord.ToString()))
+                    {
+                        errors.Add($"Keyboard shortcut '{action.KeyboardShortcut}' is assigned more than once.");
+                    }
+                }
+
                 if (string.IsNullOrWhiteSpace(action.TargetTemplate))
                 {
                     errors.Add($"Action '{action.Name}' in command '{command.Name}' must define a target template.");

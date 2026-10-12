@@ -60,7 +60,8 @@ public sealed record CommandDefinition(
     string Description,
     IReadOnlyList<CommandActionDefinition> Actions,
     string? Namespace = null,
-    string? KeyboardShortcut = null)
+    string? KeyboardShortcut = null,
+    bool ExecuteOnKeyboardShortcut = false)
 {
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
 }
@@ -74,6 +75,8 @@ public sealed record CommandActionDefinition(
     CommandExecutionDefinition? Execution = null)
 {
     public IReadOnlyList<string> ArgumentTemplates { get; init; } = [];
+    public string? KeyboardShortcut { get; init; }
+    public bool ExecuteOnKeyboardShortcut { get; init; }
 }
 
 public sealed record CommandArgumentDefinition(

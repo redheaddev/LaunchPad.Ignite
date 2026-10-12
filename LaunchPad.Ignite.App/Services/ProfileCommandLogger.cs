@@ -62,6 +62,13 @@ public sealed class ProfileCommandLogger
             .Take(1)
             .ToArray();
 
+    public static IReadOnlyList<CommandHistoryEntry> FilterHistoryEntriesByPrefix(
+        IReadOnlyList<CommandHistoryEntry> historyEntries,
+        string prefix)
+        => historyEntries
+            .Where(entry => entry.CommandText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
     public bool RemoveHistoryEntry(string commandText)
     {
         try

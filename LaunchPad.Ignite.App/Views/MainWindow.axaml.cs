@@ -537,21 +537,39 @@ public partial class MainWindow : Window
 
         var chord = new KeyboardShortcutChord(_controlPressed, _altPressed, _shiftPressed, _metaPressed, key);
         if (_shortcutViewModel is { } viewModel
-            && viewModel.TryGetKeyboardShortcutExpansion(chord, out var expansion))
+            && viewModel.TryGetKeyboardShortcutExpansion(chord, out var expansion, out var executeImmediately))
         {
             e.SuppressEvent = true;
-            Dispatcher.UIThread.Post(() =>
+            if (executeImmediately)
             {
-                viewModel.CommandText = expansion;
-                ShowAndActivate();
-                _commandBox.CaretIndex = expansion.Length;
-            });
+                // Submit the expanded command immediately
+                Dispatcher.UIThread.Post(() => viewModel.ExecuteShortcutAsync(expansion));
+            }
+            else
+            {
+                // Expand the chord into the command input and allow the user to submit it
+                Dispatcher.UIThread.Post(() =>
+                {
+                    viewModel.CommandText = expansion;
+                    ShowAndActivate();
+                    _commandBox.CaretIndex = expansion.Length;
+                });
+            }
         }
     }
 
     private static bool TryGetShortcutKey(KeyCode keyCode, out string key)
     {
         var keyCodeName = keyCode.ToString();
+        const string numpadPrefix = "VcNumPad";
+        if (keyCodeName.StartsWith(numpadPrefix, StringComparison.Ordinal)
+            && keyCodeName.Length == numpadPrefix.Length + 1
+            && char.IsAsciiDigit(keyCodeName[^1]))
+        {
+            key = $"num{keyCodeName[^1]}";
+            return true;
+        }
+
         if (keyCodeName.Length == 3
             && keyCodeName.StartsWith("Vc", StringComparison.Ordinal)
             && char.IsAsciiLetterOrDigit(keyCodeName[2]))

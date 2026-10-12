@@ -28,9 +28,11 @@ public sealed record KeyboardShortcutChord(
         var alt = false;
         var shift = false;
         var meta = false;
+        var numpad = false;
         string? key = null;
-        foreach (var part in parts)
+        for (var index = 0; index < parts.Length; index++)
         {
+            var part = parts[index];
             if (string.Equals(part, "ctrl", StringComparison.OrdinalIgnoreCase))
             {
                 if (control) return false;
@@ -50,6 +52,16 @@ public sealed record KeyboardShortcutChord(
             {
                 if (meta) return false;
                 meta = true;
+            }
+            else if (string.Equals(part, "num", StringComparison.OrdinalIgnoreCase)
+                && key is null
+                && !numpad
+                && index + 1 < parts.Length
+                && parts[index + 1].Length == 1
+                && parts[index + 1][0] is >= '0' and <= '9')
+            {
+                numpad = true;
+                key = $"num{parts[++index]}";
             }
             else if (key is null && part.Length == 1 && char.IsAsciiLetterOrDigit(part[0]))
             {
@@ -77,7 +89,15 @@ public sealed record KeyboardShortcutChord(
         if (Alt) parts.Add("alt");
         if (Shift) parts.Add("shift");
         if (Meta) parts.Add("meta");
-        parts.Add(Key);
+        if (Key.StartsWith("num", StringComparison.Ordinal) && Key.Length == 4)
+        {
+            parts.Add("num");
+            parts.Add(Key[3].ToString());
+        }
+        else
+        {
+            parts.Add(Key);
+        }
         return string.Join('+', parts);
     }
 }

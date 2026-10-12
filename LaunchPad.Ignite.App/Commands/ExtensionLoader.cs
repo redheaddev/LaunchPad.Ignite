@@ -159,7 +159,8 @@ public sealed class ExtensionLoader
         var variables = new List<CommandVariableDefinition>();
         var functions = new List<CommandFunctionDefinition>();
         var settings = manifests.Values
-            .SelectMany(entry => entry.Manifest.Schema.Settings.Select(setting => setting with { Namespace = entry.Manifest.Namespace }))
+            .SelectMany(entry => (entry.Manifest.Schema.Settings ?? Array.Empty<CommandSettingDefinition>())
+                .Select(setting => setting with { Namespace = entry.Manifest.Namespace }))
             .ToList();
         var commandSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
@@ -167,8 +168,8 @@ public sealed class ExtensionLoader
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
-            lists.AddRange(manifest.Schema.Lists);
-            foreach (var command in manifest.Schema.Commands.Select(command => command with
+            lists.AddRange(manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>());
+            foreach (var command in (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>()).Select(command => command with
             {
                 Namespace = command.Namespace ?? manifest.Namespace
             }))
@@ -176,8 +177,9 @@ public sealed class ExtensionLoader
                 commandSources.TryAdd(command.QualifiedName, manifest.Id);
                 commands.Add(command);
             }
-            variables.AddRange(manifest.Schema.Variables.Select(variable => variable with { Namespace = manifest.Namespace }));
-            var extensionFunctions = manifest.Schema.Functions
+            variables.AddRange((manifest.Schema.Variables ?? Array.Empty<CommandVariableDefinition>())
+                .Select(variable => variable with { Namespace = manifest.Namespace }));
+            var extensionFunctions = (manifest.Schema.Functions ?? Array.Empty<CommandFunctionDefinition>())
                 .Select(function => LoadFunction(function, manifest, extensionDirectory))
                 .ToArray();
             var registeredFunctionNames = LoadExecutors(manifest, extensionDirectory, executors, asyncExecutors, functionExecutors);
