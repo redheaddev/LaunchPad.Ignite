@@ -160,11 +160,127 @@ public class DirectFilePathTests
         Assert.Null(starter.StartInfo);
     }
 
+    [Fact]
+    public void TryOpenInTerminalOpensContainingFolderForFile()
+    {
+        var terminal = new RecordingTerminalLauncher();
+        var handler = new DirectFilePathHandler(
+            new RecordingProcessStarter(),
+            fileExists: path => path == @"C:\work\file.txt",
+            directoryExists: _ => false,
+            terminalLauncher: terminal);
+
+        var handled = handler.TryOpenInTerminal(@"C:\work\file.txt", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal(@"C:\work", terminal.WorkingDirectory);
+        Assert.Equal("Opened folder in terminal.", result.Message);
+    }
+
+    [Fact]
+    public void TryOpenInTerminalOpensDirectoryPath()
+    {
+        var terminal = new RecordingTerminalLauncher();
+        var handler = new DirectFilePathHandler(
+            new RecordingProcessStarter(),
+            fileExists: _ => false,
+            directoryExists: path => path == @"C:\work",
+            terminalLauncher: terminal);
+
+        var handled = handler.TryOpenInTerminal(@"C:\work", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal(@"C:\work", terminal.WorkingDirectory);
+    }
+
+    [Fact]
+    public void TryOpenInTerminalReportsMissingPath()
+    {
+        var terminal = new RecordingTerminalLauncher();
+        var handler = new DirectFilePathHandler(
+            new RecordingProcessStarter(),
+            fileExists: _ => false,
+            directoryExists: _ => false,
+            terminalLauncher: terminal);
+
+        var handled = handler.TryOpenInTerminal(@"C:\missing", out var result);
+
+        Assert.True(handled);
+        Assert.False(result.Succeeded);
+        Assert.Contains("does not exist", result.Message);
+        Assert.Null(terminal.WorkingDirectory);
+    }
+
+    [Fact]
+    public void TryOpenInTerminalDoesNotHandleOrdinaryText()
+    {
+        var terminal = new RecordingTerminalLauncher();
+        var handler = new DirectFilePathHandler(new RecordingProcessStarter(), terminalLauncher: terminal);
+
+        var handled = handler.TryOpenInTerminal("some command", out var result);
+
+        Assert.False(handled);
+        Assert.Empty(result.Message);
+        Assert.Null(terminal.WorkingDirectory);
+    }
+
+    [Fact]
+    public void PathSelectionPrefersSelectedText()
+    {
+        var text = @"open C:\work\file.txt now";
+
+        var found = DirectFilePathSelection.TryGetPath(text, 5, 21, 0, out var path);
+
+        Assert.True(found);
+        Assert.Equal(@"C:\work\file.txt", path);
+    }
+
+    [Fact]
+    public void PathSelectionReturnsQuotedTokenAtCaret()
+    {
+        var text = "open \"C:\\work area\\file.txt\" now";
+
+        var found = DirectFilePathSelection.TryGetPath(text, 0, 0, text.IndexOf("file.txt", StringComparison.Ordinal), out var path);
+
+        Assert.True(found);
+        Assert.Equal("\"C:\\work area\\file.txt\"", path);
+    }
+
+    [Fact]
+    public void PathSelectionReturnsUnquotedTokenAtCaret()
+    {
+        var text = @"open C:\work\file.txt now";
+
+        var found = DirectFilePathSelection.TryGetPath(text, 0, 0, text.IndexOf("file.txt", StringComparison.Ordinal), out var path);
+
+        Assert.True(found);
+        Assert.Equal(@"C:\work\file.txt", path);
+    }
+
+    [Fact]
+    public void PathSelectionDoesNotReturnWhitespace()
+    {
+        var found = DirectFilePathSelection.TryGetPath("   ", 0, 0, 1, out var path);
+
+        Assert.False(found);
+        Assert.Empty(path);
+    }
+
     private sealed class RecordingProcessStarter : IProcessStarter
     {
         public ProcessStartInfo? StartInfo { get; private set; }
 
         public void Start(ProcessStartInfo startInfo) => StartInfo = startInfo;
+    }
+
+    private sealed class RecordingTerminalLauncher : ISecretTerminalLauncher
+    {
+        public string? WorkingDirectory { get; private set; }
+
+        public void OpenShell(IReadOnlyDictionary<string, string> environment, string? workingDirectory)
+            => WorkingDirectory = workingDirectory;
     }
 
     private static CommandArgumentPathCompletion CreateArgumentPathCompletion()

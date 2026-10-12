@@ -50,6 +50,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ProfileSettingsStore _profileSettingsStore;
     private readonly IReadOnlyList<CommandSettingDefinition> _applicationSettings;
     private readonly IProcessStarter _processStarter;
+    private readonly ISecretTerminalLauncher _terminalLauncher;
     private bool _isExtensionListVisible;
     private bool _isDirectPathCompletionActive;
     private IReadOnlyList<string> _directPathSuggestions = Array.Empty<string>();
@@ -71,14 +72,15 @@ public partial class MainViewModel : ViewModelBase
             _profileSettingsStore));
         _applicationSettings = new ApplicationSettingsLoader().Load();
         _processStarter = new SystemProcessStarter();
+        _terminalLauncher = new SystemSecretTerminalLauncher(_processStarter);
         _secretAccessGate = new SecretAccessGate();
         _secretCommandModel = new SecretCommandModel(
             _secretStore,
             _secretAccessGate,
             new AvaloniaSecretEntryDialogService(),
             new AvaloniaClipboardService(GetSystemClipboard),
-            new SystemSecretTerminalLauncher(_processStarter));
-        _directFilePathHandler = new DirectFilePathHandler(_processStarter);
+            _terminalLauncher);
+        _directFilePathHandler = new DirectFilePathHandler(_processStarter, terminalLauncher: _terminalLauncher);
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
         new ProfileAdoExtensionInstaller().Install();
         InitializeCommandRuntime();
@@ -398,6 +400,17 @@ public partial class MainViewModel : ViewModelBase
         return true;
     }
 
+    public bool OpenDirectPathInTerminal(string path)
+    {
+        if (!_directFilePathHandler.TryOpenInTerminal(path, out var result))
+        {
+            return false;
+        }
+
+        SetStatusMessage(result.Message);
+        return true;
+    }
+
     public bool ClearHistory()
     {
         if (!_commandLogger.ClearHistory())
@@ -415,7 +428,10 @@ public partial class MainViewModel : ViewModelBase
 
     public bool ShowCommandPlaceholder => IsCommandTextEmpty && string.IsNullOrEmpty(CompletionGhostText);
 
-    public async Task<bool> HandleInputKeyAsync(CommandInputKey key, bool newWindow = false)
+    public async Task<bool> HandleInputKeyAsync(
+        CommandInputKey key,
+        bool newWindow = false,
+        CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
         if (key == CommandInputKey.Enter)
         {
@@ -424,7 +440,7 @@ public partial class MainViewModel : ViewModelBase
                 TryExpandTypedShortcut();
             }
 
-            return await ExecuteCommandAsync(newWindow);
+            return await ExecuteCommandAsync(newWindow, launchMode);
         }
 
         if (_isExtensionListVisible
@@ -879,14 +895,16 @@ public sealed record CompletionOptionViewModel(
         return ($"Usage: {action.Usage}", action.Usage);
     }
 
-    private async Task<bool> ExecuteCommandAsync(bool newWindow = false)
+    private async Task<bool> ExecuteCommandAsync(
+        bool newWindow = false,
+        CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
         var submittedText = CommandText;
         var runTime = DateTimeOffset.Now;
         var succeeded = false;
         try
         {
-            succeeded = await ExecuteCommandCoreAsync(newWindow);
+            succeeded = await ExecuteCommandCoreAsync(newWindow, launchMode);
             return succeeded;
         }
         finally
@@ -903,7 +921,9 @@ public sealed record CompletionOptionViewModel(
         return (found, value);
     }
 
-    private async Task<bool> ExecuteCommandCoreAsync(bool newWindow = false)
+    private async Task<bool> ExecuteCommandCoreAsync(
+        bool newWindow = false,
+        CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
         if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
         {
@@ -934,8 +954,8 @@ public sealed record CompletionOptionViewModel(
                 return false;
             }
 
-            SetStatusMessage($"={value.ToString("G", CultureInfo.InvariantCulture)}", isValueOutput: true);
-            CommandText = string.Empty;
+            CommandText = $"={value.ToString("G", CultureInfo.InvariantCulture)}";
+            SetStatusMessage(string.Empty);
             return true;
         }
 
@@ -964,7 +984,8 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
-        if (_directFilePathHandler.TryOpen(expandedText, out var directFileResult))
+        if (launchMode == CommandLaunchMode.Normal
+            && _directFilePathHandler.TryOpen(expandedText, out var directFileResult))
         {
             SetStatusMessage(directFileResult.Message);
             if (!directFileResult.Succeeded)
@@ -977,7 +998,8 @@ public sealed record CompletionOptionViewModel(
         }
 
         var hasNewWindowOption = UrlCommandModel.TryRemoveNewWindowOption(expandedText, out var textWithoutNewWindowOption);
-        if (_urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult, newWindow))
+        if (launchMode == CommandLaunchMode.Normal
+            && _urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult, newWindow))
         {
             SetStatusMessage(directUrlResult.Message);
             if (!directUrlResult.Succeeded)
@@ -989,7 +1011,8 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
-        if (hasNewWindowOption
+        if (launchMode == CommandLaunchMode.Normal
+            && hasNewWindowOption
             && _urlCommandModel.TryExecuteDirectUrl(textWithoutNewWindowOption, out directUrlResult, newWindow: true))
         {
             SetStatusMessage(directUrlResult.Message);
@@ -1028,6 +1051,13 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        if (launchMode != CommandLaunchMode.Normal
+            && !string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            SetStatusMessage("Elevated and alternate-user launch is only supported for shell commands.");
+            return false;
+        }
+
         CommandExecutionResult executionResult;
         if (string.Equals(parsedCommand.Definition.Kind, "secret", StringComparison.OrdinalIgnoreCase))
         {
@@ -1041,6 +1071,7 @@ public sealed record CompletionOptionViewModel(
                 ExtensionCommandModel extensionCommandModel => await extensionCommandModel.ExecuteAsync(parsedCommand),
                 VariableCommandModel variableCommandModel => await variableCommandModel.ExecuteAsync(parsedCommand),
                 UrlCommandModel urlCommandModel => urlCommandModel.Execute(parsedCommand, newWindow || parsedWithNewWindowOption),
+                ShellCommandModel shellCommandModel => shellCommandModel.Execute(parsedCommand, launchMode),
                 _ => commandExecutor.Execute(parsedCommand)
             };
         }

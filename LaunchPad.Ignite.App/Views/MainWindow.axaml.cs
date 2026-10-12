@@ -640,6 +640,37 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Enter
+            && e.KeyModifiers.HasFlag(KeyModifiers.Control)
+            && e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+            && !e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            await viewModel.HandleInputKeyAsync(CommandInputKey.Enter, launchMode: CommandLaunchMode.Elevated);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter
+            && e.KeyModifiers == KeyModifiers.Shift
+            && DirectFilePathSelection.TryGetPath(
+                _commandBox.Text ?? string.Empty,
+                _commandBox.SelectionStart,
+                _commandBox.SelectionEnd,
+                _commandBox.CaretIndex,
+                out var selectedPath)
+            && viewModel.OpenDirectPathInTerminal(selectedPath))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Alt)
+        {
+            await viewModel.HandleInputKeyAsync(CommandInputKey.Enter, launchMode: CommandLaunchMode.DifferentUser);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Enter && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             await viewModel.HandleInputKeyAsync(CommandInputKey.Enter, newWindow: true);

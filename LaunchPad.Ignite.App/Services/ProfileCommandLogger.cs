@@ -157,7 +157,7 @@ public sealed class ProfileCommandLogger
         var entry = string.IsNullOrWhiteSpace(safeCommand) ? "(empty command)" : safeCommand;
         TryAppend("log.txt", $"{timestamp:O} [{(succeeded ? "SUCCESS" : "FAILED")}] {entry}");
 
-        if (succeeded)
+        if (succeeded && !MathExpressionParser.TryParse(commandText, out _))
         {
             TryAppend("history.txt", $"{timestamp:O} {entry}");
         }

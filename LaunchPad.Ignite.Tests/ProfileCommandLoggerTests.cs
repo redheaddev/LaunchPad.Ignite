@@ -32,6 +32,17 @@ public class ProfileCommandLoggerTests
     }
 
     [Fact]
+    public void DoesNotWriteMathCommandsToHistory()
+    {
+        using var directory = new TemporaryDirectory();
+        var logger = new ProfileCommandLogger(directory.Path);
+
+        logger.RecordCommand("=5+2", succeeded: true, CreateCatalog());
+
+        Assert.False(File.Exists(Path.Combine(directory.Path, "history.txt")));
+    }
+
+    [Fact]
     public void MasksSensitiveArgumentsInLogAndHistory()
     {
         using var directory = new TemporaryDirectory();

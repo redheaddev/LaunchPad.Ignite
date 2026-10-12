@@ -466,6 +466,35 @@ public class CommandModelTests
             starter.StartInfo.ArgumentList);
     }
 
+    [Theory]
+    [InlineData(CommandLaunchMode.Elevated, "runas")]
+    [InlineData(CommandLaunchMode.DifferentUser, "runasuser")]
+    public void ShellCommandModelUsesShellVerbForSpecialLaunchModes(CommandLaunchMode launchMode, string expectedVerb)
+    {
+        var action = new CommandActionDefinition(
+            "default",
+            "",
+            "",
+            "editor.exe",
+            [new CommandArgumentDefinition("file"), new CommandArgumentDefinition("option", Optional: true)]);
+        var command = new CommandDefinition("editor", "shell", "", [action]);
+        var schema = new CommandSchema([], [command]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["shell"]),
+            new CommandSchemaValueProvider(schema));
+        var parseResult = parser.Parse("editor \"C:\\work area\\file.txt\" \"--name value & whoami\"");
+        var starter = new RecordingProcessStarter();
+        var model = new ShellCommandModel(starter);
+
+        var result = model.Execute(parseResult.ParsedCommand!, launchMode);
+
+        Assert.True(result.Succeeded);
+        Assert.True(starter.StartInfo!.UseShellExecute);
+        Assert.Equal(expectedVerb, starter.StartInfo.Verb);
+        Assert.Equal("\"C:\\work area\\file.txt\" \"--name value & whoami\"", starter.StartInfo.Arguments);
+        Assert.Empty(starter.StartInfo.ArgumentList);
+    }
+
     [Fact]
     public void ShellCommandModelReportsProcessStartErrors()
     {

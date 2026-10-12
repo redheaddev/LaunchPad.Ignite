@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
@@ -21,6 +23,9 @@ public sealed class ShellCommandModel : ICommandModel
     public string Kind => "shell";
 
     public CommandExecutionResult Execute(ParsedCommand command)
+        => Execute(command, CommandLaunchMode.Normal);
+
+    public CommandExecutionResult Execute(ParsedCommand command, CommandLaunchMode launchMode)
     {
         if (!string.Equals(command.Definition.Kind, Kind, StringComparison.OrdinalIgnoreCase))
         {
@@ -32,10 +37,8 @@ public sealed class ShellCommandModel : ICommandModel
             return new CommandExecutionResult(false, "An executable target is required.");
         }
 
-        var startInfo = new ProcessStartInfo(Environment.ExpandEnvironmentVariables(command.Action.TargetTemplate))
-        {
-            UseShellExecute = false
-        };
+        var startInfo = new ProcessStartInfo(Environment.ExpandEnvironmentVariables(command.Action.TargetTemplate));
+        var arguments = new List<string>();
 
         if (command.Action.ArgumentTemplates.Count > 0)
         {
@@ -56,7 +59,7 @@ public sealed class ShellCommandModel : ICommandModel
                     command.Arguments.TryGetValue(match.Groups[1].Value, out var argumentValue)
                         ? argumentValue
                         : string.Empty);
-                startInfo.ArgumentList.Add(Environment.ExpandEnvironmentVariables(value));
+                arguments.Add(Environment.ExpandEnvironmentVariables(value));
             }
         }
         else
@@ -65,19 +68,74 @@ public sealed class ShellCommandModel : ICommandModel
             {
                 if (command.Arguments.TryGetValue(argument.Name, out var value))
                 {
-                    startInfo.ArgumentList.Add(Environment.ExpandEnvironmentVariables(value));
+                    arguments.Add(Environment.ExpandEnvironmentVariables(value));
                 }
             }
+        }
+
+        if (launchMode == CommandLaunchMode.Normal)
+        {
+            startInfo.UseShellExecute = false;
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+        }
+        else
+        {
+            startInfo.UseShellExecute = true;
+            startInfo.Verb = launchMode switch
+            {
+                CommandLaunchMode.Elevated => "runas",
+                CommandLaunchMode.DifferentUser => "runasuser",
+                _ => throw new ArgumentOutOfRangeException(nameof(launchMode))
+            };
+            startInfo.Arguments = string.Join(" ", arguments.Select(QuoteArgument));
         }
 
         try
         {
             _processStarter.Start(startInfo);
-            return new CommandExecutionResult(true, $"Started '{startInfo.FileName}'.");
+            var launchDescription = launchMode switch
+            {
+                CommandLaunchMode.Elevated => " elevated",
+                CommandLaunchMode.DifferentUser => " as another user",
+                _ => string.Empty
+            };
+            return new CommandExecutionResult(true, $"Started '{startInfo.FileName}'{launchDescription}.");
         }
         catch (Exception exception)
         {
             return new CommandExecutionResult(false, $"Unable to start '{startInfo.FileName}': {exception.Message}");
         }
+    }
+
+    private static string QuoteArgument(string argument)
+    {
+        var builder = new StringBuilder("\"");
+        var backslashCount = 0;
+        foreach (var character in argument)
+        {
+            if (character == '\\')
+            {
+                backslashCount++;
+            }
+            else if (character == '\"')
+            {
+                builder.Append('\\', backslashCount * 2 + 1);
+                builder.Append(character);
+                backslashCount = 0;
+            }
+            else
+            {
+                builder.Append('\\', backslashCount);
+                builder.Append(character);
+                backslashCount = 0;
+            }
+        }
+
+        builder.Append('\\', backslashCount * 2);
+        builder.Append('\"');
+        return builder.ToString();
     }
 }
