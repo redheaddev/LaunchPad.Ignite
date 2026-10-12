@@ -6,16 +6,21 @@
 		Title="LaunchPad Settings"
 		Width="900" Height="620" MinWidth="760" MinHeight="500"
 		WindowStartupLocation="CenterOwner"
-		Background="#FF0F172A">
+		Background="{DynamicResource ThemeWindowBackground}">
 	<Grid ColumnDefinitions="240,*">
-		<Border Grid.Column="0" Background="#FF111827" BorderBrush="#FF334155" BorderThickness="0,0,1,0" Padding="18">
+		<Border Grid.Column="0" Background="{DynamicResource ThemeWindowBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="0,0,1,0" Padding="18">
 			<DockPanel>
-				<TextBlock DockPanel.Dock="Top" Text="SETTINGS" Foreground="#FF64748B" FontSize="11" FontWeight="Bold" Margin="8,4,0,14" />
+				<TextBlock DockPanel.Dock="Top" Text="SETTINGS" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" FontWeight="Bold" Margin="8,4,0,14" />
 				<ScrollViewer VerticalScrollBarVisibility="Auto">
 					<ListBox ItemsSource="{Binding NavigationItems}" SelectedItem="{Binding SelectedNavigationItem}">
+						<ListBox.Styles>
+							<Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+								<Setter Property="Background" Value="{DynamicResource ThemeNavigationSelected}" />
+							</Style>
+						</ListBox.Styles>
 						<ListBox.ItemTemplate>
 							<DataTemplate>
-								<TextBlock Text="{Binding Name}" Padding="10,8" Foreground="#FFE2E8F0" />
+								<TextBlock Text="{Binding Name}" Padding="{Binding Indent, FallbackValue=0},8,10,8" Foreground="{DynamicResource ThemeText}" />
 							</DataTemplate>
 						</ListBox.ItemTemplate>
 					</ListBox>
@@ -24,25 +29,91 @@
 		</Border>
 		<Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="30,26">
 			<StackPanel Spacing="5" Margin="0,0,0,22">
-				<TextBlock Text="{Binding Header}" FontSize="25" FontWeight="SemiBold" Foreground="#FFE2E8F0" />
-				<TextBlock Text="{Binding Subheader}" FontSize="13" Foreground="#FF94A3B8" />
+				<TextBlock Text="{Binding Header}" FontSize="25" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+				<TextBlock Text="{Binding Subheader}" FontSize="13" Foreground="{DynamicResource ThemeSecondaryText}" />
 				<CheckBox Content="Extension enabled" IsVisible="{Binding IsExtensionSelected}"
 						  IsChecked="{Binding IsExtensionEnabled}" Click="ExtensionEnabled_Click"
-						  Foreground="#FFE2E8F0" Margin="0,10,0,0" />
+						  Foreground="{DynamicResource ThemeText}" Margin="0,10,0,0" />
 			</StackPanel>
-			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+			<Grid Grid.Row="1" IsVisible="{Binding IsThemeSelected}" RowDefinitions="Auto,*">
+			<StackPanel Spacing="14" Margin="0,0,0,12">
+				<TextBlock Text="Color theme" Foreground="{DynamicResource ThemeText}" FontSize="16" FontWeight="SemiBold" />
+				<ComboBox ItemsSource="{Binding ColorThemes}" SelectedItem="{Binding SelectedColorTheme, Mode=OneWay}"
+						  SelectionChanged="ColorTheme_SelectionChanged">
+					<ComboBox.Styles>
+						<Style Selector="ComboBoxItem:selected /template/ ContentPresenter">
+							<Setter Property="Background" Value="{DynamicResource ThemeHighlight}" />
+						</Style>
+						<Style Selector="ComboBoxItem:selected:pointerover /template/ ContentPresenter">
+							<Setter Property="Background" Value="{DynamicResource ThemeHighlight}" />
+						</Style>
+					</ComboBox.Styles>
+					<ComboBox.ItemTemplate>
+						<DataTemplate>
+							<TextBlock Text="{Binding Name}" />
+						</DataTemplate>
+					</ComboBox.ItemTemplate>
+				</ComboBox>
+				<Button Content="Delete theme" Click="DeleteTheme_Click"
+						IsEnabled="{Binding CanDeleteSelectedColorTheme}" HorizontalAlignment="Left" />
+				<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+					<TextBox Text="{Binding RenameThemeName}" Watermark="Theme name" />
+					<Button Grid.Column="1" Content="Rename theme" Click="RenameTheme_Click"
+							IsEnabled="{Binding CanRenameSelectedColorTheme}" />
+				</Grid>
+				<TextBlock Text="The selected palette is applied immediately and saved to your profile."
+							  Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+				<Button Content="Open theme reference" Click="OpenThemeReference_Click"
+						IsVisible="{Binding HasSelectedColorThemeUrl}" HorizontalAlignment="Left" />
+				<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+					<TextBox Text="{Binding ThemeReferenceUrl}" Watermark="Theme reference URL (HTTPS)" />
+					<Button Grid.Column="1" Content="Save reference" Click="SaveThemeReference_Click"
+							IsEnabled="{Binding HasUnsavedThemeReferenceUrlChanges}" />
+				</Grid>
+				<TextBlock Text="Colors below show where each choice appears in the launcher and Settings." Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+				<Button Content="Save changes" Click="SaveThemeColors_Click"
+						IsEnabled="{Binding HasUnsavedThemeColorChanges}" HorizontalAlignment="Left" />
+				<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+					<TextBox Text="{Binding ThemeImportUrl}" Watermark="Paste a palette page URL" />
+					<Button Grid.Column="1" Content="Import palette" Click="ImportTheme_Click" />
+				</Grid>
+				<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+					<TextBox Text="{Binding NewThemeName}" Watermark="New theme name" />
+					<Button Grid.Column="1" Content="Create theme" Click="CreateTheme_Click" />
+				</Grid>
+				<TextBlock Text="{Binding ThemeImportStatus}" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+			</StackPanel>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+					<ItemsControl ItemsSource="{Binding ThemeColors}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate>
+								<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+									<Grid ColumnDefinitions="34,150,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="4">
+										<Border Width="30" Height="30" CornerRadius="5" Background="{Binding PickerBrush}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" VerticalAlignment="Center" />
+										<TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
+										<TextBox Grid.Column="2" Text="{Binding Value}" Watermark="#AARRGGBB" VerticalAlignment="Center" LostFocus="ThemeColorHex_LostFocus" Tag="{Binding Property}" />
+										<ColorPicker Grid.Column="3" Color="{Binding PickerColor, Mode=TwoWay}" />
+										<TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding Usage}" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" TextWrapping="Wrap" />
+									</Grid>
+								</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</ScrollViewer>
+			</Grid>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSettingsListVisible}">
 				<ItemsControl ItemsSource="{Binding Settings}">
 					<ItemsControl.ItemTemplate>
 						<DataTemplate>
-							<Border Background="#FF111C2E" BorderBrush="#FF26364D" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,0,12">
+							<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,0,12">
 								<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
-									<TextBlock Text="{Binding Label}" FontSize="15" FontWeight="SemiBold" Foreground="#FFE2E8F0" />
-									<TextBlock Grid.Row="1" Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Foreground="#FF94A3B8" Margin="0,5,0,10" />
+									<TextBlock Text="{Binding Label}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+									<TextBlock Grid.Row="1" Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" Margin="0,5,0,10" />
 									<ComboBox Grid.Row="2" Grid.ColumnSpan="2" ItemsSource="{Binding Options}"
 										  SelectedItem="{Binding Value, Mode=TwoWay}" IsVisible="{Binding IsSelect}" />
 									<TextBox Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding Value, Mode=TwoWay}" Watermark="{Binding Label}"
 									 IsVisible="{Binding IsNotSelect}" />
-									<TextBlock Grid.Row="3" Text="{Binding Token}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Foreground="#FF67E8F9" Margin="0,8,0,0" />
+									<TextBlock Grid.Row="3" Text="{Binding Token}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Foreground="{DynamicResource ThemeAccent}" Margin="0,8,0,0" />
 									<Button Grid.Row="3" Grid.Column="1" Content="Save" Command="{Binding SaveSettingCommand}" Margin="10,5,0,0" />
 								</Grid>
 							</Border>

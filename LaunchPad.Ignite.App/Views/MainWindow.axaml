@@ -6,7 +6,7 @@
         mc:Ignorable="d" d:DesignWidth="760" d:DesignHeight="360"
         x:Class="LaunchPad.Ignite.App.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Icon="/Assets/avalonia-logo.ico"
+        Icon="/Assets/rocket.ico"
         Title="LaunchPad.Ignite"
         Width="760" Height="360" MinWidth="640" MinHeight="300"
         WindowDecorations="None" CanResize="False"
@@ -20,28 +20,35 @@
     <Window.Styles>
         <Style Selector="Button.header-action">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#FF94A3B8" />
+            <Setter Property="Foreground" Value="{DynamicResource ThemeSecondaryText}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="6" />
             <Setter Property="MinWidth" Value="30" />
             <Setter Property="MinHeight" Value="30" />
         </Style>
         <Style Selector="Border.completion-item.highlighted">
-            <Setter Property="Background" Value="#FF1E3A5F" />
+            <Setter Property="Background" Value="{DynamicResource ThemeHighlight}" />
         </Style>
         <Style Selector="Border.completion-item TextBlock">
-            <Setter Property="Foreground" Value="#FF94A3B8" />
+            <Setter Property="Foreground" Value="{DynamicResource ThemeSecondaryText}" />
         </Style>
         <Style Selector="TextBlock.completion-item-text.highlighted">
-            <Setter Property="Foreground" Value="#FFE2E8F0" />
+            <Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
         </Style>
         <Style Selector="TextBlock.completion-item-text.checked">
-            <Setter Property="Foreground" Value="#FF67E8F9" />
+            <Setter Property="Foreground" Value="{DynamicResource ThemeChecked}" />
+        </Style>
+        <Style Selector="Border.command-input.focused">
+            <Setter Value="{DynamicResource ThemeCommandFocus}" Property="BorderBrush" />
+        </Style>
+        <Style Selector="TextBox#CommandBox:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{DynamicResource ThemeCommandFocus}" />
+            <Setter Property="BorderThickness" Value="0" />
         </Style>
     </Window.Styles>
 
-    <Border Background="#F2111827"
-            BorderBrush="#FF334155"
+    <Border Background="{DynamicResource ThemePanelBackground}"
+            BorderBrush="{DynamicResource ThemeBorder}"
             BorderThickness="1"
             CornerRadius="18"
             Padding="22">
@@ -53,11 +60,11 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8"
                             PointerPressed="HeaderBar_PointerPressed">
-                    <TextBlock Text="🚀" FontSize="16" VerticalAlignment="Center" />
+                    <Image Source="/Assets/rocket.png" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center" />
                     <TextBlock Text="LaunchPad" FontSize="15" FontWeight="SemiBold"
-                               Foreground="#FF67E8F9" VerticalAlignment="Center" />
+                               Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
                     <TextBlock Text="command launcher" FontSize="15"
-                               Foreground="#FF94A3B8" VerticalAlignment="Center" />
+                               Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding SecretLockIcon}"
@@ -72,25 +79,29 @@
                 </StackPanel>
             </Grid>
 
-            <Border Grid.Row="1" Background="#FF020617" BorderBrush="#FF334155"
+            <Border x:Name="CommandInputBorder" Grid.Row="1" Classes="command-input" Background="{DynamicResource ThemeInputBackground}" BorderBrush="{DynamicResource ThemeBorder}"
                     BorderThickness="1" CornerRadius="10" Padding="12,8">
                 <Grid ClipToBounds="True" ColumnDefinitions="12,*">
                     <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandText}"
                              FontFamily="Cascadia Mono, Consolas"
-                              FontSize="22" Foreground="#FFE2E8F0"
+                              FontSize="22" Foreground="{DynamicResource ThemeText}"
                              Background="Transparent" BorderThickness="0" Padding="12,0,0,0"
+                             FocusAdorner="{x:Null}"
+                             GotFocus="CommandBox_GotFocus" LostFocus="CommandBox_LostFocus"
+                             SelectionBrush="{DynamicResource ThemeTextSelection}"
+                             SelectionForegroundBrush="{DynamicResource ThemeTextSelectionForeground}"
                              TextWrapping="NoWrap"
                              ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                              VerticalContentAlignment="Center"
-                             CaretBrush="#FF67E8F9" />
+                             CaretBrush="{DynamicResource ThemeAccent}" />
                     <TextBlock Grid.Column="1" Text="Enter a command" IsVisible="{Binding ShowCommandPlaceholder}"
                                IsHitTestVisible="False" VerticalAlignment="Center"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
-                               Foreground="#FF64748B" />
+                                Foreground="{DynamicResource ThemeMutedText}" />
                     <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
                                TextWrapping="NoWrap" ClipToBounds="True">
-                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="#FF64748B"/></TextBlock.Inlines>
+                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="{DynamicResource ThemeMutedText}"/></TextBlock.Inlines>
                     </TextBlock>
                 </Grid>
             </Border>
@@ -98,19 +109,19 @@
             <Grid Grid.Row="2" Margin="3,12,3,0">
                 <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <TextBlock x:Name="UsageTextBlock"
-                                Foreground="#FF94A3B8" FontFamily="Cascadia Mono, Consolas"
+                                 Foreground="{DynamicResource ThemeSecondaryText}" FontFamily="Cascadia Mono, Consolas"
                                FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"
                                Margin="0,0,0,8" />
                     <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="6"
                           Margin="0,0,0,8">
-                        <TextBlock Text="Target:" Foreground="#FF64748B" FontSize="12" />
-                        <TextBlock Grid.Column="1" Text="{Binding TargetPreviewDisplay}" Foreground="#FFE86AAE"
+                        <TextBlock Text="Target:" Foreground="{DynamicResource ThemeMutedText}" FontSize="12" />
+                        <TextBlock Grid.Column="1" Text="{Binding TargetPreviewDisplay}" Foreground="{DynamicResource ThemeTarget}"
                                    FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" />
                     </Grid>
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6"
                                 IsVisible="{Binding HasCommandExpansionPreview}" Margin="0,0,0,8">
-                        <TextBlock Text="Expanded:" Foreground="#FF64748B" FontSize="12" />
-                        <TextBlock Text="{Binding CommandExpansionPreview}" Foreground="#FF67E8F9"
+                        <TextBlock Text="Expanded:" Foreground="{DynamicResource ThemeMutedText}" FontSize="12" />
+                        <TextBlock Text="{Binding CommandExpansionPreview}" Foreground="{DynamicResource ThemeAccent}"
                                    FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
                     <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto"
@@ -126,8 +137,8 @@
                                                    FontFamily="Cascadia Mono, Consolas" FontSize="13">
                                             <TextBlock.Inlines>
                                                 <Run Text="{Binding DisplayText}" />
-                                                <Run Text="{Binding KindText}" Foreground="#FF64748B" />
-                                                <Run Text="{Binding CyanText}" Foreground="#FF67E8F9" />
+                                                <Run Text="{Binding KindText}" Foreground="{DynamicResource ThemeMutedText}" />
+                                                <Run Text="{Binding CyanText}" Foreground="{DynamicResource ThemeAccent}" />
                                             </TextBlock.Inlines>
                                         </TextBlock>
                                     </Border>
@@ -136,10 +147,10 @@
                         </ItemsControl>
                     </ScrollViewer>
                     <StackPanel Grid.Row="4" Spacing="6">
-                        <Border Height="1" Background="#FF334155" />
+                        <Border Height="1" Background="{DynamicResource ThemeBorder}" />
                         <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*" ColumnSpacing="6"
                               IsVisible="{Binding IsValueOutput}">
-                            <TextBlock Text="Result:" Foreground="#FF67E8F9" FontSize="14"
+                            <TextBlock Text="Result:" Foreground="{DynamicResource ThemeAccent}" FontSize="14"
                                        VerticalAlignment="Top" />
                             <TextBlock Grid.Column="1" Text="{Binding StatusMessage}"
                                        Foreground="{Binding StatusMessageBrush}" FontSize="14"
@@ -154,10 +165,10 @@
             </Grid>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0">
-                <TextBlock Text="Alt/Option+Space  toggle" Foreground="#FF64748B" FontSize="11" />
-                <TextBlock Text="Enter  run" Foreground="#FF64748B" FontSize="11" />
-                <TextBlock Text="Tab  complete" Foreground="#FF64748B" FontSize="11" />
-                <TextBlock Text="Esc  close" Foreground="#FF64748B" FontSize="11" />
+                <TextBlock Text="Alt/Option+Space  toggle" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
+                <TextBlock Text="Enter  run" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
+                <TextBlock Text="Tab  complete" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
+                <TextBlock Text="Esc  close" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
             </StackPanel>
         </Grid>
     </Border>

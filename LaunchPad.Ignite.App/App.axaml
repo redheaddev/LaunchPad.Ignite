@@ -9,9 +9,30 @@
         <local:ViewLocator />
     </Application.DataTemplates>
 
+    <Application.Resources>
+        <SolidColorBrush x:Key="ThemeWindowBackground" Color="#FF111827" />
+        <SolidColorBrush x:Key="ThemePanelBackground" Color="#F2111827" />
+        <SolidColorBrush x:Key="ThemeInputBackground" Color="#FF020617" />
+        <SolidColorBrush x:Key="ThemeBorder" Color="#FF334155" />
+        <SolidColorBrush x:Key="ThemeText" Color="#FFE2E8F0" />
+        <SolidColorBrush x:Key="ThemeSecondaryText" Color="#FF94A3B8" />
+        <SolidColorBrush x:Key="ThemeMutedText" Color="#FF64748B" />
+        <SolidColorBrush x:Key="ThemeAccent" Color="#FF67E8F9" />
+        <SolidColorBrush x:Key="ThemeHighlight" Color="#FF1E3A5F" />
+        <SolidColorBrush x:Key="ThemeTextSelectionForeground" Color="#FF000000" />
+        <SolidColorBrush x:Key="ThemeCommandFocus" Color="#FF67E8F9" />
+        <SolidColorBrush x:Key="ThemeNavigationSelected" Color="#FF1E3A5F" />
+        <SolidColorBrush x:Key="ThemeTarget" Color="#FFE86AAE" />
+        <SolidColorBrush x:Key="ThemeRequiredArgument" Color="#FF86EFAC" />
+        <SolidColorBrush x:Key="ThemeOptionalArgument" Color="#FF94A3B8" />
+        <SolidColorBrush x:Key="ThemeChecked" Color="#FF67E8F9" />
+        <SolidColorBrush x:Key="ThemeStatus" Color="#FF64748B" />
+        <x:String x:Key="SelectedColorTheme">default</x:String>
+    </Application.Resources>
+
     <TrayIcon.Icons>
         <TrayIcons>
-            <TrayIcon Icon="/Assets/avalonia-logo.ico"
+            <TrayIcon Icon="/Assets/rocket.ico"
                       ToolTipText="LaunchPad.Ignite">
                 <TrayIcon.Menu>
                     <NativeMenu>

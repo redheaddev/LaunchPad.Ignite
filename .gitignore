@@ -12,6 +12,7 @@
 [Rr]elease/
 [Aa]rtifacts/
 [Pp]ublish/
+[Bb]uild-validation/
 
 # Test output
 [Tt]est[Rr]esults/

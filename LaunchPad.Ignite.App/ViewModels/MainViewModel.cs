@@ -21,8 +21,6 @@ namespace LaunchPad.Ignite.App.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
-    private static readonly IBrush ValueOutputBrush = new SolidColorBrush(Color.FromRgb(0x67, 0xE8, 0xF9));
-    private static readonly IBrush StatusMessageBrushDefault = new SolidColorBrush(Color.FromRgb(0x64, 0x74, 0x8B));
     private CommandCompletionSession _completionSession = null!;
     private CommandCatalog _catalog = null!;
     private CommandLineParser _parser = null!;
@@ -66,6 +64,10 @@ public partial class MainViewModel : ViewModelBase
         _extensionStateStore = new ExtensionStateStore();
         _secretStore = PlatformSecretStore.Create();
         _profileSettingsStore = new ProfileSettingsStore();
+        ColorThemeService.MigrateLegacyThemes(_profileSettingsStore);
+        ColorThemeService.Apply(ColorThemeService.Resolve(
+            _profileSettingsStore.GetValue("app:colorTheme", ColorTheme.Default.Id),
+            _profileSettingsStore));
         _applicationSettings = new ApplicationSettingsLoader().Load();
         _processStarter = new SystemProcessStarter();
         _secretAccessGate = new SecretAccessGate();
@@ -233,7 +235,7 @@ public partial class MainViewModel : ViewModelBase
     }
 
     public SettingsViewModel CreateSettingsViewModel()
-        => new(_applicationSettings, _extensions, _profileSettingsStore, _extensionStateStore, InitializeCommandRuntime);
+        => new(_applicationSettings, _extensions, _profileSettingsStore, _extensionStateStore, InitializeCommandRuntime, ColorThemeService.Apply);
 
     public async Task ImportCommandPackAsync(string path)
     {
@@ -300,7 +302,8 @@ public partial class MainViewModel : ViewModelBase
 
     public IBrush SecretLockBrush => SecretAccessLocked ? Brushes.Gold : Brushes.Gray;
 
-    public IBrush StatusMessageBrush => IsValueOutput ? ValueOutputBrush : StatusMessageBrushDefault;
+    public IBrush StatusMessageBrush => Application.Current?.Resources[
+        IsValueOutput ? "ThemeAccent" : "ThemeStatus"] as IBrush ?? Brushes.Gray;
 
     public bool IsValueOutput
     {

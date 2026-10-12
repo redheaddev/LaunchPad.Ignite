@@ -1,9 +1,11 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.ComponentModel;
@@ -24,6 +26,7 @@ public partial class MainWindow : Window
 {
     private readonly SimpleGlobalHook _globalHook = new();
     private readonly TextBox _commandBox;
+    private readonly Border _commandInputBorder;
     private readonly ItemsControl _completionList;
     private readonly TextBlock _commandTextOverlay;
     private readonly TextBlock _usageTextBlock;
@@ -36,6 +39,7 @@ public partial class MainWindow : Window
     private bool _metaPressed;
     private bool _activationKeyPressed;
     private bool _secretDialogIsOpen;
+    private bool _commandBoxHasFocus;
     private int? _pathSelectionAnchor;
     private int? _pathSelectionCaret;
     private int _pathSelectionStart = -1;
@@ -47,12 +51,16 @@ public partial class MainWindow : Window
         InitializeComponent();
         _commandBox = this.FindControl<TextBox>("CommandBox")
             ?? throw new InvalidOperationException("Command input control was not found.");;
+        _commandInputBorder = this.FindControl<Border>("CommandInputBorder")
+            ?? throw new InvalidOperationException("Command input border was not found.");
         _completionList = this.FindControl<ItemsControl>("CompletionList")
             ?? throw new InvalidOperationException("Completion list control was not found.");
         _commandTextOverlay = this.FindControl<TextBlock>("CommandTextOverlay")
             ?? throw new InvalidOperationException("Command text overlay was not found.");
         _usageTextBlock = this.FindControl<TextBlock>("UsageTextBlock")
             ?? throw new InvalidOperationException("Usage text control was not found.");
+        ColorThemeService.ThemeChanged += UpdateUsageText;
+        ColorThemeService.ThemeChanged += UpdateCommandInputBorder;
         DataContextChanged += (_, _) =>
         {
             if (DataContext is INotifyPropertyChanged viewModel)
@@ -68,6 +76,7 @@ public partial class MainWindow : Window
 
             UpdateUsageText();
         };
+        Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://LaunchPad.Ignite.App/Assets/rocket.ico")));
         _globalHook.KeyPressed += GlobalHook_KeyPressed;
         _globalHook.KeyReleased += GlobalHook_KeyReleased;
         Deactivated += MainWindow_Deactivated;
@@ -75,6 +84,30 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
         Opened += MainWindow_Opened;
         Closed += MainWindow_Closed;
+    }
+
+    private void CommandBox_GotFocus(object? sender, RoutedEventArgs e)
+    {
+        _commandBoxHasFocus = true;
+        UpdateCommandInputBorder();
+    }
+
+    private void CommandBox_LostFocus(object? sender, RoutedEventArgs e)
+    {
+        _commandBoxHasFocus = false;
+        UpdateCommandInputBorder();
+    }
+
+    private void UpdateCommandInputBorder()
+    {
+        if (Application.Current?.Resources is not { } resources)
+        {
+            return;
+        }
+
+        _commandInputBorder.BorderBrush = resources[
+            _commandBoxHasFocus ? "ThemeCommandFocus" : "ThemeBorder"] as IBrush;
+        _commandInputBorder.BorderThickness = _commandBoxHasFocus ? new Thickness(2) : new Thickness(1);
     }
 
     private void UpdateUsageText()
@@ -111,7 +144,7 @@ public partial class MainWindow : Window
         {
             _usageTextBlock.Inlines.Add(new Avalonia.Controls.Documents.Run(commandText[..commandAndActionEnd])
             {
-                Foreground = new SolidColorBrush(Color.Parse("#FF86EFAC"))
+                Foreground = Application.Current?.Resources["ThemeRequiredArgument"] as IBrush
             });
             position = commandAndActionEnd;
         }
@@ -145,8 +178,8 @@ public partial class MainWindow : Window
             var run = new Avalonia.Controls.Documents.Run(commandText[opening..(closing + 1)])
             {
                 Foreground = optional
-                    ? new SolidColorBrush(Color.Parse("#FF94A3B8"))
-                    : new SolidColorBrush(Color.Parse("#FF86EFAC"))
+                    ? Application.Current?.Resources["ThemeOptionalArgument"] as IBrush
+                    : Application.Current?.Resources["ThemeRequiredArgument"] as IBrush
             };
             if (optional)
             {
@@ -726,6 +759,8 @@ public partial class MainWindow : Window
     {
         _globalHook.KeyPressed -= GlobalHook_KeyPressed;
         _globalHook.KeyReleased -= GlobalHook_KeyReleased;
+        ColorThemeService.ThemeChanged -= UpdateUsageText;
+        ColorThemeService.ThemeChanged -= UpdateCommandInputBorder;
         try
         {
             _globalHook.Dispose();
