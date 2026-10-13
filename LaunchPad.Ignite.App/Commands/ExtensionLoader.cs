@@ -227,7 +227,6 @@ public sealed class ExtensionLoader
     private static string[] GetDefaultExtensionRoots()
         =>
         [
-            Path.Combine(AppContext.BaseDirectory, "extensions"),
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "LaunchPad.Ignite",

@@ -11,3 +11,6 @@
 - When updating parser rules, update `LaunchPad.Ignite.App/rules-parser.txt` rather than `.github/copilot-instructions.md`; the former is the intended parser rules file.
 - When implementing alphabetical sorting requested for displayed lists, apply it consistently to every user-visible list in the app, rather than only reordering one source file's definitions.
 - Use `ListSelectionMode.Single` and `ListSelectionMode.Multiple` rather than `Minimal` and `Normal`; enum names should describe selection cardinality.
+
+## PowerShell Command Guidelines
+- Prefer a single semicolon-separated command line or separate commands one at a time when pasting multiline blocks containing multiple PowerShell commands in Developer PowerShell 7.

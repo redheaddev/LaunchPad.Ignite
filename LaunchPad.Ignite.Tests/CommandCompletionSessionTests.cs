@@ -29,6 +29,80 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void RightAcceptsOneCommandTokenAndPreservesRemainingInput()
+    {
+        var schema = new CommandSchema(
+            [],
+            [new CommandDefinition("extension", "url", "", [new CommandActionDefinition("default", "", "", "https://example.test", [])])]);
+        var session = new CommandCompletionSession(new CommandCatalog(schema), new CommandSchemaValueProvider(schema));
+        session.UpdateInputText("ex install media-1.0.1,ado-1.0.1");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("extension install media-1.0.1,ado-1.0.1", state.InputText);
+        Assert.Equal("extension ", state.InputText[..state.CaretIndex!.Value]);
+    }
+
+    [Fact]
+    public void RightAcceptsNextTokenFromWholeLineSuggestion()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandText = "ex";
+
+        viewModel.HandleInputKeyAsync(CommandInputKey.Right).GetAwaiter().GetResult();
+
+        Assert.Equal("extension ", viewModel.CommandText);
+    }
+
+    [Fact]
+    public void RightAcceptsOneArgumentTokenAndPreservesTextAfterComma()
+    {
+        var session = CreateListSession(ListSelectionMode.Multiple, ["media-1.0.1", "ado-1.0.1", "weather-1.0.0"]);
+        session.UpdateInputText("list media-1.0.1,ad,weather-1.0.0");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("list media-1.0.1,ado-1.0.1,weather-1.0.0", state.InputText);
+        Assert.Equal("list media-1.0.1,ado-1.0.1", state.InputText[..state.CaretIndex!.Value]);
+    }
+
+    [Fact]
+    public void RightAcceptsGhostCommaAndNextChecklistValueTogether()
+    {
+        var session = CreateListSession(ListSelectionMode.Multiple, ["media-1.0.1", "ado-1.0.1", "weather-1.0.0"]);
+        session.UpdateInputText("list media-1.0.1");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("list media-1.0.1,ado-1.0.1", state.InputText);
+        Assert.Equal(state.InputText.Length, state.CaretIndex);
+    }
+
+    [Fact]
+    public void RightAcceptsQuotedChecklistValueContainingSpacesAsOneToken()
+    {
+        var session = CreateListSession(ListSelectionMode.Multiple, ["team project", "other value"]);
+        session.UpdateInputText("list \"team ");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("list \"team project\"", state.InputText);
+        Assert.Equal(state.InputText.Length, state.CaretIndex);
+    }
+
+    [Fact]
+    public void RightCompletesPartialChecklistValueBeforeComma()
+    {
+        var session = CreateListSession(ListSelectionMode.Multiple, ["media-1.0.1", "ado-1.0.1", "weather-1.0.0"]);
+        session.UpdateInputText("list media-1.0.1,ad,weather-1.0.0");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("list media-1.0.1,ado-1.0.1,weather-1.0.0", state.InputText);
+        Assert.Equal("list media-1.0.1,ado-1.0.1", state.InputText[..state.CaretIndex!.Value]);
+    }
+
+    [Fact]
     public void CommandSuggestionsAreFilteredByTypedPrefix()
     {
         var session = new CommandCompletionSession(

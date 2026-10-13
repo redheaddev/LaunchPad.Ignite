@@ -25,4 +25,14 @@ public class CommandLineTokenizerTests
 
         Assert.Equal("two words", tokens[1].Value);
     }
+
+    [Fact]
+    public void FindTokenBoundaryKeepsQuotedSpacesAndCommaInsideValue()
+    {
+        const string input = "\"value, value value\"] next";
+
+        var boundary = _tokenizer.FindTokenBoundary(input, 0);
+
+        Assert.Equal(input.IndexOf(" next", StringComparison.Ordinal), boundary);
+    }
 }

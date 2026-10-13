@@ -70,6 +70,47 @@ public class ExtensionPackageManagerTests
     }
 
     [Fact]
+    public void InstallPackagesInstallsAllPackagesAndRefreshesOnce()
+    {
+        using var directory = new TemporaryDirectory();
+        var packageDirectory = Path.Combine(directory.Path, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        File.Copy(CreatePackage(directory.Path, id: "sample"), Path.Combine(packageDirectory, "sample-1.0.0.zip"));
+        File.Copy(CreatePackage(directory.Path, id: "other"), Path.Combine(packageDirectory, "other-1.0.0.zip"));
+        var extensionRoot = Path.Combine(directory.Path, "extensions");
+        var packageManager = new ExtensionPackageManager(extensionRoot, packageDirectory);
+        IReadOnlyList<string>? refreshedIds = null;
+
+        var installedIds = packageManager.InstallPackages(
+            ["sample-1.0.0", "other-1.0.0"],
+            ids => refreshedIds = ids);
+
+        Assert.Equal(["sample", "other"], installedIds);
+        Assert.Equal(["sample", "other"], refreshedIds);
+        Assert.True(File.Exists(Path.Combine(extensionRoot, "sample", "extension.json")));
+        Assert.True(File.Exists(Path.Combine(extensionRoot, "other", "extension.json")));
+    }
+
+    [Fact]
+    public void FailedBatchInstallRefreshRestoresAllPreviouslyInstalledPackages()
+    {
+        using var directory = new TemporaryDirectory();
+        var extensionRoot = Path.Combine(directory.Path, "extensions");
+        var packageManager = new ExtensionPackageManager(extensionRoot);
+        packageManager.Install(CreatePackage(directory.Path, marker: "original-sample", id: "sample"));
+        packageManager.Install(CreatePackage(directory.Path, marker: "original-other", id: "other"));
+        var replacementSample = CreatePackage(directory.Path, marker: "replacement-sample", id: "sample");
+        var replacementOther = CreatePackage(directory.Path, marker: "replacement-other", id: "other");
+
+        Assert.Throws<InvalidOperationException>(() => packageManager.InstallPackages(
+            [replacementSample, replacementOther],
+            _ => throw new InvalidOperationException("runtime reload failed")));
+
+        Assert.Contains("original-sample", File.ReadAllText(Path.Combine(extensionRoot, "sample", "extension.json")));
+        Assert.Contains("original-other", File.ReadAllText(Path.Combine(extensionRoot, "other", "extension.json")));
+    }
+
+    [Fact]
     public void FailedUninstallRefreshRestoresExtensionDirectory()
     {
         using var directory = new TemporaryDirectory();
@@ -143,6 +184,120 @@ public class ExtensionPackageManagerTests
     }
 
     [Fact]
+    public void ExtensionCommandInstallsMultipleSelectedPackages()
+    {
+        using var directory = new TemporaryDirectory();
+        var packageDirectory = Path.Combine(directory.Path, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        File.Copy(CreatePackage(directory.Path, id: "sample"), Path.Combine(packageDirectory, "sample-1.0.0.zip"));
+        File.Copy(CreatePackage(directory.Path, id: "other"), Path.Combine(packageDirectory, "other-1.0.0.zip"));
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json"));
+        var packageManager = new ExtensionPackageManager(Path.Combine(directory.Path, "extensions"), packageDirectory);
+        var schema = new CommandSchema([], [ExtensionCommandModel.Definition]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["extension"]),
+            new CommandSchemaValueProvider(schema, new ExtensionIdsArgumentValueProvider([])));
+        var refreshCount = 0;
+        var model = new ExtensionCommandModel(stateStore, [], () => refreshCount++, packageManager);
+
+        var parsed = parser.Parse("extension install sample-1.0.0,other-1.0.0");
+        Assert.Equal(CommandParseStatus.Valid, parsed.Status);
+        var result = model.Execute(parsed.ParsedCommand!);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Extensions 'sample', 'other' installed.", result.Message);
+        Assert.Equal(1, refreshCount);
+        Assert.True(stateStore.IsEnabled("sample"));
+        Assert.True(stateStore.IsEnabled("other"));
+    }
+
+    [Fact]
+    public void ExtensionInstallWithoutArgumentListsAvailablePackages()
+    {
+        using var directory = new TemporaryDirectory();
+        var packageDirectory = Path.Combine(directory.Path, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        File.WriteAllText(Path.Combine(packageDirectory, "media-1.0.0.zip"), string.Empty);
+        File.WriteAllText(Path.Combine(packageDirectory, "ado-1.0.1.zip"), string.Empty);
+        var schema = new CommandSchema([], [ExtensionCommandModel.Definition]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["extension"]),
+            new CommandSchemaValueProvider(schema, new ExtensionIdsArgumentValueProvider([])));
+        var model = new ExtensionCommandModel(
+            new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json")),
+            [],
+            packageManager: new ExtensionPackageManager(
+                Path.Combine(directory.Path, "extensions"),
+                packageDirectory));
+
+        var parsed = parser.Parse("extension install");
+        Assert.Equal(CommandParseStatus.Incomplete, parsed.Status);
+        var result = model.ListAvailablePackages();
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.IsValueOutput);
+        Assert.Equal(
+            "Available extension packages:" + Environment.NewLine + "  ado-1.0.1" + Environment.NewLine + "  media-1.0.0",
+            result.Message);
+    }
+
+    [Fact]
+    public void ExtensionInstallWithoutArgumentReportsWhenNoPackagesAreAvailable()
+    {
+        using var directory = new TemporaryDirectory();
+        var schema = new CommandSchema([], [ExtensionCommandModel.Definition]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["extension"]),
+            new CommandSchemaValueProvider(schema, new ExtensionIdsArgumentValueProvider([])));
+        var model = new ExtensionCommandModel(
+            new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json")),
+            [],
+            packageManager: new ExtensionPackageManager(
+                Path.Combine(directory.Path, "extensions"),
+                Path.Combine(directory.Path, "packages")));
+
+        var parsed = parser.Parse("extension install");
+        Assert.Equal(CommandParseStatus.Incomplete, parsed.Status);
+        var result = model.ListAvailablePackages();
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.IsValueOutput);
+        Assert.Equal("No extension packages are available.", result.Message);
+    }
+
+    [Fact]
+    public void ExtensionCommandInstallsPackageByIdFromPackageInbox()
+    {
+        using var directory = new TemporaryDirectory();
+        var packageDirectory = Path.Combine(directory.Path, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        File.Copy(
+            CreatePackage(directory.Path, marker: "older", version: "1.0.9"),
+            Path.Combine(packageDirectory, "sample-1.0.9.zip"));
+        File.Copy(
+            CreatePackage(directory.Path, marker: "newer", version: "1.0.10"),
+            Path.Combine(packageDirectory, "sample-1.0.10.zip"));
+        var extensionRoot = Path.Combine(directory.Path, "extensions");
+        var packageManager = new ExtensionPackageManager(extensionRoot, packageDirectory);
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json"));
+        var schema = new CommandSchema([], [ExtensionCommandModel.Definition]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["extension"]),
+            new CommandSchemaValueProvider(schema, new ExtensionIdsArgumentValueProvider([])));
+        var model = new ExtensionCommandModel(stateStore, [], packageManager: packageManager);
+
+        var parsed = parser.Parse("extension install sample");
+        Assert.Equal(CommandParseStatus.Valid, parsed.Status);
+        var result = model.Execute(parsed.ParsedCommand!);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Extension 'sample' installed.", result.Message);
+        var installedManifest = JsonNode.Parse(File.ReadAllText(Path.Combine(extensionRoot, "sample", "extension.json")))!;
+        Assert.Equal("1.0.10", installedManifest["version"]!.GetValue<string>());
+        Assert.Equal("newer", installedManifest["marker"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ExtensionCommandUninstallRemovesDisabledState()
     {
         using var directory = new TemporaryDirectory();
@@ -197,7 +352,11 @@ public class ExtensionPackageManagerTests
         Assert.False(Directory.Exists(Path.Combine(directory.Path, "extensions", "other")));
     }
 
-    private static string CreatePackage(string directory, string? marker = null, string id = "sample")
+    private static string CreatePackage(
+        string directory,
+        string? marker = null,
+        string id = "sample",
+        string version = "1.0.0")
     {
         var packagePath = Path.Combine(directory, $"{Guid.NewGuid():N}.zip");
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
@@ -207,11 +366,12 @@ public class ExtensionPackageManagerTests
               "id": "sample",
               "name": "Sample extension",
               "namespace": "sample",
-              "version": "1.0",
+              "version": "1.0.0",
               "schema": { "lists": [], "commands": [] }
             }
             """)!.AsObject();
         manifest["id"] = id;
+        manifest["version"] = version;
         if (marker is not null)
         {
             manifest["marker"] = marker;

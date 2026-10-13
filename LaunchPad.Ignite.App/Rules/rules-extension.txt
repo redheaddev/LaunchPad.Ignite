@@ -4,10 +4,9 @@ Extension rules
 Discovery
 ---------
 Extensions are discovered in child directories that contain an `extension.json` manifest. Directories without a manifest are ignored. The loader checks these roots in order:
-  1. <application-base-directory>/extensions
-  2. %LocalAppData%/LaunchPad.Ignite/extensions
+	1. %LocalAppData%/LaunchPad.Ignite/extensions
 
-Directories within each root are enumerated in case-insensitive path order. Missing roots are ignored. If manifests use the same `id` (case-insensitively), the manifest encountered later replaces the earlier one; therefore a matching user extension replaces the app-installed extension.
+Directories within the root are enumerated in case-insensitive path order. A missing root is ignored. Extensions in the application or build output are not discovered. ZIP packages in the sibling `%LocalAppData%/LaunchPad.Ignite/packages` directory are not loaded until explicitly installed.
 
 Manifest
 --------
@@ -35,7 +34,7 @@ Type `!` to list discovered extensions as `id | version [enabled]` or `id | vers
 
 Install and uninstall extensions
 --------------------------------
-Package an extension as a ZIP file with `extension.json` at the archive root and the files referenced by the manifest beside it. Install a local package with `extension install <zip-path>`. The extension ID in the manifest determines its user installation directory under `%LocalAppData%/LaunchPad.Ignite/extensions`. Installing an extension with an existing ID replaces its user-installed copy; installed extensions with the same ID as an app-bundled extension override the bundled copy.
+Package an extension as a ZIP file with `extension.json` at the archive root and the files referenced by the manifest beside it. Bare `extension install` lists the ZIP packages available in `%LocalAppData%/LaunchPad.Ignite/packages`; typing a trailing space after `install` shows package-name checklist suggestions for the required `<id|zip-path>` argument. Select multiple packages from the checklist to install them together, or pass one or more comma-separated ZIP paths. Install by passing a ZIP path with `extension install <zip-path>`, or publish `<id>-<major>.<minor>.<patch>.zip` to the package directory and install it with `extension install <id>`. ID-based installation selects the highest semantic version available for that ID. `scripts/Publish-Extension.ps1` builds and publishes one extension package; it increments the manifest patch version unless `-Version` is provided. The extension ID in the manifest determines its installation directory under `%LocalAppData%/LaunchPad.Ignite/extensions`. Installing an extension with an existing ID replaces its user-installed copy. Batch installation validates and stages all selected packages before replacing any existing installation, then reloads active commands and functions once.
 
 Use `extension uninstall <id>` to remove a user-installed extension. App-bundled extensions cannot be uninstalled. Install and uninstall reload the active commands and functions immediately; if the reload fails, the filesystem operation is rolled back. ZIP entries that escape the package directory and packages without a valid root manifest are rejected.
 

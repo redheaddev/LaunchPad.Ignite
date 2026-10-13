@@ -49,10 +49,14 @@ public sealed class ExtensionCommandModel : ICommandModel
             [
                 new CommandActionDefinition(
                     "install",
-                    "Install or replace an extension from a ZIP package",
-                    "extension install <zip-path>",
+                    "List available packages or install an extension from a ZIP package or the profile package inbox",
+                    "extension install <id|zip-path>",
                     "extension install",
-                    [new CommandArgumentDefinition("zip-path")]),
+                    [new CommandArgumentDefinition(
+                        "zip-path",
+                        Ref: ExtensionPackageNamesArgumentValueProvider.Reference,
+                        ListMode: ListSelectionMode.Multiple,
+                        AllowCustomValues: true)]),
                 new CommandActionDefinition(
                     "pack-install",
                     "Install a command pack from a JSON manifest",
@@ -126,7 +130,9 @@ public sealed class ExtensionCommandModel : ICommandModel
     {
         if (string.Equals(command.Action.Name, "install", StringComparison.OrdinalIgnoreCase))
         {
-            return Install(command.Arguments["zip-path"]);
+            return command.Arguments.TryGetValue("zip-path", out var packageReference)
+                ? Install(packageReference)
+                : ListAvailablePackages();
         }
 
         if (string.Equals(command.Action.Name, "uninstall", StringComparison.OrdinalIgnoreCase))
@@ -251,26 +257,32 @@ public sealed class ExtensionCommandModel : ICommandModel
 
     private CommandExecutionResult Install(string packagePath)
     {
-        string? extensionId = null;
-        var previousEnabledState = true;
+        var packageReferences = packagePath.Split(',').Select(reference => reference.Trim()).ToArray();
+        var previousEnabledStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            extensionId = _packageManager.Install(packagePath, installedId =>
+            var extensionIds = _packageManager.InstallPackages(packageReferences, installedIds =>
             {
-                extensionId = installedId;
-                previousEnabledState = _stateStore.IsEnabled(installedId);
-                _stateStore.SetEnabled(installedId, enabled: true);
+                foreach (var installedId in installedIds)
+                {
+                    previousEnabledStates.Add(installedId, _stateStore.IsEnabled(installedId));
+                }
+
+                _stateStore.SetEnabled(installedIds, enabled: true);
                 _stateChanged?.Invoke();
             });
-            return new CommandExecutionResult(true, $"Extension '{extensionId}' installed.");
+            var installedLabel = extensionIds.Count == 1
+                ? $"Extension '{extensionIds[0]}'"
+                : $"Extensions '{string.Join("', '", extensionIds)}'";
+            return new CommandExecutionResult(true, $"{installedLabel} installed.");
         }
         catch (Exception exception)
         {
-            if (extensionId is not null)
+            if (previousEnabledStates.Count > 0)
             {
                 try
                 {
-                    _stateStore.SetEnabled(extensionId, previousEnabledState);
+                    _stateStore.SetEnabled(previousEnabledStates);
                 }
                 catch (Exception rollbackException)
                 {
@@ -281,6 +293,26 @@ public sealed class ExtensionCommandModel : ICommandModel
 
             return new CommandExecutionResult(false, $"Unable to install extension: {exception.Message}");
         }
+    }
+
+    public CommandExecutionResult ListAvailablePackages()
+    {
+        var packageNames = _packageManager.GetAvailablePackageNames();
+        if (packageNames.Count == 0)
+        {
+            return new CommandExecutionResult(true, "No extension packages are available.")
+            {
+                IsValueOutput = true
+            };
+        }
+
+        return new CommandExecutionResult(
+            true,
+            "Available extension packages:" + Environment.NewLine
+            + string.Join(Environment.NewLine, packageNames.Select(packageName => $"  {packageName}")))
+        {
+            IsValueOutput = true
+        };
     }
 
     private CommandExecutionResult Uninstall(string argument)

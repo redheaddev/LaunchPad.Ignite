@@ -13,8 +13,10 @@ public sealed class CommandCompletionSession
     private CompletionResolution _resolution;
     private List<string> _selectedValues = [];
     private string _listFilter = string.Empty;
+    private int _listFilterStart;
     private string? _preferredHighlightValue;
     private int _highlightedIndex;
+    private int? _caretIndex;
 
     public CommandCompletionSession(
         CommandCatalog catalog,
@@ -46,6 +48,7 @@ public sealed class CommandCompletionSession
         }
 
         _inputText = inputText;
+        _caretIndex = null;
         if (ShouldOpenListImmediately(_inputText))
         {
             _inputText += ' ';
@@ -66,10 +69,14 @@ public sealed class CommandCompletionSession
 
     public CommandCompletionState HandleKey(CommandInputKey key)
     {
+        _caretIndex = null;
         switch (key)
         {
             case CommandInputKey.Tab:
                 AcceptOrToggle();
+                break;
+            case CommandInputKey.Right:
+                AcceptToken();
                 break;
             case CommandInputKey.Space:
                 ExitChecklist();
@@ -166,6 +173,98 @@ public sealed class CommandCompletionSession
         _inputText = _inputText[.._resolution.TokenStart] + FormatListValue(selectedItem) + (appendSpace ? " " : string.Empty);
         _preferredHighlightValue = null;
         Recalculate(resetSelection: true);
+    }
+
+    private void AcceptToken()
+    {
+        if (_resolution.AwaitingSeparator)
+        {
+            _inputText += ' ';
+            _preferredHighlightValue = null;
+            Recalculate(resetSelection: true);
+            return;
+        }
+
+        var items = GetVisibleItems();
+        var selectedValue = _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple && _listFilter.Length == 0
+            ? items.FirstOrDefault(item => !_selectedValues.Contains(item.Value, StringComparer.OrdinalIgnoreCase))?.Value
+            : items.Count > 0 && _highlightedIndex >= 0 && _highlightedIndex < items.Count
+                ? items[_highlightedIndex].Value
+                : null;
+        if (selectedValue is null)
+        {
+            if (_resolution.IsChecklist
+                && _resolution.ListMode == ListSelectionMode.Multiple
+                && _listFilter.Length == 0
+                && _selectedValues.Count == _valueProvider.GetValues(_resolution.Argument!.Ref!).Count)
+            {
+                _caretIndex = _inputText.Length;
+                State = BuildState();
+            }
+
+            return;
+        }
+
+        var selectedItem = FormatListValue(selectedValue);
+        var replacementStart = _resolution.TokenStart;
+        var tokenEnd = FindTokenEnd(_inputText, replacementStart);
+        var replacement = selectedItem;
+        if (_resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple)
+        {
+            var argumentEnd = FindArgumentEnd(_inputText, _resolution.TokenStart);
+            tokenEnd = argumentEnd;
+            if (_listFilter.Length == 0 && _selectedValues.Count > 0)
+            {
+                var separator = argumentEnd > _resolution.TokenStart && _inputText[argumentEnd - 1] == ','
+                    ? string.Empty
+                    : ",";
+                replacementStart = argumentEnd;
+                replacement = separator + selectedItem;
+            }
+            else
+            {
+                replacementStart = _listFilterStart;
+                tokenEnd = FindTokenEnd(_inputText, replacementStart);
+            }
+
+            if (selectedValue.Any(char.IsWhiteSpace)
+                && replacementStart == _resolution.TokenStart
+                && tokenEnd == argumentEnd)
+            {
+                replacement = string.Join(',', _selectedValues.Select(FormatListValue).Append(selectedItem));
+                replacementStart = _resolution.TokenStart;
+            }
+
+        }
+
+        var suffix = _inputText[tokenEnd..];
+        if (suffix.Length == 0 && !_resolution.IsChecklist && ShouldAppendSpace(selectedValue))
+        {
+            suffix = " ";
+        }
+
+        _inputText = _inputText[..replacementStart] + replacement + suffix;
+        var acceptedEnd = replacementStart + replacement.Length;
+        if (suffix.StartsWith(' '))
+        {
+            acceptedEnd++;
+        }
+
+        _preferredHighlightValue = null;
+        Recalculate(resetSelection: true);
+        _caretIndex = acceptedEnd;
+        State = BuildState();
+    }
+
+    private static int FindTokenEnd(string input, int tokenStart)
+    {
+        return new LaunchPad.Ignite.Core.Parsing.CommandLineTokenizer().FindTokenBoundary(input, tokenStart);
+    }
+
+    private static int FindArgumentEnd(string input, int argumentStart)
+    {
+        return new LaunchPad.Ignite.Core.Parsing.CommandLineTokenizer()
+            .FindTokenBoundary(input, argumentStart, commaIsBoundary: false);
     }
 
     private static string FormatListValue(string value)
@@ -315,8 +414,13 @@ public sealed class CommandCompletionSession
         var token = _resolution.Prefix;
         var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
         var parts = token.Split(',');
+        var rawArgumentEnd = FindArgumentEnd(_inputText, _resolution.TokenStart);
+        var rawParts = _resolution.TokenStart < rawArgumentEnd
+            ? _inputText[_resolution.TokenStart..rawArgumentEnd].Split(',')
+            : [];
         _selectedValues = [];
         _listFilter = string.Empty;
+        _listFilterStart = _resolution.TokenStart;
 
         var partsToRead = parts.Length;
         if (parts.Length > 0 && parts[^1].Length == 0)
@@ -332,14 +436,15 @@ public sealed class CommandCompletionSession
             {
                 _selectedValues.Add(value);
             }
-            else if (isLastPart)
+            else if (isLastPart || _resolution.ListMode == ListSelectionMode.Multiple)
             {
                 _listFilter = value;
+                _listFilterStart = _resolution.TokenStart + rawParts.Take(index).Sum(part => part.Length + 1);
             }
             else
             {
-                _listFilter = string.Join(',', parts.Skip(index));
-                break;
+                _listFilter = value;
+                _listFilterStart = _resolution.TokenStart + rawParts.Take(index).Sum(part => part.Length + 1);
             }
         }
 
@@ -428,7 +533,8 @@ public sealed class CommandCompletionSession
             ghostText,
             items,
             _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple,
-            CanComplete: _resolution.AwaitingSeparator || items.Count > 0);
+            CanComplete: _resolution.AwaitingSeparator || items.Count > 0,
+            CaretIndex: _caretIndex);
     }
 
     private bool TryGetGhostSuffix(string candidate, string prefix, out string suffix)

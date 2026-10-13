@@ -42,26 +42,5 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Ado\LaunchPad.Ignite.Extensions.Ado.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Media\LaunchPad.Ignite.Extensions.Media.csproj" ReferenceOutputAssembly="false" />
-    <Content Include="..\LaunchPad.Ignite.Extensions.Ado\extension.json">
-      <Link>extensions\ado\extension.json</Link>
-      <TargetPath>extensions\ado\extension.json</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\LaunchPad.Ignite.Extensions.Media\extension.json">
-      <Link>extensions\media\extension.json</Link>
-      <TargetPath>extensions\media\extension.json</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
-
-  <Target Name="CopyAdoExtensionAssemblyAfterBuild" AfterTargets="Build">
-    <MakeDir Directories="$(OutputPath)extensions\ado" />
-    <Copy SourceFiles="$(SolutionDir)LaunchPad.Ignite.Extensions.Ado\bin\$(Configuration)\net8.0\LaunchPad.Ignite.Extensions.Ado.dll" DestinationFiles="$(OutputPath)extensions\ado\LaunchPad.Ignite.Extensions.Ado.dll" />
-  </Target>
-  <Target Name="CopyMediaExtensionAssemblyAfterBuild" AfterTargets="Build">
-    <MakeDir Directories="$(OutputPath)extensions\media" />
-    <Copy SourceFiles="$(SolutionDir)LaunchPad.Ignite.Extensions.Media\bin\$(Configuration)\net8.0\LaunchPad.Ignite.Extensions.Media.dll" DestinationFiles="$(OutputPath)extensions\media\LaunchPad.Ignite.Extensions.Media.dll" />
-  </Target>
 </Project>

@@ -9,4 +9,7 @@ public interface ICommandExecutor
     CommandExecutionResult Execute(ParsedCommand command);
 }
 
-public sealed record CommandExecutionResult(bool Succeeded, string Message);
+public sealed record CommandExecutionResult(bool Succeeded, string Message)
+{
+    public bool IsValueOutput { get; init; }
+}

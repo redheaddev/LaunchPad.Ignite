@@ -30,7 +30,7 @@ internal sealed class CommandCompletionResolver
     public CompletionResolution Resolve(string input)
     {
         var tokens = _tokenizer.Tokenize(input);
-        var trailingWhitespace = _tokenizer.EndsWithWhitespace(input);
+        var trailingWhitespace = EndsWithUnquotedWhitespace(input);
 
         if (!trailingWhitespace && tokens.Count > 0)
         {
@@ -190,7 +190,6 @@ internal sealed class CommandCompletionResolver
         var tokenStart = trailingWhitespace || argumentTokens.Length == 0
             ? input.Length
             : argumentTokens[^1].Start;
-
         if (argumentIndex >= action.Arguments.Count)
         {
             return None(tokenStart);
@@ -264,6 +263,20 @@ internal sealed class CommandCompletionResolver
         => command.QualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Namespace?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool EndsWithUnquotedWhitespace(string input)
+    {
+        var insideQuotes = false;
+        for (var index = 0; index < input.Length; index++)
+        {
+            if (input[index] == '"')
+            {
+                insideQuotes = !insideQuotes;
+            }
+        }
+
+        return !insideQuotes && input.Length > 0 && char.IsWhiteSpace(input[^1]);
+    }
 
     private static CompletionResolution None(int tokenStart, bool awaitingSeparator = false)
         => CreateResolution(CompletionKind.None, string.Empty, tokenStart, Array.Empty<string>()) with

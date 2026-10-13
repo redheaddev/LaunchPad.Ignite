@@ -82,7 +82,6 @@ public partial class MainViewModel : ViewModelBase
             _terminalLauncher);
         _directFilePathHandler = new DirectFilePathHandler(_processStarter, terminalLauncher: _terminalLauncher);
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
-        new ProfileAdoExtensionInstaller().Install();
         InitializeCommandRuntime();
         _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
@@ -146,12 +145,14 @@ public partial class MainViewModel : ViewModelBase
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
         var shortcutResolver = new ShortcutResolver(schema.Commands);
+        var extensionPackageManager = new ExtensionPackageManager();
         var valueProvider = new CommandSchemaValueProvider(
             schema,
             new CompositeArgumentValueProvider(
                 new SecretNamesArgumentValueProvider(_secretStore),
                 new ThemeNamesArgumentValueProvider(_profileSettingsStore),
                 new ProfileBackupFilesArgumentValueProvider(profileBackupService),
+                new ExtensionPackageNamesArgumentValueProvider(extensionPackageManager),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
                 new InstalledComponentIdsArgumentValueProvider(componentIds, _extensionStateStore)));
         var functionExpander = new CommandTextFunctionExpander(
@@ -204,6 +205,7 @@ public partial class MainViewModel : ViewModelBase
             _extensionStateStore,
             extensionIds,
             InitializeCommandRuntime,
+            packageManager: extensionPackageManager,
             commandPackIds: commandPackIds,
             commandPackLoader: new CommandPackLoader(_extensionStateStore),
             confirmPackReplacement: ConfirmCommandPackReplacement);
@@ -485,9 +487,15 @@ public partial class MainViewModel : ViewModelBase
         var shortcutList = GetShortcutSuggestions(CommandText);
         if (shortcutList.Count > 0
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
-                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last)
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
+                or CommandInputKey.Right)
         {
-            if (key == CommandInputKey.Tab)
+            if (key == CommandInputKey.Right)
+            {
+                var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, shortcutList.Count - 1);
+                AcceptNextSuggestionToken(CommandText, shortcutList[selectedIndex].Key);
+            }
+            else if (key == CommandInputKey.Tab)
             {
                 var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, shortcutList.Count - 1);
                 CommandText = shortcutList[selectedIndex].Key;
@@ -508,12 +516,36 @@ public partial class MainViewModel : ViewModelBase
 
         var historySuggestions = GetHistorySuggestions(CommandText);
         if (historySuggestions.Count > 0
+            && (key != CommandInputKey.Right || _highlightedCompletionIndex < historySuggestions.Count)
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
-                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last)
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
+                or CommandInputKey.Right)
         {
             var regularCount = _completionSession.State.Items.Count;
             var historyCount = historySuggestions.Count;
-            if (key == CommandInputKey.Tab)
+            if (key == CommandInputKey.Right && _highlightedCompletionIndex < historyCount)
+            {
+                var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, historyCount - 1);
+                var selectedHistoryEntry = historySuggestions[selectedIndex];
+                var isHistoryFilter = TryGetHistoryFilter(CommandText, out var historySearchText);
+                var completionInput = isHistoryFilter
+                    ? historySearchText
+                    : CommandText;
+                AcceptNextSuggestionToken(
+                    completionInput,
+                    selectedHistoryEntry.CommandText,
+                    skipLeadingWhitespace: true);
+                var updatedHistorySuggestions = GetHistorySuggestions(CommandText);
+                var selectedHistoryIndex = updatedHistorySuggestions
+                    .ToList()
+                    .FindIndex(entry => entry == selectedHistoryEntry);
+                if (selectedHistoryIndex >= 0)
+                {
+                    _highlightedCompletionIndex = selectedHistoryIndex;
+                    ApplyCompletionState(_completionSession.State);
+                }
+            }
+            else if (key == CommandInputKey.Tab)
             {
                 if (_highlightedCompletionIndex < historyCount)
                 {
@@ -545,6 +577,22 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
+        if (key == CommandInputKey.Right
+            && (HasCompletionOptions || _completionSession.State.IsChecklistActive))
+        {
+            var previousText = CommandText;
+            var completionState = _completionSession.HandleKey(key);
+            ApplyCompletionState(completionState);
+            if (!string.Equals(previousText, CommandText, StringComparison.Ordinal)
+                && Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                && desktop.MainWindow is MainWindow mainWindow)
+            {
+                mainWindow.SetPendingCaretIndex(completionState.CaretIndex ?? CommandText.Length);
+            }
+
+            return false;
+        }
+
         if (key == CommandInputKey.Tab && TryExpandTypedShortcut())
         {
             return false;
@@ -552,6 +600,54 @@ public partial class MainViewModel : ViewModelBase
 
         ApplyCompletionState(_completionSession.HandleKey(key));
         return false;
+    }
+
+    private void AcceptNextSuggestionToken(
+        string input,
+        string suggestion,
+        bool skipLeadingWhitespace = false)
+    {
+        if (!suggestion.StartsWith(input, StringComparison.OrdinalIgnoreCase)
+            || suggestion.Length == input.Length)
+        {
+            return;
+        }
+
+        var remaining = suggestion[input.Length..];
+        var start = 0;
+        if (skipLeadingWhitespace)
+        {
+            while (start < remaining.Length && char.IsWhiteSpace(remaining[start]))
+            {
+                start++;
+            }
+        }
+
+        int acceptedLength;
+        if (remaining.StartsWith(','))
+        {
+            acceptedLength = _tokenizer.FindTokenBoundary(remaining, 1);
+        }
+        else
+        {
+            var boundary = _tokenizer.FindTokenBoundary(remaining, start);
+            acceptedLength = boundary;
+            if (!skipLeadingWhitespace
+                && boundary >= 0
+                && boundary < remaining.Length
+                && remaining[boundary] == ' ')
+            {
+                acceptedLength++;
+            }
+        }
+
+        var updatedText = input + remaining[..acceptedLength];
+        CommandText = updatedText;
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.SetPendingCaretIndex(updatedText.Length);
+        }
     }
 
     partial void OnCommandTextChanged(string value)
@@ -639,12 +735,19 @@ public partial class MainViewModel : ViewModelBase
         _activeArgumentPathContext = null;
         _isDirectPathCompletionActive = false;
         _directPathSuggestions = Array.Empty<string>();
-        CompletionGhostText = TryGetHistoryFilter(state.InputText, out _)
-            || TryGetShortcutFilter(state.InputText, out _)
+        var selectedHistoryText = selectedHistoryIndex >= 0
+            ? historySuggestions[selectedHistoryIndex].CommandText
+            : null;
+        var selectedHistoryPrefixLength = TryGetHistoryFilter(state.InputText, out var historySearchText)
+            ? historySearchText.Length
+            : state.InputText.Length;
+        CompletionGhostText = TryGetShortcutFilter(state.InputText, out _)
             ? string.Empty
-            : selectedHistoryIndex >= 0
-                ? historySuggestions[selectedHistoryIndex].CommandText[state.InputText.Length..]
-                : state.InputText.Length == 0 ? string.Empty : state.GhostText;
+            : selectedHistoryText is not null
+                ? selectedHistoryPrefixLength <= selectedHistoryText.Length
+                    ? selectedHistoryText[selectedHistoryPrefixLength..]
+                    : string.Empty
+                : state.InputText.Length == 0 ? selectedCommandText ?? string.Empty : state.GhostText;
         var usage = GetUsageText(previewCommandText);
         UsageText = usage.Text;
         UsageCommandText = usage.CommandText;
@@ -658,7 +761,6 @@ public partial class MainViewModel : ViewModelBase
                 var cyanText = string.Empty;
                 var kindText = string.Empty;
                 if (!state.IsChecklistActive
-                    && isCommandCompletion
                     && _catalog.TryGetCommand(item.Value, out var command))
                 {
                     var sourceLabel = _commandSources.TryGetValue(command.QualifiedName, out var sourceId)
@@ -666,7 +768,6 @@ public partial class MainViewModel : ViewModelBase
                         : string.Empty;
                     displayText = item.Value;
                     cyanText = sourceLabel;
-                    kindText = $" · {command.Kind.ToUpperInvariant()}";
                 }
 
                 var listSuggestionCount = historySuggestions.Count + shortcutSuggestions.Count;
@@ -1143,6 +1244,19 @@ public sealed record CompletionOptionViewModel(
 
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
+            var incompleteTokens = _tokenizer.Tokenize(expandedText);
+            if (incompleteTokens.Count == 2
+                && string.Equals(incompleteTokens[0].Value, "extension", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(incompleteTokens[1].Value, "install", StringComparison.OrdinalIgnoreCase)
+                && _commandExecutors.TryGetValue("extension", out var extensionExecutor)
+                && extensionExecutor is ExtensionCommandModel extensionModel)
+            {
+                var packageListResult = extensionModel.ListAvailablePackages();
+                SetStatusMessage(packageListResult.Message, packageListResult.IsValueOutput);
+                CommandText = string.Empty;
+                return true;
+            }
+
             SetStatusMessage("Command is incomplete.");
             return false;
         }
@@ -1188,7 +1302,7 @@ public sealed record CompletionOptionViewModel(
             return false;
         }
 
-        SetStatusMessage(executionResult.Message);
+        SetStatusMessage(executionResult.Message, executionResult.IsValueOutput);
         if (!executionResult.Succeeded)
         {
             return false;
@@ -1341,7 +1455,7 @@ public sealed record CompletionOptionViewModel(
             return false;
         }
 
-        SetStatusMessage(executionResult.Message);
+        SetStatusMessage(executionResult.Message, executionResult.IsValueOutput);
         if (!executionResult.Succeeded)
         {
             return false;
@@ -1350,4 +1464,5 @@ public sealed record CompletionOptionViewModel(
         CommandText = string.Empty;
         return true;
     }
+
 }

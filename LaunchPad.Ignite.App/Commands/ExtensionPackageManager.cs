@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace LaunchPad.Ignite.App.Commands;
 
@@ -19,77 +20,133 @@ public sealed class ExtensionPackageManager
     };
 
     private readonly string _extensionRoot;
+    private readonly string _packageDirectory;
+
+    public static string DefaultPackageDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "LaunchPad.Ignite",
+        "packages");
 
     public ExtensionPackageManager()
         : this(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "LaunchPad.Ignite",
-            "extensions"))
+            "extensions"), DefaultPackageDirectory)
     {
     }
 
     public ExtensionPackageManager(string extensionRoot)
+        : this(extensionRoot, DefaultPackageDirectory)
+    {
+    }
+
+    public ExtensionPackageManager(string extensionRoot, string packageDirectory)
     {
         _extensionRoot = Path.GetFullPath(extensionRoot);
+        _packageDirectory = Path.GetFullPath(packageDirectory);
     }
 
     public string Install(string packagePath, Action<string>? runtimeRefresh = null)
+        => InstallPackages([packagePath], ids => runtimeRefresh?.Invoke(ids[0]))[0];
+
+    public IReadOnlyList<string> InstallPackages(
+        IEnumerable<string> packageReferences,
+        Action<IReadOnlyList<string>>? runtimeRefresh = null)
     {
-        if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+        var resolvedPackagePaths = packageReferences
+            .Select(ResolvePackagePath)
+            .ToArray();
+        if (resolvedPackagePaths.Length == 0)
         {
-            throw new FileNotFoundException("Extension package was not found.", packagePath);
+            throw new ArgumentException("At least one extension package is required.", nameof(packageReferences));
+        }
+
+        foreach (var packagePath in resolvedPackagePaths)
+        {
+            if (!File.Exists(packagePath))
+            {
+                throw new FileNotFoundException("Extension package was not found.", packagePath);
+            }
         }
 
         var transactionRoot = Path.Combine(Path.GetDirectoryName(_extensionRoot)!, ".extension-transactions");
         Directory.CreateDirectory(transactionRoot);
         var transactionDirectory = Path.Combine(transactionRoot, Guid.NewGuid().ToString("N"));
-        var stagedExtensionDirectory = Path.Combine(transactionDirectory, "package");
-        Directory.CreateDirectory(stagedExtensionDirectory);
+        var stagedRoot = Path.Combine(transactionDirectory, "staged");
+        var backupRoot = Path.Combine(transactionDirectory, "previous");
+        var stagedDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var installedDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var backupDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var extensionIds = new List<string>();
 
-        string? backupDirectory = null;
-        string? installedDirectory = null;
         try
         {
-            ExtractPackage(packagePath, stagedExtensionDirectory);
-            var manifestPath = Path.Combine(stagedExtensionDirectory, ManifestFileName);
-            if (!File.Exists(manifestPath))
+            Directory.CreateDirectory(stagedRoot);
+            for (var index = 0; index < resolvedPackagePaths.Length; index++)
             {
-                throw new InvalidDataException($"Extension package must contain '{ManifestFileName}' at its root.");
+                var stagedDirectory = Path.Combine(stagedRoot, index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                Directory.CreateDirectory(stagedDirectory);
+                ExtractPackage(resolvedPackagePaths[index], stagedDirectory);
+                var manifestPath = Path.Combine(stagedDirectory, ManifestFileName);
+                if (!File.Exists(manifestPath))
+                {
+                    throw new InvalidDataException($"Extension package must contain '{ManifestFileName}' at its root.");
+                }
+
+                var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
+                    ?? throw new InvalidDataException($"Extension package manifest '{manifestPath}' is empty.");
+                ValidateManifestId(manifest.Id);
+                if (!stagedDirectories.TryAdd(manifest.Id, stagedDirectory))
+                {
+                    throw new InvalidDataException($"Multiple selected packages have the extension ID '{manifest.Id}'.");
+                }
+
+                extensionIds.Add(manifest.Id);
             }
 
-            var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
-                ?? throw new InvalidDataException("Extension package manifest is empty.");
-            ValidateManifestId(manifest.Id);
-            _ = new ExtensionLoader([transactionDirectory]).Load();
+            _ = new ExtensionLoader([stagedRoot]).Load();
 
             Directory.CreateDirectory(_extensionRoot);
-            installedDirectory = Path.Combine(_extensionRoot, manifest.Id);
-            if (Directory.Exists(installedDirectory)
-                && (File.GetAttributes(installedDirectory) & FileAttributes.ReparsePoint) != 0)
+            foreach (var extensionId in extensionIds)
             {
-                throw new InvalidDataException($"Extension install directory '{installedDirectory}' cannot be a link.");
+                var installedDirectory = Path.Combine(_extensionRoot, extensionId);
+                installedDirectories.Add(extensionId, installedDirectory);
+                if (Directory.Exists(installedDirectory))
+                {
+                    if ((File.GetAttributes(installedDirectory) & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new InvalidDataException($"Extension install directory '{installedDirectory}' cannot be a link.");
+                    }
+
+                    Directory.CreateDirectory(backupRoot);
+                    var backupDirectory = Path.Combine(backupRoot, extensionId);
+                    Directory.Move(installedDirectory, backupDirectory);
+                    backupDirectories.Add(extensionId, backupDirectory);
+                }
+
+                Directory.Move(stagedDirectories[extensionId], installedDirectory);
             }
 
-            if (Directory.Exists(installedDirectory))
-            {
-                backupDirectory = Path.Combine(transactionDirectory, "previous");
-                Directory.Move(installedDirectory, backupDirectory);
-            }
-
-            Directory.Move(stagedExtensionDirectory, installedDirectory);
-            runtimeRefresh?.Invoke(manifest.Id);
-            return manifest.Id;
+            runtimeRefresh?.Invoke(extensionIds);
+            return extensionIds;
         }
         catch
         {
-            if (installedDirectory is not null && Directory.Exists(installedDirectory))
+            foreach (var extensionId in extensionIds.AsEnumerable().Reverse())
             {
-                Directory.Delete(installedDirectory, recursive: true);
-            }
+                if (installedDirectories.TryGetValue(extensionId, out var installedDirectory)
+                    && Directory.Exists(installedDirectory))
+                {
+                    Directory.Delete(installedDirectory, recursive: true);
+                }
 
-            if (backupDirectory is not null && Directory.Exists(backupDirectory) && installedDirectory is not null)
-            {
-                Directory.Move(backupDirectory, installedDirectory);
+                if (backupDirectories.TryGetValue(extensionId, out var backupDirectory)
+                    && Directory.Exists(backupDirectory)
+                    && installedDirectory is not null
+                    && !Directory.Exists(installedDirectory))
+                {
+                    Directory.Move(backupDirectory, installedDirectory);
+                }
             }
 
             throw;
@@ -101,6 +158,19 @@ public sealed class ExtensionPackageManager
                 Directory.Delete(transactionDirectory, recursive: true);
             }
         }
+    }
+
+    public IReadOnlyList<string> GetAvailablePackageNames()
+    {
+        if (!Directory.Exists(_packageDirectory))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(_packageDirectory, "*.zip")
+            .Select(packagePath => Path.GetFileNameWithoutExtension(packagePath)!)
+            .OrderBy(packageName => packageName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     public void Uninstall(string extensionId, Action<string>? runtimeRefresh = null)
@@ -222,6 +292,78 @@ public sealed class ExtensionPackageManager
         }
 
         return null;
+    }
+
+    private string ResolvePackagePath(string packageReference)
+    {
+        if (string.IsNullOrWhiteSpace(packageReference) || File.Exists(packageReference))
+        {
+            return packageReference;
+        }
+
+        if (Path.IsPathRooted(packageReference)
+            || packageReference.Contains(Path.DirectorySeparatorChar)
+            || packageReference.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return packageReference;
+        }
+
+        var packageId = packageReference.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetFileNameWithoutExtension(packageReference)
+            : packageReference;
+
+        var versionedPackageName = Regex.Match(packageId, "^(?<id>.+)-(?<version>\\d+\\.\\d+\\.\\d+)$");
+        if (versionedPackageName.Success)
+        {
+            var versionedPackageId = versionedPackageName.Groups["id"].Value;
+            ValidateManifestId(versionedPackageId);
+            return Path.Combine(_packageDirectory, $"{packageId}.zip");
+        }
+
+        ValidateManifestId(packageId);
+        var latestVersionedPackage = FindLatestVersionedPackage(packageId);
+        if (latestVersionedPackage is not null)
+        {
+            return latestVersionedPackage;
+        }
+
+        return Path.Combine(_packageDirectory, $"{packageId}.zip");
+    }
+
+    private string? FindLatestVersionedPackage(string packageId)
+    {
+        if (!Directory.Exists(_packageDirectory))
+        {
+            return null;
+        }
+
+        var prefix = $"{packageId}-";
+        string? latestPackagePath = null;
+        Version? latestVersion = null;
+        foreach (var packagePath in Directory.EnumerateFiles(_packageDirectory, "*.zip"))
+        {
+            var fileName = Path.GetFileName(packagePath);
+            if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                || !fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var versionText = fileName.Substring(prefix.Length, fileName.Length - prefix.Length - ".zip".Length);
+            if (!Regex.IsMatch(versionText, "^\\d+\\.\\d+\\.\\d+$")
+                || !Version.TryParse(versionText, out var version))
+            {
+                continue;
+            }
+
+            if (latestVersion is null || version.CompareTo(latestVersion) > 0)
+            {
+                latestVersion = version;
+                latestPackagePath = packagePath;
+            }
+        }
+
+        return latestPackagePath;
     }
 
     private static bool IsBundledExtension(string extensionId)

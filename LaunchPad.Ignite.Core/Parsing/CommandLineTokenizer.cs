@@ -46,4 +46,22 @@ public sealed class CommandLineTokenizer
 
     public bool EndsWithWhitespace(string input)
         => input.Length > 0 && char.IsWhiteSpace(input[^1]);
+
+    public int FindTokenBoundary(string input, int start, bool commaIsBoundary = true)
+    {
+        var insideQuotes = false;
+        for (var index = start; index < input.Length; index++)
+        {
+            if (input[index] == '"')
+            {
+                insideQuotes = !insideQuotes;
+            }
+            else if (!insideQuotes && (char.IsWhiteSpace(input[index]) || (commaIsBoundary && input[index] == ',')))
+            {
+                return index;
+            }
+        }
+
+        return input.Length;
+    }
 }

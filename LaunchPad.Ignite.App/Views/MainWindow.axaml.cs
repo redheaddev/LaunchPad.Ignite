@@ -769,6 +769,9 @@ public partial class MainWindow : Window
             inputKey = e.Key switch
             {
                 Key.Tab when viewModel.CanComplete || viewModel.CanExpandTypedShortcut => CommandInputKey.Tab,
+                Key.Right when (viewModel.CanComplete || viewModel.IsChecklistActive)
+                    && _commandBox.SelectionStart == _commandBox.SelectionEnd
+                    && _commandBox.CaretIndex == (_commandBox.Text?.Length ?? 0) => CommandInputKey.Right,
                 Key.Enter => CommandInputKey.Enter,
                 Key.Space when viewModel.IsChecklistActive => CommandInputKey.Space,
                 Key.Up when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Up,

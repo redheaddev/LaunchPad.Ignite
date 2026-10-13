@@ -3,6 +3,7 @@ namespace LaunchPad.Ignite.Core.Completion;
 public enum CommandInputKey
 {
     Tab,
+    Right,
     Space,
     Enter,
     Escape,
@@ -29,4 +30,5 @@ public sealed record CommandCompletionState(
     IReadOnlyList<CompletionItem> Items,
     bool IsChecklistActive,
     string? Message = null,
-    bool CanComplete = false);
+    bool CanComplete = false,
+    int? CaretIndex = null);
