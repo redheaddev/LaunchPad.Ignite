@@ -18,19 +18,25 @@ public sealed class SecretCommandModel
     private readonly ISecretEntryDialogService _dialogService;
     private readonly IClipboardService _clipboardService;
     private readonly ISecretTerminalLauncher _terminalLauncher;
+    private readonly ISecretEnvironmentHandoff? _vscodeTerminalHandoff;
+    private readonly ExtensionSecretAccessPolicy? _extensionSecretAccessPolicy;
 
     public SecretCommandModel(
         ISecretStore secretStore,
         ISecretAccessGate accessGate,
         ISecretEntryDialogService dialogService,
         IClipboardService clipboardService,
-        ISecretTerminalLauncher terminalLauncher)
+        ISecretTerminalLauncher terminalLauncher,
+        ISecretEnvironmentHandoff? vscodeTerminalHandoff = null,
+        ExtensionSecretAccessPolicy? extensionSecretAccessPolicy = null)
     {
         _secretStore = secretStore;
         _accessGate = accessGate;
         _dialogService = dialogService;
         _clipboardService = clipboardService;
         _terminalLauncher = terminalLauncher;
+        _vscodeTerminalHandoff = vscodeTerminalHandoff;
+        _extensionSecretAccessPolicy = extensionSecretAccessPolicy;
     }
 
     public async Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command)
@@ -49,6 +55,7 @@ public sealed class SecretCommandModel
                 "copy-value" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: false),
                 "copy-env" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: true),
                 "shell" => await OpenShellAsync(command.Arguments["secretNames"], command.Arguments.GetValueOrDefault("path")),
+                "vscode" => await OpenVsCodeAsync(command),
                 _ => new CommandExecutionResult(false, $"Unknown secret action '{command.Action.Name}'.")
             };
         }
@@ -264,6 +271,60 @@ public sealed class SecretCommandModel
 
         _terminalLauncher.OpenShell(environment, workingDirectory);
         return new CommandExecutionResult(true, "Terminal opened with the selected secrets in its environment.");
+    }
+
+    private async Task<CommandExecutionResult> OpenVsCodeAsync(ParsedCommand command)
+    {
+        var namesCsv = command.Arguments.GetValueOrDefault("secretNames") ?? string.Empty;
+        var names = namesCsv.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (names.Length == 0 || names.Any(name => !IsValidName(name)))
+        {
+            return InvalidName();
+        }
+
+        if (names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length)
+        {
+            return new CommandExecutionResult(false, "Secret names must not be repeated.");
+        }
+
+        if (_extensionSecretAccessPolicy is null)
+        {
+            return new CommandExecutionResult(false, "VS Code secret access has not been configured in Settings.");
+        }
+
+        var missingGrant = names.FirstOrDefault(name => !_extensionSecretAccessPolicy.IsAllowed("vscode", name));
+        if (missingGrant is not null)
+        {
+            return new CommandExecutionResult(false,
+                $"Secret '{missingGrant}' is not permitted for the vscode extension. Manage access in Settings.");
+        }
+
+        var authorizationResult = await EnsureAuthorizedAsync();
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in names)
+        {
+            if (!_secretStore.TryGet(name, out var value))
+            {
+                return new CommandExecutionResult(false, $"Secret '{name}' was not found.");
+            }
+
+            environment.Add(name, value);
+        }
+
+        if (_vscodeTerminalHandoff is null)
+        {
+            return new CommandExecutionResult(false, "The VS Code terminal extension is unavailable.");
+        }
+
+        return await _vscodeTerminalHandoff.OpenAsync(
+            environment,
+            command.Arguments.GetValueOrDefault("path"),
+            command.Arguments.GetValueOrDefault("terminalName"));
     }
 
     private async Task<CommandExecutionResult?> EnsureAuthorizedAsync()

@@ -1,0 +1,16 @@
+{
+  "id": "np11",
+  "namespace": "np11",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
+      { "name": "cc", "kind": "url", "description": "Open ClaimCenter for NP11", "actions": [{ "name": "default", "description": "", "usage": "np11:cc", "targetTemplate": "http://gwappnp11:8080/cc/ClaimCenter.do", "arguments": [] }] },
+      { "name": "cm", "kind": "url", "description": "Open ContactManager for NP11", "actions": [{ "name": "default", "description": "", "usage": "np11:cm", "targetTemplate": "http://gwappnp11:8280/ab/ContactManager.do", "arguments": [] }] },
+      { "name": "pc", "kind": "url", "description": "Open PolicyCenter for NP11", "actions": [{ "name": "default", "description": "", "usage": "np11:pc", "targetTemplate": "http://gwappnp11:8180/pc/PolicyCenter.do", "arguments": [] }] },
+      { "name": "bc", "kind": "url", "description": "Open BillingCenter for NP11", "actions": [{ "name": "default", "description": "", "usage": "np11:bc", "targetTemplate": "http://gwappnp11:8580/bc/BillingCenter.do", "arguments": [] }] },
+      { "name": "bol", "kind": "url", "description": "Open Business Online for NP11", "actions": [{ "name": "default", "description": "", "usage": "np11:bol", "targetTemplate": "http://np11/businessonline", "arguments": [] }] }
+    ],
+    "functions": []
+  }
+}

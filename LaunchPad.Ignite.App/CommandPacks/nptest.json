@@ -1,0 +1,16 @@
+{
+  "id": "nptest",
+  "namespace": "nptest",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
+      { "name": "cc1", "kind": "url", "description": "Open ClaimCenter for NPTEST", "actions": [{ "name": "default", "description": "", "usage": "nptest:cc1", "targetTemplate": "http://gwappnptestcc01:8080/cc/ClaimCenter.do", "arguments": [] }] },
+      { "name": "cm1", "kind": "url", "description": "Open ContactManager for NPTEST", "actions": [{ "name": "default", "description": "", "usage": "nptest:cm1", "targetTemplate": "http://gwappnptestcm01:8280/ab/ContactManager.do", "arguments": [] }] },
+      { "name": "pc1", "kind": "url", "description": "Open PolicyCenter for NPTEST", "actions": [{ "name": "default", "description": "", "usage": "nptest:pc1", "targetTemplate": "http://gwappnptestpc01:8180/pc/PolicyCenter.do", "arguments": [] }] },
+      { "name": "bc1", "kind": "url", "description": "Open BillingCenter for NPTEST", "actions": [{ "name": "default", "description": "", "usage": "nptest:bc1", "targetTemplate": "http://gwappnptestbc01:8580/bc/BillingCenter.do", "arguments": [] }] },
+      { "name": "bol", "kind": "url", "description": "Open Business Online for NPTEST", "actions": [{ "name": "default", "description": "", "usage": "nptest:bol", "targetTemplate": "http://nptest/businessonline", "arguments": [] }] }
+    ],
+    "functions": []
+  }
+}

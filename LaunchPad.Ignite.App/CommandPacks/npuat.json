@@ -1,0 +1,16 @@
+{
+  "id": "npuat",
+  "namespace": "npuat",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
+      { "name": "cc1", "kind": "url", "description": "Open ClaimCenter for NPUAT", "actions": [{ "name": "default", "description": "", "usage": "npuat:cc1", "targetTemplate": "http://gwappnpuatcc01:8080/cc/ClaimCenter.do", "arguments": [] }] },
+      { "name": "cm1", "kind": "url", "description": "Open ContactManager for NPUAT", "actions": [{ "name": "default", "description": "", "usage": "npuat:cm1", "targetTemplate": "http://gwappnpuatcm01:8280/ab/ContactManager.do", "arguments": [] }] },
+      { "name": "pc1", "kind": "url", "description": "Open PolicyCenter for NPUAT", "actions": [{ "name": "default", "description": "", "usage": "npuat:pc1", "targetTemplate": "http://gwappnpuatpc01:8180/pc/PolicyCenter.do", "arguments": [] }] },
+      { "name": "bc1", "kind": "url", "description": "Open BillingCenter for NPUAT", "actions": [{ "name": "default", "description": "", "usage": "npuat:bc1", "targetTemplate": "http://gwappnpuatbc01:8580/bc/BillingCenter.do", "arguments": [] }] },
+      { "name": "bol", "kind": "url", "description": "Open Business Online for NPUAT", "actions": [{ "name": "default", "description": "", "usage": "npuat:bol", "targetTemplate": "http://npuat/businessonline", "arguments": [] }] }
+    ],
+    "functions": []
+  }
+}

@@ -17,6 +17,8 @@ public sealed record LoadedExtensions(
     IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
     IReadOnlyList<LoadedExtensionInfo> Extensions)
 {
+    public IReadOnlyList<ISecretEnvironmentHandoff> SecretEnvironmentHandoffs { get; init; } = [];
+
     public IReadOnlyDictionary<string, IAsyncCommandExecutor> AsyncExecutors { get; init; }
         = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
 
@@ -26,7 +28,7 @@ public sealed record LoadedExtensions(
     public void ConfigureCommandExecutors(
         IEnumerable<CommandVariableDefinition> variables,
         IReadOnlyDictionary<string, string> settingValues,
-        Func<string, (bool Found, string Value)> tryGetSecret,
+        Func<string, string, (bool Found, string Value)> tryGetSecret,
         Action<string> openUrl)
     {
         var settingsByNamespace = variables
@@ -67,12 +69,19 @@ public sealed record LoadedExtensions(
 
                 settings = configuredSettings;
             }
-            contextAware.Configure(settings, tryGetSecret, openUrl);
+            contextAware.Configure(
+                settings,
+                name => tryGetSecret(extensionNamespace, name),
+                openUrl);
+
         }
     }
 }
 
-public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled);
+public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled)
+{
+    public string Namespace { get; init; } = Id;
+}
 
 public sealed class ExtensionLoader
 {
@@ -147,7 +156,10 @@ public sealed class ExtensionLoader
             .Select(entry => new LoadedExtensionInfo(
                 entry.Manifest.Id,
                 string.IsNullOrWhiteSpace(entry.Manifest.Version) ? "unknown" : entry.Manifest.Version,
-                !disabledIds.Contains(entry.Manifest.Id)))
+                !disabledIds.Contains(entry.Manifest.Id))
+            {
+                Namespace = entry.Manifest.Namespace
+            })
             .OrderBy(extension => extension.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var enabledManifests = manifests.Values
@@ -166,6 +178,7 @@ public sealed class ExtensionLoader
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+        var secretEnvironmentHandoffs = new List<ISecretEnvironmentHandoff>();
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
             lists.AddRange(manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>());
@@ -182,7 +195,13 @@ public sealed class ExtensionLoader
             var extensionFunctions = (manifest.Schema.Functions ?? Array.Empty<CommandFunctionDefinition>())
                 .Select(function => LoadFunction(function, manifest, extensionDirectory))
                 .ToArray();
-            var registeredFunctionNames = LoadExecutors(manifest, extensionDirectory, executors, asyncExecutors, functionExecutors);
+            var registeredFunctionNames = LoadExecutors(
+                manifest,
+                extensionDirectory,
+                executors,
+                asyncExecutors,
+                functionExecutors,
+                secretEnvironmentHandoffs);
             var extensionFunctionNames = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var function in extensionFunctions)
             {
@@ -220,13 +239,15 @@ public sealed class ExtensionLoader
         }, executors, functionExecutors, extensionInfo)
         {
             CommandSources = commandSources,
-            AsyncExecutors = asyncExecutors
+            AsyncExecutors = asyncExecutors,
+            SecretEnvironmentHandoffs = secretEnvironmentHandoffs
         };
     }
 
     private static string[] GetDefaultExtensionRoots()
         =>
         [
+            Path.Combine(AppContext.BaseDirectory, "extensions"),
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "LaunchPad.Ignite",
@@ -330,7 +351,8 @@ public sealed class ExtensionLoader
         string extensionDirectory,
         IDictionary<string, ICommandExecutor> executors,
         IDictionary<string, IAsyncCommandExecutor> asyncExecutors,
-        IDictionary<string, ICommandFunctionExecutor> functionExecutors)
+        IDictionary<string, ICommandFunctionExecutor> functionExecutors,
+        ICollection<ISecretEnvironmentHandoff> secretEnvironmentHandoffs)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
         {
@@ -357,11 +379,12 @@ public sealed class ExtensionLoader
                 && !type.IsInterface
                 && (typeof(ICommandExecutor).IsAssignableFrom(type)
                     || typeof(IAsyncCommandExecutor).IsAssignableFrom(type)
-                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)))
+                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)
+                    || typeof(ISecretEnvironmentHandoff).IsAssignableFrom(type)))
             .ToArray();
         if (executorTypes.Length == 0)
         {
-            throw new InvalidDataException($"Extension '{manifest.Id}' assembly does not contain any command or function executors.");
+            throw new InvalidDataException($"Extension '{manifest.Id}' assembly does not contain any supported executors or handoff capabilities.");
         }
 
         var registeredFunctionNames = new List<string>();
@@ -403,6 +426,12 @@ public sealed class ExtensionLoader
                 }
 
                 registeredFunctionNames.Add(functionQualifiedName);
+            }
+
+            if (instance is ISecretEnvironmentHandoff secretEnvironmentHandoff)
+            {
+                secretEnvironmentHandoff.ConfigureExtensionRoot(extensionDirectory);
+                secretEnvironmentHandoffs.Add(secretEnvironmentHandoff);
             }
         }
 

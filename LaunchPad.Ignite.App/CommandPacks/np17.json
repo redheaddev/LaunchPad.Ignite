@@ -1,0 +1,16 @@
+{
+  "id": "np17",
+  "namespace": "np17",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
+      { "name": "cc1", "kind": "url", "description": "Open ClaimCenter for NP17", "actions": [{ "name": "default", "description": "", "usage": "np17:cc1", "targetTemplate": "http://gwappnp17cc01:8080/cc/ClaimCenter.do", "arguments": [] }] },
+      { "name": "cm1", "kind": "url", "description": "Open ContactManager for NP17", "actions": [{ "name": "default", "description": "", "usage": "np17:cm1", "targetTemplate": "http://gwappnp17cm01:8280/ab/ContactManager.do", "arguments": [] }] },
+      { "name": "pc1", "kind": "url", "description": "Open PolicyCenter for NP17", "actions": [{ "name": "default", "description": "", "usage": "np17:pc1", "targetTemplate": "http://gwappnp17pc01:8180/pc/PolicyCenter.do", "arguments": [] }] },
+      { "name": "bc1", "kind": "url", "description": "Open BillingCenter for NP17", "actions": [{ "name": "default", "description": "", "usage": "np17:bc1", "targetTemplate": "http://gwappnp17bc01:8580/bc/BillingCenter.do", "arguments": [] }] },
+      { "name": "bol", "kind": "url", "description": "Open Business Online for NP17", "actions": [{ "name": "default", "description": "", "usage": "np17:bol", "targetTemplate": "http://np17/businessonline", "arguments": [] }] }
+    ],
+    "functions": []
+  }
+}

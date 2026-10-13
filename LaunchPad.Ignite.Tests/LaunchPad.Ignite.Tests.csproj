@@ -26,6 +26,17 @@
     <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Weather\LaunchPad.Ignite.Extensions.Weather.csproj" />
     <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Ado\LaunchPad.Ignite.Extensions.Ado.csproj" />
     <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Media\LaunchPad.Ignite.Extensions.Media.csproj" />
+    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.VsCode\LaunchPad.Ignite.Extensions.VsCode.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyVsCodeExtensionAssetsForTests" AfterTargets="Build">
+    <ItemGroup>
+      <VsCodeExtensionAsset Include="..\LaunchPad.Ignite.Extensions.VsCode\bin\$(Configuration)\net8.0\extensions\vscode\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutputPath)extensions\vscode" />
+    <Copy SourceFiles="@(VsCodeExtensionAsset)"
+          DestinationFiles="@(VsCodeExtensionAsset->'$(OutputPath)extensions\vscode\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

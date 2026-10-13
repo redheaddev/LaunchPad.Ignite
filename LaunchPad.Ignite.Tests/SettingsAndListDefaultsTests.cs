@@ -127,6 +127,34 @@ public sealed class SettingsAndListDefaultsTests
     }
 
     [Fact]
+    public void SecretPermissionCheckbox_PersistsPerExtensionGrantAndDefaultsToDeny()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], []) { Settings = [] },
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            [new LoadedExtensionInfo("ado", "1.0", true) { Namespace = "ado" },
+             new LoadedExtensionInfo("vscode", "1.0", true) { Namespace = "vscode" }]);
+        var viewModel = new SettingsViewModel(
+            [], extensions, store,
+            new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json")),
+            () => { }, _ => { }, ["pat", "token"]);
+
+        var ado = Assert.Single(viewModel.ExtensionSecretPermissions.Where(extension => extension.ExtensionName == "ado"));
+        var vscode = Assert.Single(viewModel.ExtensionSecretPermissions.Where(extension => extension.ExtensionName == "vscode"));
+        Assert.All(ado.Secrets, secret => Assert.False(secret.IsAllowed));
+        Assert.All(vscode.Secrets, secret => Assert.False(secret.IsAllowed));
+
+        var patPermission = ado.Secrets.Single(secret => secret.Name == "pat");
+        patPermission.IsAllowed = true;
+
+        Assert.Equal("[\"pat\"]", store.GetValue(ExtensionSecretAccessPolicy.GetSettingName("ado"), "[]"));
+        Assert.Equal("[]", store.GetValue(ExtensionSecretAccessPolicy.GetSettingName("vscode"), "[]"));
+    }
+
+    [Fact]
     public void ProfileSettingsStore_MigratesLegacyThemeKeysIntoThemeNodes()
     {
         using var directory = new TemporaryDirectory();

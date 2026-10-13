@@ -107,6 +107,30 @@
 					</ItemsControl>
 				</ScrollViewer>
 			</Grid>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSecretsSelected}">
+				<ItemsControl ItemsSource="{Binding ExtensionSecretPermissions}">
+					<ItemsControl.ItemTemplate>
+						<DataTemplate>
+							<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,0,12">
+								<StackPanel Spacing="8">
+									<TextBlock Text="{Binding ExtensionName}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+									<TextBlock Text="Secret access is denied unless explicitly allowed below." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+									<ItemsControl ItemsSource="{Binding Secrets}">
+										<ItemsControl.ItemTemplate>
+											<DataTemplate x:DataType="vm:SecretPermissionChoiceViewModel">
+												<StackPanel Orientation="Horizontal" Spacing="8">
+													<CheckBox IsChecked="{Binding IsAllowed, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" />
+													<TextBlock Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
+												</StackPanel>
+											</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
+								</StackPanel>
+							</Border>
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
+			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSettingsListVisible}">
 				<ItemsControl ItemsSource="{Binding Settings}">
 					<ItemsControl.ItemTemplate>

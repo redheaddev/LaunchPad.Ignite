@@ -20,6 +20,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly IReadOnlyList<CommandSettingDefinition> _applicationSettings;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly Action<ColorTheme> _themeChanged;
+    private readonly IReadOnlyList<ExtensionSecretPermissionViewModel> _extensionSecretPermissions;
     private readonly Dictionary<string, Dictionary<string, string>> _themeColorDrafts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<ColorTheme> _colorThemes = [];
     private IReadOnlyList<ThemeColorEditorViewModel> _themeColors = [];
@@ -30,12 +31,13 @@ public partial class SettingsViewModel : ViewModelBase
     private SettingsNavigationItem? _selectedNavigationItem;
     public IReadOnlyList<SettingsNavigationItem> NavigationItems { get; }
     public IReadOnlyList<SettingEditorViewModel> Settings { get; private set; } = [];
+    public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
     public string Header { get; private set; } = "General";
     public string Subheader { get; private set; } = string.Empty;
     public bool IsExtensionEnabled { get; private set; } = true;
     public bool IsExtensionSelected => SelectedNavigationItem?.Category == "extension";
     public bool IsThemeSelected => SelectedNavigationItem?.Category == "theme";
-    public bool IsSettingsListVisible => !IsThemeSelected;
+    public bool IsSettingsListVisible => !IsThemeSelected && !IsSecretsSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
     public string NewThemeName
     {
@@ -82,13 +84,34 @@ public partial class SettingsViewModel : ViewModelBase
         ProfileSettingsStore settingsStore,
         ExtensionStateStore extensionStateStore,
         Action settingsChanged,
-        Action<ColorTheme> themeChanged)
+        Action<ColorTheme> themeChanged,
+        IReadOnlyList<string>? availableSecretNames = null)
     {
         _settingsStore = settingsStore;
         _settingsChanged = settingsChanged;
         _applicationSettings = applicationSettings;
         _extensionStateStore = extensionStateStore;
         _themeChanged = themeChanged;
+        var secretNames = _settingsStore.GetValues()
+            .Where(pair => pair.Key.StartsWith("secretPermissions:", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(pair => ParseSecretNames(pair.Value))
+            .Concat(availableSecretNames ?? [])
+            .Concat(extensions.Schema.Settings
+                .Where(setting => setting.SecretReference)
+                .Select(setting => _settingsStore.GetValue(setting.QualifiedName, setting.DefaultValue)))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _extensionSecretPermissions = extensions.Extensions
+            .OrderBy(extension => extension.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(extension => new ExtensionSecretPermissionViewModel(
+                extension.Id,
+                extension.Namespace,
+                secretNames,
+                ReadGrantedSecrets(extension.Namespace),
+                SaveGrantedSecrets))
+            .ToArray();
         SelectedColorThemeId = _settingsStore.GetValue("app:colorTheme", ColorTheme.Default.Id);
         ColorThemeService.MigrateLegacyThemes(_settingsStore);
         ThemeReferenceUrl = SelectedColorThemeUrl ?? string.Empty;
@@ -107,7 +130,7 @@ public partial class SettingsViewModel : ViewModelBase
         };
         foreach (var extension in extensions.Extensions.OrderBy(extension => extension.Id, StringComparer.OrdinalIgnoreCase))
         {
-            extensionSettings.TryGetValue(extension.Id, out var settingsForExtension);
+            extensionSettings.TryGetValue(extension.Namespace, out var settingsForExtension);
             var extensionLabel = settingsForExtension?.FirstOrDefault()?.Namespace ?? extension.Id;
             navigation.Add(new SettingsNavigationItem(extensionLabel, "extension", extension.Id)
             {
@@ -246,6 +269,11 @@ public partial class SettingsViewModel : ViewModelBase
             Subheader = "Choose the color palette used throughout LaunchPad.";
             Settings = [];
         }
+        else if (value.Category == "secrets")
+        {
+            Subheader = "Grant each extension access only to the secrets it needs. Unchecked secrets are denied.";
+            Settings = [];
+        }
         else
         {
             Subheader = string.Empty;
@@ -258,6 +286,8 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsExtensionSelected));
         OnPropertyChanged(nameof(IsThemeSelected));
         OnPropertyChanged(nameof(IsSettingsListVisible));
+        OnPropertyChanged(nameof(IsSecretsSelected));
+        OnPropertyChanged(nameof(ExtensionSecretPermissions));
         OnPropertyChanged(nameof(Settings));
     }
 
@@ -524,6 +554,41 @@ public partial class SettingsViewModel : ViewModelBase
         public void Update(string value) => Value = value;
     }
 
+    public bool IsSecretsSelected => SelectedNavigationItem?.Category == "secrets";
+
+    private IReadOnlyList<string> ReadGrantedSecrets(string extensionNamespace)
+    {
+        var value = _settingsStore.GetValue(ExtensionSecretAccessPolicy.GetSettingName(extensionNamespace), "[]");
+        return ParseSecretNames(value);
+    }
+
+    private void SaveGrantedSecrets(string extensionNamespace, IReadOnlyList<string> secretNames)
+    {
+        var key = ExtensionSecretAccessPolicy.GetSettingName(extensionNamespace);
+        if (secretNames.Count == 0)
+        {
+            _settingsStore.RemoveValue(key);
+        }
+        else
+        {
+            _settingsStore.SetValue(key, System.Text.Json.JsonSerializer.Serialize(secretNames));
+        }
+
+        _settingsChanged();
+    }
+
+    private static IReadOnlyList<string> ParseSecretNames(string serialized)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<string[]>(serialized) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
     private SettingEditorViewModel CreateEditor(CommandSettingDefinition definition)
     {
         var value = _settingsStore.GetValue(definition.QualifiedName, definition.DefaultValue);
@@ -563,5 +628,59 @@ public partial class SettingsViewModel : ViewModelBase
         public bool IsEnabled { get; init; }
         public IReadOnlyList<CommandSettingDefinition> AvailableSettings { get; init; } = [];
         public CommandSettingDefinition? SettingDefinition { get; init; }
+    }
+}
+
+public sealed class ExtensionSecretPermissionViewModel : ViewModelBase
+{
+    private readonly string _extensionNamespace;
+    private readonly Action<string, IReadOnlyList<string>> _save;
+
+    public string ExtensionName { get; }
+    public IReadOnlyList<SecretPermissionChoiceViewModel> Secrets { get; }
+
+    public ExtensionSecretPermissionViewModel(
+        string extensionId,
+        string extensionNamespace,
+        IReadOnlyList<string> secretNames,
+        IReadOnlyList<string> grantedSecretNames,
+        Action<string, IReadOnlyList<string>> save)
+    {
+        ExtensionName = extensionId;
+        _extensionNamespace = extensionNamespace;
+        _save = save;
+        Secrets = secretNames.Select(name => new SecretPermissionChoiceViewModel(
+            name,
+            grantedSecretNames.Contains(name, StringComparer.OrdinalIgnoreCase),
+            OnPermissionChanged)).ToArray();
+    }
+
+    private void OnPermissionChanged()
+        => _save(_extensionNamespace, Secrets.Where(secret => secret.IsAllowed).Select(secret => secret.Name).ToArray());
+}
+
+public sealed class SecretPermissionChoiceViewModel : ViewModelBase
+{
+    private readonly Action _changed;
+    private bool _isAllowed;
+
+    public string Name { get; }
+    public bool IsAllowed
+    {
+        get => _isAllowed;
+        set
+        {
+            if (SetProperty(ref _isAllowed, value))
+            {
+                _changed();
+            }
+        }
+    }
+
+    public SecretPermissionChoiceViewModel(string name, bool isAllowed, Action changed)
+    {
+        Name = name;
+        _isAllowed = isAllowed;
+        _changed = changed;
     }
 }

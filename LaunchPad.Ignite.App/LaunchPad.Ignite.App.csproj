@@ -45,5 +45,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
+    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.VsCode\LaunchPad.Ignite.Extensions.VsCode.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyVsCodeExtensionAssets" AfterTargets="Build">
+    <ItemGroup>
+      <VsCodeExtensionAsset Include="..\LaunchPad.Ignite.Extensions.VsCode\bin\$(Configuration)\net8.0\extensions\vscode\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutputPath)extensions\vscode" />
+    <Copy SourceFiles="@(VsCodeExtensionAsset)"
+          DestinationFiles="@(VsCodeExtensionAsset->'$(OutputPath)extensions\vscode\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

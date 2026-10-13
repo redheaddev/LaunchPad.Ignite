@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
-using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
@@ -251,6 +250,93 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task VsCodeHandoffReceivesSelectedSecretsPathAndTerminalName()
+    {
+        var handoff = new FakeSecretEnvironmentHandoff();
+        var model = CreateModel(
+            store: new FakeSecretStore(("token", "sensitive-value")),
+            vscodeHandoff: handoff,
+            vscodeGrants: ["token"]);
+
+        var result = await ExecuteAsync(model, "secret vscode token C:\\work Build");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("sensitive-value", handoff.Environment!["token"]);
+        Assert.Equal("C:\\work", handoff.WorkingDirectory);
+        Assert.Equal("Build", handoff.TerminalName);
+        Assert.DoesNotContain("sensitive-value", result.Message);
+    }
+
+    [Fact]
+    public async Task VsCodeHandoffPromptsForUnlockBeforeExposingSecrets()
+    {
+        var handoff = new FakeSecretEnvironmentHandoff();
+        var dialog = new FakeDialogService("wrong-password");
+        var model = CreateModel(
+            store: new FakeSecretStore(("token", "sensitive-value")),
+            gate: new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: false),
+            dialog: dialog,
+            vscodeHandoff: handoff,
+            vscodeGrants: ["token"]);
+
+        var result = await ExecuteAsync(model, "secret vscode token");
+
+        Assert.False(result.Succeeded);
+        Assert.Null(handoff.Environment);
+        Assert.Equal(["Unlock secrets"], dialog.Titles);
+    }
+
+    [Fact]
+    public async Task VsCodeHandoffRejectsSecretsNotGrantedToExtensionBeforeUnlockOrRead()
+    {
+        var store = new FakeSecretStore(("token", "sensitive-value"));
+        var handoff = new FakeSecretEnvironmentHandoff();
+        var dialog = new FakeDialogService("master-password");
+        var model = CreateModel(
+            store: store,
+            gate: new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: false),
+            dialog: dialog,
+            vscodeHandoff: handoff,
+            vscodeGrants: ["other", "permitted"]);
+
+        var result = await ExecuteAsync(model, "secret vscode token");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("not permitted for the vscode extension", result.Message);
+        Assert.Null(handoff.Environment);
+        Assert.Empty(dialog.Titles);
+        Assert.Empty(store.LastTryGetNames);
+    }
+
+    [Fact]
+    public async Task VsCodeHandoffDeniesAllSecretsWithoutAnExplicitGrant()
+    {
+        var handoff = new FakeSecretEnvironmentHandoff();
+        var model = CreateModel(
+            store: new FakeSecretStore(("token", "sensitive-value")),
+            vscodeHandoff: handoff);
+
+        var result = await ExecuteAsync(model, "secret vscode token");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("not permitted for the vscode extension", result.Message);
+        Assert.Null(handoff.Environment);
+    }
+
+    [Fact]
+    public async Task VsCodeHandoffRejectsMissingSecretWithoutStartingHandoff()
+    {
+        var handoff = new FakeSecretEnvironmentHandoff();
+        var model = CreateModel(vscodeHandoff: handoff, vscodeGrants: ["absent"]);
+
+        var result = await ExecuteAsync(model, "secret vscode absent");
+
+        Assert.False(result.Succeeded);
+        Assert.Null(handoff.Environment);
+        Assert.Contains("Secret 'absent' was not found", result.Message);
+    }
+
+    [Fact]
     public async Task RenameAndRemoveOperateOnTheSelectedSecret()
     {
         var store = new FakeSecretStore(("oldName", "value"));
@@ -293,13 +379,30 @@ public class SecretCommandModelTests
         FakeSecretAccessGate? gate = null,
         FakeClipboardService? clipboard = null,
         FakeTerminalLauncher? terminal = null,
-        FakeDialogService? dialog = null)
-        => new(
-            store ?? new FakeSecretStore(),
-            gate ?? new FakeSecretAccessGate(),
+        FakeDialogService? dialog = null,
+        FakeSecretEnvironmentHandoff? vscodeHandoff = null,
+        IReadOnlyList<string>? vscodeGrants = null)
+    {
+        var actualStore = store ?? new FakeSecretStore();
+        var actualGate = gate ?? new FakeSecretAccessGate();
+        var profileSettings = new ProfileSettingsStore(Path.Combine(Path.GetTempPath(), $"ignite-test-{Guid.NewGuid():N}.json"));
+        if (vscodeGrants is not null)
+        {
+            profileSettings.SetValue(
+                ExtensionSecretAccessPolicy.GetSettingName("vscode"),
+                System.Text.Json.JsonSerializer.Serialize(vscodeGrants));
+        }
+
+        var policy = new ExtensionSecretAccessPolicy(profileSettings, actualStore);
+        return new SecretCommandModel(
+            actualStore,
+            actualGate,
             dialog ?? new FakeDialogService("secret-value"),
             clipboard ?? new FakeClipboardService(),
-            terminal ?? new FakeTerminalLauncher());
+            terminal ?? new FakeTerminalLauncher(),
+            vscodeHandoff,
+            policy);
+    }
 
     private static async Task<CommandExecutionResult> ExecuteAsync(SecretCommandModel model, string commandText)
     {
@@ -317,9 +420,35 @@ public class SecretCommandModelTests
         return await model.ExecuteAsync(parseResult.ParsedCommand!);
     }
 
+    private sealed class FakeSecretEnvironmentHandoff : ISecretEnvironmentHandoff
+    {
+        public IReadOnlyDictionary<string, string>? Environment { get; private set; }
+
+        public string? WorkingDirectory { get; private set; }
+
+        public string? TerminalName { get; private set; }
+
+        public void ConfigureExtensionRoot(string extensionRoot)
+        {
+        }
+
+        public Task<CommandExecutionResult> OpenAsync(
+            IReadOnlyDictionary<string, string> environment,
+            string? workingDirectory,
+            string? terminalName)
+        {
+            Environment = environment;
+            WorkingDirectory = workingDirectory;
+            TerminalName = terminalName;
+            return Task.FromResult(new CommandExecutionResult(true, "VS Code terminal opened."));
+        }
+    }
+
     private sealed class FakeSecretStore : ISecretStore
     {
         private readonly Dictionary<string, string> _secrets = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<string> LastTryGetNames { get; } = [];
 
         public FakeSecretStore(params (string Name, string Value)[] secrets)
         {
@@ -331,7 +460,11 @@ public class SecretCommandModelTests
 
         public IReadOnlyList<string> GetNames() => _secrets.Keys.ToArray();
 
-        public bool TryGet(string name, out string value) => _secrets.TryGetValue(name, out value!);
+        public bool TryGet(string name, out string value)
+        {
+            LastTryGetNames.Add(name);
+            return _secrets.TryGetValue(name, out value!);
+        }
 
         public void Set(string name, string value) => _secrets[name] = value;
 

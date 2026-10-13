@@ -12,5 +12,8 @@
 - When implementing alphabetical sorting requested for displayed lists, apply it consistently to every user-visible list in the app, rather than only reordering one source file's definitions.
 - Use `ListSelectionMode.Single` and `ListSelectionMode.Multiple` rather than `Minimal` and `Normal`; enum names should describe selection cardinality.
 
+## Security Guidelines
+- Enforce extension secret access using explicit per-secret, per-extension user grants in settings, with a generic mechanism and default-deny behavior; never grant extension access unless the user explicitly permits it.
+
 ## PowerShell Command Guidelines
 - Prefer a single semicolon-separated command line or separate commands one at a time when pasting multiline blocks containing multiple PowerShell commands in Developer PowerShell 7.

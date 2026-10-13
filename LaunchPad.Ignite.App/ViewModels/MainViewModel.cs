@@ -37,7 +37,7 @@ public partial class MainViewModel : ViewModelBase
     private DirectFilePathHandler _directFilePathHandler = null!;
     private CommandArgumentPathCompletion _argumentPathCompletion = null!;
     private CommandArgumentPathContext? _activeArgumentPathContext;
-    private readonly SecretCommandModel _secretCommandModel;
+    private SecretCommandModel _secretCommandModel = null!;
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
     private readonly ExtensionStateStore _extensionStateStore;
@@ -77,12 +77,6 @@ public partial class MainViewModel : ViewModelBase
         _processStarter = new SystemProcessStarter();
         _terminalLauncher = new SystemSecretTerminalLauncher(_processStarter);
         _secretAccessGate = new SecretAccessGate();
-        _secretCommandModel = new SecretCommandModel(
-            _secretStore,
-            _secretAccessGate,
-            new AvaloniaSecretEntryDialogService(),
-            new AvaloniaClipboardService(GetSystemClipboard),
-            _terminalLauncher);
         _directFilePathHandler = new DirectFilePathHandler(_processStarter, terminalLauncher: _terminalLauncher);
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
         InitializeCommandRuntime();
@@ -95,6 +89,18 @@ public partial class MainViewModel : ViewModelBase
     private void InitializeCommandRuntime()
     {
         var extensions = new ExtensionLoader(_extensionStateStore).Load();
+        var profileSettings = _profileSettingsStore.GetValues();
+        var extensionSecretAccessPolicy = new ExtensionSecretAccessPolicy(
+            _profileSettingsStore,
+            _secretStore);
+        _secretCommandModel = new SecretCommandModel(
+            _secretStore,
+            _secretAccessGate,
+            new AvaloniaSecretEntryDialogService(),
+            new AvaloniaClipboardService(GetSystemClipboard),
+            _terminalLauncher,
+            extensions.SecretEnvironmentHandoffs.FirstOrDefault(),
+            extensionSecretAccessPolicy);
         var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
         var commandPacks = new CommandPackLoader(_extensionStateStore)
             .LoadWithSources(extensions.Schema, extensionIds);
@@ -121,8 +127,8 @@ public partial class MainViewModel : ViewModelBase
         var urlTargetOpener = new SystemUrlTargetOpener();
         extensions.ConfigureCommandExecutors(
             schema.Variables,
-            _profileSettingsStore.GetValues(),
-            name => TryGetSecret(name),
+            profileSettings,
+            (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
             url => urlTargetOpener.Open([new UrlTarget(url)]));
 
         var commands = schema.Commands
@@ -189,7 +195,7 @@ public partial class MainViewModel : ViewModelBase
                 extensions.ConfigureCommandExecutors(
                     effectiveVariables,
                     _profileSettingsStore.GetValues(),
-                    name => TryGetSecret(name),
+                    (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
                     url => urlTargetOpener.Open([new UrlTarget(url)]));
                 ApplyCompletionState(_completionSession.UpdateVariables(effectiveVariables));
             },
@@ -272,7 +278,14 @@ public partial class MainViewModel : ViewModelBase
     }
 
     public SettingsViewModel CreateSettingsViewModel()
-        => new(_applicationSettings, _extensions, _profileSettingsStore, _extensionStateStore, InitializeCommandRuntime, ColorThemeService.Apply);
+        => new(
+            _applicationSettings,
+            _extensions,
+            _profileSettingsStore,
+            _extensionStateStore,
+            InitializeCommandRuntime,
+            ColorThemeService.Apply,
+            _secretStore.GetNames());
 
     public async Task ImportCommandPackAsync(string path)
     {

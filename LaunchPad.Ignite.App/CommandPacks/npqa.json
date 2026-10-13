@@ -1,0 +1,16 @@
+{
+  "id": "npqa",
+  "namespace": "npqa",
+  "schema": {
+    "lists": [],
+    "variables": [],
+    "commands": [
+      { "name": "cc1", "kind": "url", "description": "Open ClaimCenter for NPQA", "actions": [{ "name": "default", "description": "", "usage": "npqa:cc1", "targetTemplate": "http://gwappnpqacc01:8080/cc/ClaimCenter.do", "arguments": [] }] },
+      { "name": "cm1", "kind": "url", "description": "Open ContactManager for NPQA", "actions": [{ "name": "default", "description": "", "usage": "npqa:cm1", "targetTemplate": "http://gwappnpqacm01:8280/ab/ContactManager.do", "arguments": [] }] },
+      { "name": "pc1", "kind": "url", "description": "Open PolicyCenter for NPQA", "actions": [{ "name": "default", "description": "", "usage": "npqa:pc1", "targetTemplate": "http://gwappnpqapc01:8180/pc/PolicyCenter.do", "arguments": [] }] },
+      { "name": "bc1", "kind": "url", "description": "Open BillingCenter for NPQA", "actions": [{ "name": "default", "description": "", "usage": "npqa:bc1", "targetTemplate": "http://gwappnpqabc01:8580/bc/BillingCenter.do", "arguments": [] }] },
+      { "name": "bol", "kind": "url", "description": "Open Business Online for NPQA", "actions": [{ "name": "default", "description": "", "usage": "npqa:bol", "targetTemplate": "http://npqa/businessonline", "arguments": [] }] }
+    ],
+    "functions": []
+  }
+}
