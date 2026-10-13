@@ -85,7 +85,7 @@
                     <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandText}"
                              FontFamily="Cascadia Mono, Consolas"
                               FontSize="22" Foreground="{DynamicResource ThemeText}"
-                             Background="Transparent" BorderThickness="0" Padding="12,0,0,0"
+                             Background="{DynamicResource ThemeInputBackground}" BorderThickness="0" Padding="12,0,0,0"
                              FocusAdorner="{x:Null}"
                              GotFocus="CommandBox_GotFocus" LostFocus="CommandBox_LostFocus"
                              SelectionBrush="{DynamicResource ThemeTextSelection}"
