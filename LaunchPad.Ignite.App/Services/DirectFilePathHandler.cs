@@ -43,16 +43,16 @@ public sealed class DirectFilePathHandler
 
     public bool TryOpen(string text, out CommandExecutionResult result)
     {
-        if (!IsDirectPath(text))
+        if (!_completion.TryGetCompletionPath(text, out var path))
         {
             result = new CommandExecutionResult(false, string.Empty);
             return false;
         }
 
-        var isDirectory = _directoryExists(text);
-        if (!isDirectory && !_fileExists(text))
+        var isDirectory = _directoryExists(path);
+        if (!isDirectory && !_fileExists(path))
         {
-            result = new CommandExecutionResult(false, $"Path '{text}' does not exist.");
+            result = new CommandExecutionResult(false, $"Path '{path}' does not exist.");
             return true;
         }
 
@@ -60,7 +60,7 @@ public sealed class DirectFilePathHandler
         {
             UseShellExecute = true
         };
-        startInfo.ArgumentList.Add(isDirectory ? text : $"/select,{text}");
+        startInfo.ArgumentList.Add(isDirectory ? path : $"/select,{path}");
 
         try
         {

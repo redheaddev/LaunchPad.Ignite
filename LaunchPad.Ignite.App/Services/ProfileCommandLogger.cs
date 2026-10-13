@@ -146,9 +146,17 @@ public sealed class ProfileCommandLogger
             return $"{Math.Max(1, (int)age.TotalMinutes)}m";
         }
 
-        return age < TimeSpan.FromDays(7)
-            ? $"{(int)age.TotalHours}h"
-            : $"{(int)age.TotalDays}d";
+        if (age < TimeSpan.FromDays(1))
+        {
+            return $"{(int)age.TotalHours}h";
+        }
+
+        if (age < TimeSpan.FromDays(365))
+        {
+            return $"{(int)age.TotalDays}d";
+        }
+
+        return $"{(int)(age.TotalDays / 365)}y";
     }
 
     public void RecordCommand(

@@ -90,6 +90,25 @@ public class ProfileCommandLoggerTests
         Assert.Equal(DateTimeOffset.Parse("2025-01-05T00:00:00.0000000+00:00"), history[1].RunTime);
     }
 
+    [Theory]
+    [InlineData(0, 0, 59, "59m")]
+    [InlineData(0, 1, 0, "1h")]
+    [InlineData(0, 23, 0, "23h")]
+    [InlineData(1, 0, 0, "1d")]
+    [InlineData(364, 0, 0, "364d")]
+    [InlineData(365, 0, 0, "1y")]
+    [InlineData(730, 0, 0, "2y")]
+    public void FormatsHistoryAgeUsingCompactUnits(int days, int hours, int minutes, string expected)
+    {
+        var now = DateTimeOffset.Parse("2025-01-01T00:00:00+00:00");
+
+        var age = ProfileCommandLogger.FormatHistoryAge(
+            now.AddDays(-days).AddHours(-hours).AddMinutes(-minutes),
+            now);
+
+        Assert.Equal(expected, age);
+    }
+
     [Fact]
     public void RemovesAllMatchingHistoryEntriesWithoutChangingOtherEntries()
     {
@@ -138,7 +157,7 @@ public class ProfileCommandLoggerTests
 
         var age = ProfileCommandLogger.FormatHistoryAge(now - TimeSpan.FromHours(25), now);
 
-        Assert.Equal("25h", age);
+        Assert.Equal("1d", age);
     }
 
     private static void AssertHistoryEntry(string entry, string expectedCommand)

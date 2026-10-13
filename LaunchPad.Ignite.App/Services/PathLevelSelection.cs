@@ -6,6 +6,40 @@ namespace LaunchPad.Ignite.App.Services;
 
 public static class PathLevelSelection
 {
+    public static bool IsPathSelection(string inputText, int selectionStart, int selectionEnd)
+    {
+        var start = Math.Min(selectionStart, selectionEnd);
+        var end = Math.Max(selectionStart, selectionEnd);
+        var tokens = new CommandLineTokenizer().Tokenize(inputText);
+        foreach (var token in tokens)
+        {
+            var rawToken = inputText.Substring(token.Start, token.Length);
+            var equalsIndex = token.Value.IndexOf('=');
+            var value = equalsIndex >= 0 ? token.Value[(equalsIndex + 1)..] : token.Value;
+            if (!IsAbsolutePath(value))
+            {
+                continue;
+            }
+
+            var valueOffset = equalsIndex >= 0
+                ? rawToken.IndexOf(value, rawToken.IndexOf('=') + 1, StringComparison.Ordinal)
+                : rawToken.IndexOf(value, StringComparison.Ordinal);
+            if (valueOffset < 0)
+            {
+                continue;
+            }
+
+            var pathStart = token.Start + valueOffset;
+            var pathEnd = pathStart + value.Length;
+            if (start >= pathStart && end <= pathEnd)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool TryAdjustSelection(
         string inputText,
         int caretIndex,
@@ -16,30 +50,32 @@ public static class PathLevelSelection
         out int adjustedEnd,
         out int nextCaretIndex)
     {
-        adjustedStart = selectionStart;
-        adjustedEnd = selectionEnd;
+        var normalizedSelectionStart = Math.Min(selectionStart, selectionEnd);
+        var normalizedSelectionEnd = Math.Max(selectionStart, selectionEnd);
+        adjustedStart = normalizedSelectionStart;
+        adjustedEnd = normalizedSelectionEnd;
         nextCaretIndex = caretIndex;
-        var hasSelection = selectionStart < selectionEnd;
+        var hasSelection = normalizedSelectionStart < normalizedSelectionEnd;
         if (hasSelection)
         {
             if (moveRight)
             {
-                if (!TryGetBoundary(inputText, selectionStart, moveRight: true, out var nextStart))
+                if (!TryGetBoundary(inputText, normalizedSelectionStart, moveRight: true, out var nextStart))
                 {
                     return false;
                 }
 
-                adjustedStart = Math.Min(nextStart, selectionEnd);
+                adjustedStart = Math.Min(nextStart, normalizedSelectionEnd);
                 nextCaretIndex = adjustedStart;
                 return true;
             }
 
-            if (!TryGetBoundary(inputText, selectionEnd, moveRight: false, out var previousEnd))
+            if (!TryGetBoundary(inputText, normalizedSelectionEnd, moveRight: false, out var previousEnd))
             {
                 return false;
             }
 
-            adjustedEnd = Math.Max(previousEnd, selectionStart);
+            adjustedEnd = Math.Max(previousEnd, normalizedSelectionStart);
             nextCaretIndex = adjustedEnd;
             return true;
         }
@@ -110,11 +146,21 @@ public static class PathLevelSelection
     {
         var pathEnd = pathStart + path.Length;
         var relativeCaret = caretIndex - pathStart;
-        for (var index = relativeCaret; index < path.Length; index++)
+        var nextSeparatorStart = relativeCaret;
+        if (path.StartsWith("\\\\", StringComparison.Ordinal) && nextSeparatorStart < 2)
+        {
+            nextSeparatorStart = 2;
+        }
+        else if (nextSeparatorStart < path.Length && IsSeparator(path[nextSeparatorStart]))
+        {
+            nextSeparatorStart++;
+        }
+
+        for (var index = nextSeparatorStart; index < path.Length; index++)
         {
             if (IsSeparator(path[index]))
             {
-                return pathStart + index + 1;
+                return pathStart + index;
             }
         }
 

@@ -32,6 +32,7 @@ public partial class MainViewModel : ViewModelBase
     private IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors = null!;
     private IReadOnlyDictionary<string, IAsyncCommandExecutor> _asyncCommandExecutors = null!;
     private IReadOnlyDictionary<string, string> _commandSources = null!;
+    private SnippetStore _snippetStore = null!;
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
     private CommandArgumentPathCompletion _argumentPathCompletion = null!;
@@ -41,6 +42,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly DispatcherTimer _secretAccessStateTimer;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
+    private readonly HistorySuggestionCycler _historySuggestionCycler = new();
     private IReadOnlyList<CommandHistoryEntry> _historyCommands = Array.Empty<CommandHistoryEntry>();
     private string _historyInputText = string.Empty;
     private int _highlightedCompletionIndex;
@@ -53,6 +55,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISecretTerminalLauncher _terminalLauncher;
     private bool _isExtensionListVisible;
     private bool _isDirectPathCompletionActive;
+    private bool _isHistoryPathStepping;
     private IReadOnlyList<string> _directPathSuggestions = Array.Empty<string>();
     private int _directPathHighlightedIndex;
     private bool _directPathReplacesWholeInput;
@@ -125,7 +128,8 @@ public partial class MainViewModel : ViewModelBase
         var commands = schema.Commands
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(command.Name, ExitCommandModel.Definition.Name, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(command.QualifiedName, ExtensionCommandModel.Definition.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(command.QualifiedName, ExtensionCommandModel.Definition.QualifiedName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command.Name, SnippetCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase))
             .Append(VariableCommandModel.Definition);
         commands = commands.Append(ExtensionCommandModel.Definition);
 
@@ -136,19 +140,22 @@ public partial class MainViewModel : ViewModelBase
                 .Append(ThemeCommandDefinition.Definition)
                 .Append(ProfileBackupCommandDefinitions.Backup)
                 .Append(ProfileBackupCommandDefinitions.Restore)
+                .Append(SnippetCommandDefinition.Definition)
                 .Append(ExitCommandModel.Definition)
                 .ToArray()
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet" };
         builtInKinds = [.. builtInKinds, "extension"];
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
         var shortcutResolver = new ShortcutResolver(schema.Commands);
         var extensionPackageManager = new ExtensionPackageManager();
+        _snippetStore = new SnippetStore();
         var valueProvider = new CommandSchemaValueProvider(
             schema,
             new CompositeArgumentValueProvider(
+                new SnippetNamesArgumentValueProvider(_snippetStore),
                 new SecretNamesArgumentValueProvider(_secretStore),
                 new ThemeNamesArgumentValueProvider(_profileSettingsStore),
                 new ProfileBackupFilesArgumentValueProvider(profileBackupService),
@@ -199,7 +206,14 @@ public partial class MainViewModel : ViewModelBase
         };
         var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
-            ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore)
+            ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore),
+            ["snippet"] = new SnippetCommandModel(
+                _snippetStore,
+                _secretStore,
+                new AvaloniaSnippetDialogService(),
+                _secretAccessGate,
+                new AvaloniaSecretEntryDialogService(),
+                _terminalLauncher)
         };
         commandExecutors["extension"] = new ExtensionCommandModel(
             _extensionStateStore,
@@ -376,9 +390,11 @@ public partial class MainViewModel : ViewModelBase
     public bool CanComplete => _isExtensionListVisible
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
+                || _historySuggestionCycler.TryGetSuggestions(CommandText, out _)
             : _completionSession.State.CanComplete
                 || GetHistorySuggestions(CommandText).Count > 0
-                || GetShortcutSuggestions(CommandText).Count > 0);
+                || GetShortcutSuggestions(CommandText).Count > 0
+                || GetSnippetSuggestions(CommandText).Count > 0);
 
     public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
 
@@ -407,9 +423,50 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
+        _historySuggestionCycler.Reset();
         _historyCommands = _commandLogger.ReadHistoryEntries();
         _highlightedCompletionIndex = 0;
         ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+        return true;
+    }
+
+    public bool CycleHistory(bool older)
+    {
+        var prefix = TryGetHistoryFilter(CommandText, out var historySearchText)
+            ? historySearchText
+            : CommandText;
+        if (!_historySuggestionCycler.TryCycle(
+            _historyCommands,
+            CommandText,
+            prefix,
+            older,
+            out _))
+        {
+            return false;
+        }
+
+        _highlightedCompletionIndex = 0;
+        ApplyCompletionState(_completionSession.State);
+        return true;
+    }
+
+    public bool SelectHistoryBoundary(bool newest)
+    {
+        var prefix = TryGetHistoryFilter(CommandText, out var historySearchText)
+            ? historySearchText
+            : CommandText;
+        if (!_historySuggestionCycler.TrySelectBoundary(
+            _historyCommands,
+            CommandText,
+            prefix,
+            newest,
+            out _))
+        {
+            return false;
+        }
+
+        _highlightedCompletionIndex = 0;
+        ApplyCompletionState(_completionSession.State);
         return true;
     }
 
@@ -432,6 +489,7 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _historyCommands = Array.Empty<CommandHistoryEntry>();
+        _historySuggestionCycler.Reset();
         _highlightedCompletionIndex = 0;
         ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
         return true;
@@ -476,12 +534,57 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
+        var historySuggestions = GetHistorySuggestions(CommandText);
+        var hasRetainedHistoryContext = _historySuggestionCycler.TryGetSuggestions(CommandText, out _);
+        var hasSelectedHistoryPath = key == CommandInputKey.Right
+            && _highlightedCompletionIndex >= 0
+            && _highlightedCompletionIndex < historySuggestions.Count
+            && _directFilePathHandler.TryGetCompletionPath(
+                historySuggestions[_highlightedCompletionIndex].CommandText,
+                out _);
         if (_isDirectPathCompletionActive
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
-                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last)
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
+                or CommandInputKey.Right
+            && (key != CommandInputKey.Right
+                || (!hasSelectedHistoryPath
+                    && (!hasRetainedHistoryContext || !_isHistoryPathStepping))))
         {
+            if (hasRetainedHistoryContext)
+            {
+                _isHistoryPathStepping = false;
+            }
+
             HandleDirectPathCompletionKey(key);
             return false;
+        }
+
+        if (SnippetCompletion.TryGetFilterPrefix(CommandText, out _))
+        {
+            var snippetSuggestions = GetSnippetSuggestions(CommandText);
+            if (snippetSuggestions.Count > 0
+                && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
+                    or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
+                    or CommandInputKey.Right)
+            {
+                if (key is CommandInputKey.Right or CommandInputKey.Tab)
+                {
+                    var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, snippetSuggestions.Count - 1);
+                    CommandText = SnippetCompletion.BuildRunCommand(snippetSuggestions[selectedIndex]);
+                }
+                else
+                {
+                    _highlightedCompletionIndex = key switch
+                    {
+                        CommandInputKey.First => 0,
+                        CommandInputKey.Last => snippetSuggestions.Count - 1,
+                        _ => MoveCompletionIndex(_highlightedCompletionIndex, key, snippetSuggestions.Count)
+                    };
+                    ApplyCompletionState(_completionSession.State);
+                }
+
+                return false;
+            }
         }
 
         var shortcutList = GetShortcutSuggestions(CommandText);
@@ -514,7 +617,6 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
-        var historySuggestions = GetHistorySuggestions(CommandText);
         if (historySuggestions.Count > 0
             && (key != CommandInputKey.Right || _highlightedCompletionIndex < historySuggestions.Count)
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
@@ -523,6 +625,28 @@ public partial class MainViewModel : ViewModelBase
         {
             var regularCount = _completionSession.State.Items.Count;
             var historyCount = historySuggestions.Count;
+            if (key == CommandInputKey.Down
+                && _highlightedCompletionIndex >= 0
+                && _highlightedCompletionIndex < historyCount
+                && _directFilePathHandler.TryGetCompletionPath(
+                    historySuggestions[_highlightedCompletionIndex].CommandText,
+                    out var historyCompletionPath))
+            {
+                var selectedHistoryEntry = historySuggestions[_highlightedCompletionIndex];
+                CommandText = selectedHistoryEntry.CommandText;
+                if (_historySuggestionCycler.TryRetainSelection(
+                    _historyCommands,
+                    CommandText,
+                    historyCompletionPath,
+                    selectedHistoryEntry))
+                {
+                    _isHistoryPathStepping = true;
+                    _highlightedCompletionIndex = 0;
+                    ApplyCompletionState(_completionSession.State);
+                    return false;
+                }
+            }
+
             if (key == CommandInputKey.Right && _highlightedCompletionIndex < historyCount)
             {
                 var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, historyCount - 1);
@@ -535,14 +659,46 @@ public partial class MainViewModel : ViewModelBase
                     completionInput,
                     selectedHistoryEntry.CommandText,
                     skipLeadingWhitespace: true);
-                var updatedHistorySuggestions = GetHistorySuggestions(CommandText);
-                var selectedHistoryIndex = updatedHistorySuggestions
-                    .ToList()
-                    .FindIndex(entry => entry == selectedHistoryEntry);
-                if (selectedHistoryIndex >= 0)
+                var selectedHistoryPathCompleted = _directFilePathHandler.TryGetCompletionPath(
+                        selectedHistoryEntry.CommandText,
+                        out var selectedHistoryPath)
+                    && _directFilePathHandler.TryGetCompletionPath(CommandText, out var completedHistoryPath)
+                    && string.Equals(selectedHistoryPath, completedHistoryPath, StringComparison.OrdinalIgnoreCase);
+                if (!selectedHistoryPathCompleted
+                    && _completionSession.State.CanComplete
+                    && _completionSession.State.Items.Count == 0
+                    && !_tokenizer.EndsWithWhitespace(CommandText))
                 {
-                    _highlightedCompletionIndex = selectedHistoryIndex;
+                    CommandText += ' ';
+                    if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                        && desktop.MainWindow is MainWindow mainWindow)
+                    {
+                        mainWindow.SetPendingCaretIndex(CommandText.Length);
+                    }
+                }
+
+                if (selectedHistoryPathCompleted)
+                {
+                    _historySuggestionCycler.Reset();
+                    _isHistoryPathStepping = false;
+                    _highlightedCompletionIndex = 0;
                     ApplyCompletionState(_completionSession.State);
+                }
+                else
+                {
+                    var updatedPrefix = TryGetHistoryFilter(CommandText, out var updatedHistorySearchText)
+                        ? updatedHistorySearchText
+                        : CommandText;
+                    if (_historySuggestionCycler.TryRetainSelection(
+                        _historyCommands,
+                        CommandText,
+                        updatedPrefix,
+                        selectedHistoryEntry))
+                    {
+                        _isHistoryPathStepping = true;
+                        _highlightedCompletionIndex = 0;
+                        ApplyCompletionState(_completionSession.State);
+                    }
                 }
             }
             else if (key == CommandInputKey.Tab)
@@ -607,6 +763,21 @@ public partial class MainViewModel : ViewModelBase
         string suggestion,
         bool skipLeadingWhitespace = false)
     {
+        var inputPath = input.Trim('"');
+        if (_directFilePathHandler.TryGetCompletionPath(suggestion, out var suggestionPath)
+            && DirectFilePathCompletion.TryAcceptNextPathSegment(inputPath, suggestionPath, out var nextPath))
+        {
+            var completedPath = _directFilePathHandler.GetSuggestionText(nextPath);
+            CommandText = completedPath;
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime pathDesktop
+                && pathDesktop.MainWindow is MainWindow pathMainWindow)
+            {
+                pathMainWindow.SetPendingCaretIndex(completedPath.Length);
+            }
+
+            return;
+        }
+
         if (!suggestion.StartsWith(input, StringComparison.OrdinalIgnoreCase)
             || suggestion.Length == input.Length)
         {
@@ -632,12 +803,19 @@ public partial class MainViewModel : ViewModelBase
         {
             var boundary = _tokenizer.FindTokenBoundary(remaining, start);
             acceptedLength = boundary;
-            if (!skipLeadingWhitespace
-                && boundary >= 0
-                && boundary < remaining.Length
-                && remaining[boundary] == ' ')
+            if (boundary >= 0 && boundary < remaining.Length)
             {
-                acceptedLength++;
+                if (!skipLeadingWhitespace && remaining[boundary] == ' ')
+                {
+                    acceptedLength++;
+                }
+                else if (skipLeadingWhitespace)
+                {
+                    while (acceptedLength < remaining.Length && char.IsWhiteSpace(remaining[acceptedLength]))
+                    {
+                        acceptedLength++;
+                    }
+                }
             }
         }
 
@@ -657,6 +835,8 @@ public partial class MainViewModel : ViewModelBase
         UpdateCommandExpansionPreview(value);
         if (!_syncingInput)
         {
+            _historySuggestionCycler.Reset();
+            _isHistoryPathStepping = false;
             ApplyCompletionState(_completionSession.UpdateInputText(value));
             if (string.Equals(value.Trim(), "!", StringComparison.Ordinal))
             {
@@ -687,19 +867,26 @@ public partial class MainViewModel : ViewModelBase
         UpdateCommandExpansionPreview(state.InputText);
         var historySuggestions = GetHistorySuggestions(state.InputText);
         var shortcutSuggestions = GetShortcutSuggestions(state.InputText);
+        var snippetSuggestions = GetSnippetSuggestions(state.InputText);
         var selectedHistoryIndex = _highlightedCompletionIndex < historySuggestions.Count
             ? _highlightedCompletionIndex
             : -1;
-        var selectedShortcutIndex = historySuggestions.Count == 0
-            && _highlightedCompletionIndex < shortcutSuggestions.Count
-                ? _highlightedCompletionIndex
+        var selectedShortcutIndex = _highlightedCompletionIndex >= historySuggestions.Count
+            && _highlightedCompletionIndex < historySuggestions.Count + shortcutSuggestions.Count
+                ? _highlightedCompletionIndex - historySuggestions.Count
+                : -1;
+        var selectedSnippetIndex = _highlightedCompletionIndex >= historySuggestions.Count + shortcutSuggestions.Count
+            && _highlightedCompletionIndex < historySuggestions.Count + shortcutSuggestions.Count + snippetSuggestions.Count
+                ? _highlightedCompletionIndex - historySuggestions.Count - shortcutSuggestions.Count
                 : -1;
         var selectedCommandText = selectedHistoryIndex >= 0
             ? historySuggestions[selectedHistoryIndex].CommandText
             : selectedShortcutIndex >= 0
                 ? shortcutSuggestions[selectedShortcutIndex].Value
-            : historySuggestions.Count > 0
-                ? GetRegularCompletionValue(state, _highlightedCompletionIndex - historySuggestions.Count)
+                : selectedSnippetIndex >= 0
+                    ? SnippetCompletion.BuildRunCommand(snippetSuggestions[selectedSnippetIndex])
+            : historySuggestions.Count + shortcutSuggestions.Count + snippetSuggestions.Count > 0
+                ? GetRegularCompletionValue(state, _highlightedCompletionIndex - historySuggestions.Count - shortcutSuggestions.Count - snippetSuggestions.Count)
                 : state.Items.FirstOrDefault(item => item.IsHighlighted)?.Value;
         var tokens = _tokenizer.Tokenize(state.InputText);
         var isCommandCompletion = tokens.Count == 0
@@ -708,6 +895,8 @@ public partial class MainViewModel : ViewModelBase
             && _catalog.TryGetCommand(tokens[0].Value, out _);
         var previewCommandText = selectedHistoryIndex >= 0
             ? historySuggestions[selectedHistoryIndex].CommandText
+            : selectedSnippetIndex >= 0
+                ? selectedCommandText!
             : isCommandCompletion && !inputIsExactCommand && selectedCommandText is not null
                 ? selectedCommandText
                 : state.InputText;
@@ -742,6 +931,7 @@ public partial class MainViewModel : ViewModelBase
             ? historySearchText.Length
             : state.InputText.Length;
         CompletionGhostText = TryGetShortcutFilter(state.InputText, out _)
+            || SnippetCompletion.TryGetFilterPrefix(state.InputText, out _)
             ? string.Empty
             : selectedHistoryText is not null
                 ? selectedHistoryPrefixLength <= selectedHistoryText.Length
@@ -770,7 +960,7 @@ public partial class MainViewModel : ViewModelBase
                     cyanText = sourceLabel;
                 }
 
-                var listSuggestionCount = historySuggestions.Count + shortcutSuggestions.Count;
+                var listSuggestionCount = historySuggestions.Count + shortcutSuggestions.Count + snippetSuggestions.Count;
                 var isHighlighted = listSuggestionCount == 0
                     ? item.IsHighlighted
                     : _highlightedCompletionIndex >= listSuggestionCount
@@ -792,7 +982,12 @@ public partial class MainViewModel : ViewModelBase
                 $"[shortcut] {shortcut.Key} → {shortcut.Value.TrimEnd()}",
                 index == selectedShortcutIndex,
                 false));
-        CompletionItems = historyItems.Concat(shortcutItems).Concat(regularItems).ToArray();
+        var snippetItems = snippetSuggestions.Select((snippet, index) =>
+            new CompletionOptionViewModel(
+                $"[snippet] {snippet}",
+                index == selectedSnippetIndex,
+                false));
+        CompletionItems = historyItems.Concat(shortcutItems).Concat(snippetItems).Concat(regularItems).ToArray();
         OnPropertyChanged(nameof(IsChecklistActive));
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
@@ -801,6 +996,11 @@ public partial class MainViewModel : ViewModelBase
 
     private IReadOnlyList<CommandHistoryEntry> GetHistorySuggestions(string inputText)
     {
+        if (_historySuggestionCycler.TryGetSuggestions(inputText, out var cycledSuggestions))
+        {
+            return cycledSuggestions;
+        }
+
         if (TryGetHistoryFilter(inputText, out var searchText))
         {
             return searchText.Length == 0
@@ -828,6 +1028,9 @@ public partial class MainViewModel : ViewModelBase
         => TryGetShortcutFilter(inputText, out var prefix)
             ? _shortcutResolver.GetAliasExpansions(prefix)
             : Array.Empty<KeyValuePair<string, string>>();
+
+    private IReadOnlyList<string> GetSnippetSuggestions(string inputText)
+        => SnippetCompletion.Filter(_snippetStore.GetNames(), inputText);
 
     private static bool TryGetShortcutFilter(string inputText, out string prefix)
     {
@@ -947,16 +1150,45 @@ public partial class MainViewModel : ViewModelBase
             _directPathHighlightedIndex = 0;
         }
 
-        CompletionGhostText = string.Empty;
+        var hasRetainedHistory = _historySuggestionCycler.TryGetSuggestions(CommandText, out var retainedHistory)
+            && retainedHistory.Count > 0;
+        CompletionGhostText = _isHistoryPathStepping
+            && hasRetainedHistory
+            && _directFilePathHandler.TryGetCompletionPath(retainedHistory[0].CommandText, out var historyPath)
+            && _directFilePathHandler.TryGetCompletionPath(CommandText, out var currentPath)
+            && historyPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase)
+                ? historyPath[currentPath.Length..]
+                : DirectFilePathCompletion.TrySelectSuggestion(
+                    _directPathSuggestions,
+                    _directPathHighlightedIndex,
+                    out var selectedPath)
+                    && _directFilePathHandler.TryGetCompletionPath(CommandText, out var typedPath)
+                    && selectedPath.StartsWith(typedPath, StringComparison.OrdinalIgnoreCase)
+                        ? selectedPath[typedPath.Length..]
+                        : string.Empty;
         UsageText = "Files and folders";
         UsageCommandText = string.Empty;
         OnPropertyChanged(nameof(UsageCommandText));
-        CompletionItems = _directPathSuggestions
+        var pathItems = _directPathSuggestions
             .Select((path, index) => new CompletionOptionViewModel(
                 path,
-                index == _directPathHighlightedIndex,
+                !(_isHistoryPathStepping && hasRetainedHistory)
+                    && index == _directPathHighlightedIndex,
                 false))
-            .ToArray();
+            .ToList();
+        if (hasRetainedHistory)
+        {
+            var entry = retainedHistory[0];
+            var age = ProfileCommandLogger.FormatHistoryAge(entry.RunTime, DateTimeOffset.Now);
+            var ageLabel = age.Length == 0 ? string.Empty : $" [{age}]";
+            pathItems.Insert(0, new CompletionOptionViewModel(
+                $"[history] {entry.CommandText}",
+                _isHistoryPathStepping,
+                false,
+                ageLabel));
+        }
+
+        CompletionItems = pathItems;
         OnPropertyChanged(nameof(IsChecklistActive));
         OnPropertyChanged(nameof(HasCompletionOptions));
         OnPropertyChanged(nameof(CanComplete));
@@ -967,6 +1199,12 @@ public partial class MainViewModel : ViewModelBase
     {
         if (_directPathSuggestions.Count == 0)
         {
+            return;
+        }
+
+        if (key == CommandInputKey.Right)
+        {
+            AcceptNextDirectPathSegment();
             return;
         }
 
@@ -1010,6 +1248,39 @@ public partial class MainViewModel : ViewModelBase
             _directPathSuggestions.Count > 0 ? GetCurrentDirectPathText() : string.Empty,
             _directPathReplacesWholeInput,
             resetHighlight: false);
+    }
+
+    private void AcceptNextDirectPathSegment()
+    {
+        if (!DirectFilePathCompletion.TrySelectSuggestion(
+                _directPathSuggestions,
+                _directPathHighlightedIndex,
+                out var selectedPath)
+            || !DirectFilePathCompletion.TryAcceptNextPathSegment(
+                GetCurrentDirectPathText(),
+                selectedPath,
+                out var acceptedPath))
+        {
+            return;
+        }
+
+        if (_directPathReplacesWholeInput)
+        {
+            CommandText = _directFilePathHandler.GetSuggestionText(acceptedPath);
+        }
+        else
+        {
+            CommandText = CommandArgumentPathCompletion.ReplaceValue(
+                CommandText,
+                _activeArgumentPathContext!,
+                acceptedPath);
+        }
+
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.SetPendingCaretIndex(CommandText.Length);
+        }
     }
 
     private string GetCurrentDirectPathText()
@@ -1295,6 +1566,10 @@ public sealed record CompletionOptionViewModel(
         else if (_asyncCommandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var asyncCommandExecutor))
         {
             executionResult = await asyncCommandExecutor.ExecuteAsync(parsedCommand);
+            if (string.Equals(parsedCommand.Definition.Kind, "snippet", StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshSecretAccessState();
+            }
         }
         else
         {

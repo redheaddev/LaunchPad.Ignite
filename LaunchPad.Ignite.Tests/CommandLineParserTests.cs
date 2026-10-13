@@ -1,6 +1,7 @@
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
+using LaunchPad.Ignite.App.Commands;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -135,5 +136,47 @@ public class CommandLineParserTests
 
         Assert.Equal(CommandParseStatus.Valid, result.Status);
         Assert.Equal("token1,token2", result.ParsedCommand!.Arguments["secrets"]);
+    }
+
+    [Theory]
+    [InlineData("snippet run deploy PROJECT=ignite", "ignite")]
+    [InlineData("snippet run deploy PROJECT=two=parts", "two=parts")]
+    [InlineData("snippet run deploy PROJECT=\"team project\"", "team project")]
+    public void ParseAcceptsAdditionalNamedArgumentsWhenEnabled(string input, string expectedValue)
+    {
+        var command = SnippetCommandDefinition.Definition;
+        var runAction = command.Actions.Single(action => action.Name == "run");
+        var schema = new CommandSchema([], [command]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["snippet"]),
+            new DictionaryArgumentValueProvider(new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["list:snippets"] = ["deploy"]
+            }));
+
+        var result = parser.Parse(input);
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal(expectedValue, result.ParsedCommand!.Arguments["PROJECT"]);
+        Assert.True(runAction.AllowAdditionalNamedArguments);
+    }
+
+    [Theory]
+    [InlineData("snippet run deploy PROJECT=")]
+    [InlineData("snippet run deploy PROJECT=one PROJECT=two")]
+    public void ParseRejectsMalformedAdditionalNamedArguments(string input)
+    {
+        var command = SnippetCommandDefinition.Definition;
+        var schema = new CommandSchema([], [command]);
+        var parser = new CommandLineParser(
+            new CommandCatalog(schema, ["snippet"]),
+            new DictionaryArgumentValueProvider(new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["list:snippets"] = ["deploy"]
+            }));
+
+        var result = parser.Parse(input);
+
+        Assert.Equal(CommandParseStatus.Invalid, result.Status);
     }
 }

@@ -46,6 +46,71 @@ public class DirectFilePathTests
     }
 
     [Fact]
+    public void GetSuggestionsCompletesUncSharesForServerRootAndPrefix()
+    {
+        string? requestedServer = null;
+        var completion = new DirectFilePathCompletion(
+            enumerateUncShares: server =>
+            {
+                requestedServer = server;
+                return ["Media", "Documents", "Development"];
+            });
+
+        var rootSuggestions = completion.GetSuggestions(@"\\server\");
+        var filteredSuggestions = completion.GetSuggestions(@"\\server\doc");
+
+        Assert.Equal(@"\\server", requestedServer);
+        Assert.Equal(
+            [@"\\server\Development\", @"\\server\Documents\", @"\\server\Media\"],
+            rootSuggestions);
+        Assert.Equal([@"\\server\Documents\"], filteredSuggestions);
+    }
+
+    [Fact]
+    public void GetSuggestionsEnumeratesEntriesInsideUncShare()
+    {
+        var requestedDirectories = new List<string>();
+        var completion = new DirectFilePathCompletion(
+            directory =>
+            {
+                requestedDirectories.Add(directory);
+                return [@"\\server\share\folder", @"\\server\share\file.txt"];
+            },
+            path => path == @"\\server\share\folder",
+            _ => throw new InvalidOperationException("Share enumeration is only for the server root."));
+
+        var suggestions = completion.GetSuggestions(@"\\server\share\fi");
+
+        Assert.Equal([@"\\server\share\"], requestedDirectories);
+        Assert.Equal([@"\\server\share\file.txt"], suggestions);
+    }
+
+    [Fact]
+    public void GetSuggestionsRecognizesUncServerPrefixBeforeShareSeparator()
+    {
+        var requestedServer = string.Empty;
+        var completion = new DirectFilePathCompletion(
+            enumerateUncShares: server =>
+            {
+                requestedServer = server;
+                return ["share"];
+            });
+
+        var suggestions = completion.GetSuggestions(@"\\server\");
+
+        Assert.Equal(@"\\server", requestedServer);
+        Assert.Equal([@"\\server\share\"], suggestions);
+    }
+
+    [Fact]
+    public void DoesNotTreatBareUncPrefixAsDirectPath()
+    {
+        var completion = new DirectFilePathCompletion();
+
+        Assert.False(completion.IsDirectPath(@"\\"));
+    }
+
+    [Fact]
     public void TrySelectSuggestionReturnsTheHighlightedPath()
     {
         var suggestions = new[] { @"C:\projects\", @"C:\photo.txt" };
@@ -54,6 +119,47 @@ public class DirectFilePathTests
 
         Assert.True(selected);
         Assert.Equal(@"C:\photo.txt", path);
+    }
+
+    [Fact]
+    public void RightAcceptanceConsumesEachDirectorySegmentAndItsSeparatorTogether()
+    {
+        const string suggestion = @"\\server\share\folder\";
+
+        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+            @"\\server\sha",
+            suggestion,
+            out var firstPath));
+        Assert.Equal(@"\\server\share\", firstPath);
+
+        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+            firstPath,
+            suggestion,
+            out var secondPath));
+        Assert.Equal(@"\\server\share\folder\", secondPath);
+
+        Assert.False(DirectFilePathCompletion.TryAcceptNextPathSegment(
+            secondPath,
+            suggestion,
+            out _));
+    }
+
+    [Theory]
+    [InlineData("C", @"C:\temp\LaunchPad.Ignite.App.Build\", @"C:\")]
+    [InlineData("C:", @"C:\temp\LaunchPad.Ignite.App.Build\", @"C:\")]
+    [InlineData(@"C:\", @"C:\temp\LaunchPad.Ignite.App.Build\", @"C:\temp\")]
+    [InlineData(@"C:\temp\", @"C:\temp\LaunchPad.Ignite.App.Build\", @"C:\temp\LaunchPad.Ignite.App.Build\")]
+    public void RightAcceptanceAdvancesHistoryPathBySegment(
+        string currentPath,
+        string suggestion,
+        string expectedPath)
+    {
+        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+            currentPath,
+            suggestion,
+            out var acceptedPath));
+
+        Assert.Equal(expectedPath, acceptedPath);
     }
 
     [Fact]
@@ -141,6 +247,23 @@ public class DirectFilePathTests
         Assert.True(handled);
         Assert.True(result.Succeeded);
         Assert.Equal("/select,C:\\work\\file.txt", Assert.Single(starter.StartInfo!.ArgumentList));
+    }
+
+    [Fact]
+    public void TryOpenOpensQuotedUncPathWithSpaces()
+    {
+        var starter = new RecordingProcessStarter();
+        var expectedPath = @"\\server\shared folder\file.txt";
+        var handler = new DirectFilePathHandler(
+            starter,
+            fileExists: path => path == expectedPath,
+            directoryExists: _ => false);
+
+        var handled = handler.TryOpen($"\"{expectedPath}\"", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal($"/select,{expectedPath}", Assert.Single(starter.StartInfo!.ArgumentList));
     }
 
     [Fact]
@@ -281,6 +404,10 @@ public class DirectFilePathTests
 
         public void OpenShell(IReadOnlyDictionary<string, string> environment, string? workingDirectory)
             => WorkingDirectory = workingDirectory;
+
+        public void RunScript(string scriptPath, string type, IReadOnlyDictionary<string, string> environment)
+        {
+        }
     }
 
     private static CommandArgumentPathCompletion CreateArgumentPathCompletion()

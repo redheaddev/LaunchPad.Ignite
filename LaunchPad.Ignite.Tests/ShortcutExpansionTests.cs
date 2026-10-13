@@ -181,7 +181,7 @@ public class ShortcutExpansionTests
         Assert.True(resolver.TryExpandChord(chord, out var expansion));
 
         // Keyboard chord expansion should not be immediate by default
-        Assert.False(resolver.TryExpandChord(chord, out expansion, out var executeImmediately));
+        Assert.True(resolver.TryExpandChord(chord, out expansion, out var executeImmediately));
         Assert.False(executeImmediately);
 
         // But it should still provide the correct expansion text

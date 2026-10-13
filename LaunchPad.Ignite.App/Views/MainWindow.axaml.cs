@@ -9,6 +9,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.ComponentModel;
+using System.Collections.Generic;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Completion;
@@ -191,6 +192,19 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task<IReadOnlyDictionary<string, string>?> ShowSnippetArgumentsAsync(SnippetArgumentsWindow dialog)
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<IReadOnlyDictionary<string, string>?>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     internal void SetPendingCaretIndex(int caretIndex) => _pendingCaretIndex = caretIndex;
 
     private void UpdateCommandTextOverlayOffset()
@@ -284,6 +298,65 @@ public partial class MainWindow : Window
                         {
                             CreateDialogButton("Cancel", false),
                             CreateDialogButton("Overwrite", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    internal async Task<SnippetEditorResult?> ShowSnippetEditorAsync(SnippetEditorWindow dialog)
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<SnippetEditorResult?>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    internal async Task<bool> ConfirmSnippetRemovalAsync(string name)
+    {
+        var dialog = new Window
+        {
+            Title = "Remove snippet?",
+            Width = 420,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"Remove snippet '{name}'? This cannot be undone.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Remove", true)
                         }
                     }
                 }
@@ -476,7 +549,7 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             Activate();
-            _commandBox.Focus();
+            RequestCommandBoxFocus();
         }, DispatcherPriority.Input);
 
         if (_hotKeyTask is not null)
@@ -621,7 +694,18 @@ public partial class MainWindow : Window
 
     private void MainWindow_Activated(object? sender, EventArgs e)
     {
-        Dispatcher.UIThread.Post(() => _commandBox.Focus(), DispatcherPriority.Input);
+        RequestCommandBoxFocus();
+    }
+
+    private void RequestCommandBoxFocus()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (IsVisible && !_secretDialogIsOpen)
+            {
+                _commandBox.Focus();
+            }
+        }, DispatcherPriority.Background);
     }
 
     internal async Task<string?> ShowSecretEntryDialogAsync(SecretEntryWindow dialog)
@@ -719,6 +803,20 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Right
+            && e.KeyModifiers == KeyModifiers.None
+            && PathLevelSelection.IsPathSelection(
+                _commandBox.Text ?? string.Empty,
+                _commandBox.SelectionStart,
+                _commandBox.SelectionEnd)
+            && TrySelectPathLevel(
+                moveRight: true,
+                adjustUntrackedSelection: _commandBox.SelectionStart != _commandBox.SelectionEnd))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift)
             && e.Key is Key.Left or Key.Right)
@@ -729,12 +827,22 @@ public partial class MainWindow : Window
         CommandInputKey? inputKey = null;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
         {
-            inputKey = e.Key switch
+            if (e.KeyModifiers == KeyModifiers.Alt
+                && e.Key is Key.Up or Key.Down or Key.Home or Key.End)
             {
-                Key.Home when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.First,
-                Key.End when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Last,
-                _ => null
-            };
+                if (e.Key is Key.Up or Key.Down)
+                {
+                    viewModel.CycleHistory(older: e.Key == Key.Up);
+                }
+                else
+                {
+                    viewModel.SelectHistoryBoundary(newest: e.Key == Key.Home);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
         }
         else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
@@ -768,6 +876,10 @@ public partial class MainWindow : Window
         {
             inputKey = e.Key switch
             {
+                Key.Up when e.KeyModifiers == KeyModifiers.Shift
+                    && (viewModel.HasCompletionOptions || viewModel.IsChecklistActive) => CommandInputKey.First,
+                Key.Down when e.KeyModifiers == KeyModifiers.Shift
+                    && (viewModel.HasCompletionOptions || viewModel.IsChecklistActive) => CommandInputKey.Last,
                 Key.Tab when viewModel.CanComplete || viewModel.CanExpandTypedShortcut => CommandInputKey.Tab,
                 Key.Right when (viewModel.CanComplete || viewModel.IsChecklistActive)
                     && _commandBox.SelectionStart == _commandBox.SelectionEnd
@@ -825,17 +937,38 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool TrySelectPathLevel(bool moveRight)
+    private bool TrySelectPathLevel(bool moveRight, bool adjustUntrackedSelection = false)
     {
         var text = _commandBox.Text ?? string.Empty;
-        var selectionStart = _commandBox.SelectionStart;
-        var selectionEnd = _commandBox.SelectionEnd;
+        var selectionStart = Math.Min(_commandBox.SelectionStart, _commandBox.SelectionEnd);
+        var selectionEnd = Math.Max(_commandBox.SelectionStart, _commandBox.SelectionEnd);
         var hasTrackedSelection = _pathSelectionAnchor.HasValue
             && _pathSelectionCaret.HasValue
             && selectionStart == _pathSelectionStart
             && selectionEnd == _pathSelectionEnd;
         if (!hasTrackedSelection && selectionStart < selectionEnd)
         {
+            if (adjustUntrackedSelection
+                && PathLevelSelection.TryAdjustSelection(
+                    text,
+                    _commandBox.CaretIndex,
+                    selectionStart,
+                    selectionEnd,
+                    moveRight,
+                    out var adjustedSelectionStart,
+                    out var adjustedSelectionEnd,
+                    out var adjustedSelectionCaret))
+            {
+                var selectionAnchor = moveRight ? selectionEnd : selectionStart;
+                SetPathSelection(
+                    selectionAnchor,
+                    adjustedSelectionCaret,
+                    adjustedSelectionStart,
+                    adjustedSelectionEnd,
+                    text);
+                return true;
+            }
+
             var edge = moveRight ? selectionEnd : selectionStart;
             SetPathSelection(edge, edge, edge, edge, text);
             return true;
@@ -914,7 +1047,7 @@ public partial class MainWindow : Window
     {
         Show();
         Activate();
-        _commandBox.Focus();
+        RequestCommandBoxFocus();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)

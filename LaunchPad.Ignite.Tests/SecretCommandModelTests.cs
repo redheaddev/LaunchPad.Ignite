@@ -425,6 +425,10 @@ public class SecretCommandModelTests
             Environment = environment;
             WorkingDirectory = workingDirectory;
         }
+
+        public void RunScript(string scriptPath, string type, IReadOnlyDictionary<string, string> environment)
+        {
+        }
     }
 
     private sealed class AdjustableTimeProvider : TimeProvider

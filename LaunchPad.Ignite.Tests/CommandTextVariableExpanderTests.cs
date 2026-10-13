@@ -44,6 +44,18 @@ public class CommandTextVariableExpanderTests
     }
 
     [Fact]
+    public void ExpandDoesNotTreatUncAdministrativeShareSuffixAsVariable()
+    {
+        var expander = new CommandTextVariableExpander();
+
+        var result = expander.Expand(@"copy \\server\C$\folder");
+
+        Assert.Equal(@"copy \\server\C$\folder", result.ExpandedText);
+        Assert.Empty(result.ResolvedVariables);
+        Assert.Empty(result.UnresolvedVariables);
+    }
+
+    [Fact]
     public void ExpandedCommandTextCanBeParsedAsRegularCommandInput()
     {
         var schema = new CommandSchema(

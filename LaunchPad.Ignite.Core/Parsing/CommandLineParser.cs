@@ -75,6 +75,26 @@ public sealed class CommandLineParser
                     string.Equals(candidate.Name, argumentName, StringComparison.OrdinalIgnoreCase));
                 if (argument is null)
                 {
+                    if (action.AllowAdditionalNamedArguments)
+                    {
+                        var additionalValue = token.Value[(equalsIndex + 1)..];
+                        if (additionalValue.Length == 0)
+                        {
+                            return new CommandParseResult(
+                                CommandParseStatus.Invalid,
+                                Error: $"Argument '{argumentName}' requires a value.");
+                        }
+
+                        if (!suppliedArguments.TryAdd(argumentName, additionalValue))
+                        {
+                            return new CommandParseResult(
+                                CommandParseStatus.Invalid,
+                                Error: $"Argument '{argumentName}' was supplied more than once.");
+                        }
+
+                        continue;
+                    }
+
                     return new CommandParseResult(
                         CommandParseStatus.Invalid,
                         Error: $"Unknown argument '{argumentName}'.");
@@ -132,6 +152,18 @@ public sealed class CommandLineParser
             }
 
             parsedArguments.Add(argument.Name, value);
+        }
+
+        if (action.AllowAdditionalNamedArguments)
+        {
+            foreach (var (argumentName, value) in suppliedArguments)
+            {
+                if (!action.Arguments.Any(argument =>
+                    string.Equals(argument.Name, argumentName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    parsedArguments.Add(argumentName, value);
+                }
+            }
         }
 
         var parsedCommand = new ParsedCommand(command, action, parsedArguments);

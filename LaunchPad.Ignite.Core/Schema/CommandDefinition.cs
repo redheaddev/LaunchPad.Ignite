@@ -77,6 +77,7 @@ public sealed record CommandActionDefinition(
     public IReadOnlyList<string> ArgumentTemplates { get; init; } = [];
     public string? KeyboardShortcut { get; init; }
     public bool ExecuteOnKeyboardShortcut { get; init; }
+    public bool AllowAdditionalNamedArguments { get; init; }
 }
 
 public sealed record CommandArgumentDefinition(

@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		x:Class="LaunchPad.Ignite.App.Views.SnippetEditorWindow"
+		Title="Snippet"
+		Width="680"
+		Height="680"
+		MinWidth="560"
+		MinHeight="520"
+		CanResize="True"
+		WindowStartupLocation="CenterOwner">
+	<Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="22" RowSpacing="12">
+		<TextBox x:Name="NameBox" Grid.Row="0" IsReadOnly="True" Watermark="Name" />
+		<Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="12">
+			<StackPanel Spacing="6">
+				<TextBlock Text="Type" />
+				<ComboBox x:Name="TypeBox" SelectedIndex="0">
+					<ComboBoxItem Content="powershell" />
+					<ComboBoxItem Content="shell" />
+				</ComboBox>
+			</StackPanel>
+			<StackPanel Grid.Column="1" Spacing="6">
+				<TextBlock Text="Arguments (environment variable names, comma-separated)" />
+				<TextBox x:Name="ArgumentsBox" Watermark="PROJECT, ENVIRONMENT" />
+			</StackPanel>
+		</Grid>
+		<StackPanel Grid.Row="2" Spacing="6">
+			<TextBlock Text="Allowed stored secrets" />
+			<ScrollViewer Height="90" VerticalScrollBarVisibility="Auto">
+				<StackPanel x:Name="SecretsPanel" Spacing="4" />
+			</ScrollViewer>
+		</StackPanel>
+		<Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="6">
+			<TextBlock Text="Script" />
+			<TextBox x:Name="ScriptBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="NoWrap"
+					 FontFamily="Cascadia Mono, Consolas" VerticalContentAlignment="Top"
+					 HorizontalContentAlignment="Stretch"
+					 ScrollViewer.VerticalScrollBarVisibility="Auto"
+					 ScrollViewer.HorizontalScrollBarVisibility="Auto" />
+		</Grid>
+		<StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+			<Button Content="Cancel" Click="Cancel_Click" />
+			<Button Content="Save" IsDefault="True" Click="Save_Click" />
+		</StackPanel>
+	</Grid>
+</Window>

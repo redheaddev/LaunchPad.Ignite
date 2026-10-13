@@ -10,7 +10,7 @@ public sealed record CommandTextExpansionResult(
 
 public sealed class CommandTextVariableExpander
 {
-    private static readonly Regex VariablePattern = new(@"\$([^\s/<>?&#]+)", RegexOptions.Compiled);
+    private static readonly Regex VariablePattern = new(@"\$(?!\\)([^\s/<>?&#]+)", RegexOptions.Compiled);
     private readonly Dictionary<string, string> _variables;
 
     public CommandTextVariableExpander(IEnumerable<CommandVariableDefinition>? variables = null)

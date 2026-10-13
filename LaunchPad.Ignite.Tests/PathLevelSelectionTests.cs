@@ -5,8 +5,8 @@ namespace LaunchPad.Ignite.Tests;
 public class PathLevelSelectionTests
 {
     [Theory]
-    [InlineData(@"open C:\work\folder\fi", 8, true, 13)]
-    [InlineData(@"open C:\work\folder\fi", 13, true, 20)]
+    [InlineData(@"open C:\work\folder\fi", 8, true, 12)]
+    [InlineData(@"open C:\work\folder\fi", 13, true, 19)]
     [InlineData(@"open C:\work\folder\fi", 20, false, 13)]
     [InlineData(@"open C:\work\folder\fi", 13, false, 8)]
     public void MovesByPathSegment(string input, int caret, bool moveRight, int expected)
@@ -33,9 +33,9 @@ public class PathLevelSelectionTests
             out _);
 
         Assert.True(adjusted);
-        Assert.Equal(3, start);
+        Assert.Equal(2, start);
         Assert.Equal(path.Length, end);
-        Assert.Equal(@"temp\LaunchPad.Ignite.App.Build\", path[start..end]);
+        Assert.Equal(@"\temp\LaunchPad.Ignite.App.Build\", path[start..end]);
     }
 
     [Fact]
@@ -81,11 +81,100 @@ public class PathLevelSelectionTests
     {
         var drivePath = @"C:\work\file";
         Assert.True(PathLevelSelection.TryGetBoundary(drivePath, 3, true, out var driveBoundary));
-        Assert.Equal(8, driveBoundary);
+        Assert.Equal(7, driveBoundary);
 
         var uncPath = @"\\server\share\file";
         Assert.True(PathLevelSelection.TryGetBoundary(uncPath, 2, true, out var uncBoundary));
-        Assert.Equal(9, uncBoundary);
+        Assert.Equal(8, uncBoundary);
+    }
+
+    [Theory]
+    [InlineData(@"c:\temp\LaunchPad.Ignite.App.Build\", 0)]
+    [InlineData(@"\\server\path", 2)]
+    public void RecognizesSelectedAbsolutePath(string path, int selectionStart)
+    {
+        Assert.True(PathLevelSelection.IsPathSelection(path, selectionStart, path.Length));
+    }
+
+    [Fact]
+    public void DoesNotTreatAnOrdinaryTextSelectionAsAPath()
+    {
+        Assert.False(PathLevelSelection.IsPathSelection("open selected text", 5, 13));
+    }
+
+    [Theory]
+    [InlineData(@"c:\temp\LaunchPad.Ignite.App.Build\", 0, 2)]
+    [InlineData(@"\\server\share\file", 2, 8)]
+    public void PlainRightMovesCaretToTheNextPathSeparator(
+        string path,
+        int caret,
+        int expectedBoundary)
+    {
+        Assert.True(PathLevelSelection.IsPathSelection(path, caret, caret));
+
+        var adjusted = PathLevelSelection.TryAdjustSelection(
+            path,
+            caret,
+            caret,
+            caret,
+            moveRight: true,
+            out var start,
+            out var end,
+            out var nextCaret);
+
+        Assert.True(adjusted);
+        Assert.Equal(caret, start);
+        Assert.Equal(expectedBoundary, end);
+        Assert.Equal(expectedBoundary, nextCaret);
+    }
+
+    [Fact]
+    public void CtrlShiftRightStopsBeforeUncSeparatorThenConsumesItOnNextPress()
+    {
+        const string path = @"\\server\c$\path";
+
+        var adjusted = PathLevelSelection.TryAdjustSelection(
+            path,
+            path.Length,
+            2,
+            path.Length,
+            moveRight: true,
+            out var start,
+            out var end,
+            out var caret);
+
+        Assert.True(adjusted);
+        Assert.Equal(8, start);
+        Assert.Equal(path.Length, end);
+        Assert.Equal(8, caret);
+        Assert.Equal(@"\\server", path[..start]);
+
+        Assert.True(PathLevelSelection.TryGetBoundary(path, caret, moveRight: true, out var nextBoundary));
+        Assert.Equal(11, nextBoundary);
+    }
+
+    [Theory]
+    [InlineData(@"c:\temp\LaunchPad.Ignite.App.Build\", 2, 2)]
+    [InlineData(@"\\server\path", 8, 8)]
+    public void RightSelectionAdjustmentHandlesReversedSelectionEndpoints(
+        string path,
+        int expectedStart,
+        int expectedCaret)
+    {
+        var adjusted = PathLevelSelection.TryAdjustSelection(
+            path,
+            0,
+            path.Length,
+            0,
+            moveRight: true,
+            out var start,
+            out var end,
+            out var caret);
+
+        Assert.True(adjusted);
+        Assert.Equal(expectedStart, start);
+        Assert.Equal(path.Length, end);
+        Assert.Equal(expectedCaret, caret);
     }
 
     [Fact]
