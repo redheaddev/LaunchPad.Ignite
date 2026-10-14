@@ -119,6 +119,91 @@ public sealed class CommandPackLoader
         return Path.Combine(_profilePackDirectory, $"{id}.json");
     }
 
+    public CommandPackManifest ReadInstalledManifest(string id)
+    {
+        var path = GetInstalledPackPath(id);
+        if (!File.Exists(path))
+        {
+            throw new InvalidOperationException($"Command pack '{id}' is not installed in the profile pack directory.");
+        }
+
+        return ReadManifest(path);
+    }
+
+    public void ValidateInstalledManifest(CommandPackManifest manifest)
+    {
+        ValidateManifestForExport(manifest);
+        var commandNames = manifest.Schema.Commands
+            .Select(command => (command with { Namespace = command.Namespace ?? manifest.Namespace }).QualifiedName)
+            .ToArray();
+        var duplicateName = commandNames
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1)?.Key;
+        if (duplicateName is not null)
+        {
+            throw new InvalidDataException($"Command name '{duplicateName}' is already defined by command pack '{manifest.Id}'.");
+        }
+    }
+
+    public void ValidateManifestForExport(CommandPackManifest manifest)
+    {
+        var path = GetInstalledPackPath(manifest.Id);
+        ValidateManifest(manifest, manifest.Id, path);
+        foreach (var command in manifest.Schema.Commands)
+        {
+            ValidateCommand(command with { Namespace = command.Namespace ?? manifest.Namespace }, path);
+        }
+
+        foreach (var variable in manifest.Schema.Variables)
+        {
+            var effectiveNamespace = variable.Namespace ?? manifest.Namespace;
+            if (!string.IsNullOrEmpty(effectiveNamespace))
+            {
+                ValidateQualifiedNamespace(effectiveNamespace, $"variable '{variable.Name}'", path);
+            }
+        }
+
+        foreach (var function in manifest.Schema.Functions)
+        {
+            ValidateFunction(function with { Namespace = function.Namespace ?? manifest.Namespace }, path);
+        }
+    }
+
+    public void WriteExportManifest(CommandPackManifest manifest, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("An export path is required.", nameof(path));
+        }
+
+        ValidateManifestForExport(manifest);
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        WriteManifestAtomically(fullPath, manifest);
+    }
+
+    public void WriteInstalledManifest(CommandPackManifest manifest)
+    {
+        ValidateInstalledManifest(manifest);
+        WriteManifestAtomically(GetInstalledPackPath(manifest.Id), manifest);
+    }
+
+    public void DeleteInstalledPack(string id)
+    {
+        var path = GetInstalledPackPath(id);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        _stateStore?.Remove(id);
+    }
+
     public string InstallPack(string sourcePath, bool replaceExisting)
         => InstallPack(sourcePath, _profilePackDirectory, replaceExisting);
 

@@ -378,6 +378,36 @@ public partial class MainViewModel : ViewModelBase
         SetStatusMessage(result.Message);
     }
 
+    public ImportExportViewModel CreateImportExportViewModel(Action close)
+    {
+        var reservedCommandNames = _catalog.Schema.Commands
+            .Where(command => !_userCommandNames.Contains(command.QualifiedName)
+                && !_commandPackSources.ContainsKey(command.QualifiedName))
+            .Select(command => command.QualifiedName)
+            .Concat(_commandPackSources.Keys.Where(name => !_commandPacks
+                .Where(pack => pack.Enabled && _extensionStateStore.IsEnabled(pack.Id))
+                .Any(pack => pack.Commands.Contains(name, StringComparer.OrdinalIgnoreCase))))
+            .ToArray();
+        var manager = new CommandOwnershipManager(
+            _commandSchemaLoader,
+            _commandPackLoader,
+            _extensionStateStore,
+            _commandPacks,
+            reservedCommandNames,
+            InitializeCommandRuntime);
+        return new ImportExportViewModel(manager, ImportCommandPackForDialogAsync, close);
+    }
+
+    private async Task<CommandExecutionResult> ImportCommandPackForDialogAsync(string path)
+    {
+        var command = new ParsedCommand(
+            ExtensionCommandModel.Definition,
+            ExtensionCommandModel.Definition.Actions.Single(action => action.Name == "pack-install"),
+            new Dictionary<string, string> { ["json-path"] = path });
+        var model = (ExtensionCommandModel)_commandExecutors["extension"];
+        return await model.ExecuteAsync(command);
+    }
+
     private static Task<bool> ConfirmCommandPackReplacement(string id)
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow

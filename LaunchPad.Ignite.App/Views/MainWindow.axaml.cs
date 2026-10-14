@@ -523,15 +523,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        var path = await PickCommandPackFileAsync();
-        if (path is null)
+        _secretDialogIsOpen = true;
+        try
         {
-            return;
+            var dialogViewModel = viewModel.CreateImportExportViewModel(() => { });
+            await new ImportExportWindow(dialogViewModel).ShowDialog(this);
+            _commandBox.Text = viewModel.CommandText;
+            _commandBox.CaretIndex = viewModel.CommandText.Length;
         }
-
-        await viewModel.ImportCommandPackAsync(path);
-        _commandBox.Text = viewModel.CommandText;
-        _commandBox.CaretIndex = viewModel.CommandText.Length;
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
     }
 
     private async void SettingsButton_Click(object? sender, RoutedEventArgs e)

@@ -220,6 +220,48 @@ public sealed class CommandSchemaLoader
     public IReadOnlyList<CommandDefinition> GetUserCommands() => ReadSchema(_userCommandsPath).Commands;
     public IReadOnlyList<CommandListDefinition> GetUserLists() => ReadSchema(_userCommandsPath).Lists;
 
+    public CommandSchema ReadUserSchemaForTransfer()
+    {
+        EnsureUserCommandsFileExists();
+        return ReadSchema(_userCommandsPath);
+    }
+
+    public void ValidateUserSchemaForTransfer(
+        CommandSchema userSchema,
+        IEnumerable<string>? commandsMovingFromPacks = null)
+    {
+        var allowedPackCommandNames = (commandsMovingFromPacks ?? [])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var appCommandConflict = _appSchema.Commands.FirstOrDefault(appCommand =>
+            userSchema.Commands.Any(userCommand => string.Equals(
+                userCommand.QualifiedName,
+                appCommand.QualifiedName,
+                StringComparison.OrdinalIgnoreCase))
+            && !allowedPackCommandNames.Contains(appCommand.QualifiedName));
+        if (appCommandConflict is not null)
+        {
+            throw new InvalidOperationException($"Command name '{appCommandConflict.QualifiedName}' is already in use.");
+        }
+
+        var merged = Merge(_appSchema, userSchema);
+        var errors = new CommandSchemaValidator().Validate(merged, SupportedKinds(merged));
+        if (errors.Count > 0)
+        {
+            throw new InvalidDataException(string.Join(Environment.NewLine, errors));
+        }
+    }
+
+    public void WriteUserSchemaForTransfer(
+        CommandSchema userSchema,
+        IEnumerable<string>? commandsMovingFromPacks = null)
+    {
+        ValidateUserSchemaForTransfer(userSchema, commandsMovingFromPacks);
+        WriteSchema(userSchema);
+    }
+
+    public void RestoreUserSchemaForTransfer(CommandSchema userSchema)
+        => WriteSchema(userSchema);
+
     private void ValidateAndWrite(CommandSchema userSchema)
     {
         var merged = Merge(_appSchema, userSchema);

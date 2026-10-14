@@ -1,0 +1,150 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:vm="using:LaunchPad.Ignite.App.ViewModels"
+		x:Class="LaunchPad.Ignite.App.Views.ImportExportWindow"
+		x:DataType="vm:ImportExportViewModel"
+		Title="Command Packs — Import / Export"
+		Width="860" Height="700" MinWidth="700" MinHeight="540"
+		WindowStartupLocation="CenterOwner"
+		Background="{DynamicResource ThemeWindowBackground}">
+	<Window.Styles>
+		<Style Selector="TextBlock">
+			<Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+		</Style>
+		<Style Selector="TabItem">
+			<Setter Property="Foreground" Value="{DynamicResource ThemeSecondaryText}" />
+		</Style>
+		<Style Selector="TabItem:selected">
+			<Setter Property="Foreground" Value="{DynamicResource ThemeAccent}" />
+		</Style>
+		<Style Selector="TextBox">
+			<Setter Property="Background" Value="{DynamicResource ThemeInputBackground}" />
+			<Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+		</Style>
+		<Style Selector="ComboBox">
+			<Setter Property="Background" Value="{DynamicResource ThemeInputBackground}" />
+			<Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+		</Style>
+		<Style Selector="CheckBox">
+			<Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+		</Style>
+		<Style Selector="Button">
+			<Setter Property="Background" Value="{DynamicResource ThemePanelBackground}" />
+			<Setter Property="Foreground" Value="{DynamicResource ThemeText}" />
+			<Setter Property="BorderBrush" Value="{DynamicResource ThemeBorder}" />
+		</Style>
+	</Window.Styles>
+	<Border Background="{DynamicResource ThemePanelBackground}"
+			BorderBrush="{DynamicResource ThemeBorder}"
+			BorderThickness="1"
+			CornerRadius="14"
+			Padding="18">
+	<Grid RowDefinitions="*,Auto" RowSpacing="12">
+		<TabControl Grid.Row="0">
+			<TabItem Header="Move commands">
+				<Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="10" Margin="8">
+					<StackPanel Orientation="Horizontal" Spacing="8">
+						<TextBlock Text="Move selected commands to" VerticalAlignment="Center" />
+						<ComboBox Width="220" ItemsSource="{Binding Destinations}" SelectedItem="{Binding SelectedDestination}">
+							<ComboBox.ItemTemplate>
+								<DataTemplate x:DataType="vm:CommandDestinationViewModel">
+									<TextBlock Text="{Binding Name}" />
+								</DataTemplate>
+							</ComboBox.ItemTemplate>
+						</ComboBox>
+						<Button Content="Refresh" Click="Refresh_Click" />
+					</StackPanel>
+					<ScrollViewer Grid.Row="1">
+						<ItemsControl ItemsSource="{Binding Sources}">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate x:DataType="vm:CommandSourceViewModel">
+									<StackPanel Spacing="4" Margin="0,0,0,10">
+										<StackPanel Orientation="Horizontal" Spacing="8">
+											<TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+											<Button Content="{Binding ToggleAllText}" Command="{Binding ToggleAllCommand}" />
+										</StackPanel>
+										<ItemsControl ItemsSource="{Binding Commands}">
+											<ItemsControl.ItemTemplate>
+												<DataTemplate x:DataType="vm:CommandSelectionViewModel">
+													<CheckBox IsChecked="{Binding IsSelected}">
+														<StackPanel>
+															<TextBlock Text="{Binding QualifiedName}" />
+															<TextBlock Text="{Binding Description}" Opacity="0.7" FontSize="12" />
+														</StackPanel>
+													</CheckBox>
+												</DataTemplate>
+											</ItemsControl.ItemTemplate>
+										</ItemsControl>
+									</StackPanel>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+					<TextBlock Grid.Row="2" Text="{Binding MovePreview}" TextWrapping="Wrap" />
+					<StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10">
+						<Button Content="Move" Command="{Binding MoveCommand}" IsEnabled="{Binding CanMove}" />
+						<TextBlock Text="{Binding MoveStatus}" TextWrapping="Wrap" VerticalAlignment="Center" />
+					</StackPanel>
+				</Grid>
+			</TabItem>
+			<TabItem Header="Export pack">
+				<Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10" Margin="8">
+					<StackPanel Orientation="Horizontal" Spacing="8">
+						<TextBlock Text="Pack ID" VerticalAlignment="Center" />
+						<TextBox Width="180" Text="{Binding ExportPackId}" />
+						<TextBlock Text="Namespace (optional)" VerticalAlignment="Center" />
+						<TextBox Width="180" Text="{Binding ExportNamespace}" />
+						<Button Content="Refresh commands" Click="Refresh_Click" />
+					</StackPanel>
+					<TextBlock Grid.Row="1" Text="Select commands to include; referenced user/enabled-pack lists and variables are included automatically." TextWrapping="Wrap" />
+					<ScrollViewer Grid.Row="2">
+						<ItemsControl ItemsSource="{Binding Sources}">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate x:DataType="vm:CommandSourceViewModel">
+									<StackPanel Spacing="4" Margin="0,0,0,10">
+										<StackPanel Orientation="Horizontal" Spacing="8">
+											<TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+											<Button Content="{Binding ToggleAllText}" Command="{Binding ToggleAllCommand}" />
+										</StackPanel>
+										<ItemsControl ItemsSource="{Binding Commands}">
+											<ItemsControl.ItemTemplate>
+												<DataTemplate x:DataType="vm:CommandSelectionViewModel">
+													<CheckBox IsChecked="{Binding IsSelected}">
+														<StackPanel>
+															<TextBlock Text="{Binding QualifiedName}" />
+															<TextBlock Text="{Binding Description}" Opacity="0.7" FontSize="12" />
+														</StackPanel>
+													</CheckBox>
+												</DataTemplate>
+											</ItemsControl.ItemTemplate>
+										</ItemsControl>
+									</StackPanel>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+					<TextBlock Grid.Row="3" Text="{Binding ExportPreview}" TextWrapping="Wrap" />
+					<StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="10">
+						<Button Content="Export JSON…" IsEnabled="{Binding CanExport}" Click="Export_Click" />
+						<TextBlock Text="{Binding ExportStatus}" TextWrapping="Wrap" VerticalAlignment="Center" />
+					</StackPanel>
+				</Grid>
+			</TabItem>
+			<TabItem Header="Import pack">
+				<StackPanel Spacing="12" Margin="8">
+					<TextBlock Text="Choose a command-pack JSON file to install. Existing pack replacement uses the standard confirmation." TextWrapping="Wrap" />
+					<StackPanel Orientation="Horizontal" Spacing="8">
+						<TextBox Width="600" Text="{Binding ImportPath}" Watermark="Command pack JSON path" />
+						<Button Content="Browse…" Click="BrowseImport_Click" />
+					</StackPanel>
+					<Button Content="Import pack" Command="{Binding ImportCommand}" />
+					<TextBlock Text="{Binding ImportStatus}" TextWrapping="Wrap" />
+				</StackPanel>
+			</TabItem>
+		</TabControl>
+		<StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+			<Button Content="Close" Click="Close_Click" />
+		</StackPanel>
+	</Grid>
+	</Border>
+</Window>
