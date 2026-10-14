@@ -471,6 +471,36 @@ public class CommandCompletionSessionTests
         Assert.Empty(state.Items);
     }
 
+    [Fact]
+    public void EditCommandSuggestsQualifiedCommandNamesAndParsesOptionalName()
+    {
+        var commands = new[]
+        {
+            new CommandDefinition("open", "url", "", [new CommandActionDefinition("default", "", "", "https://example.test", [])]),
+            new CommandDefinition("build", "shell", "", [new CommandActionDefinition("default", "", "", "dotnet build", [])], "tools")
+        };
+        var schema = new CommandSchema([], commands.Append(EditCommandDefinition.Definition).ToArray());
+        var provider = new LaunchPad.Ignite.App.Services.CommandNamesArgumentValueProvider(() => commands);
+        var session = new CommandCompletionSession(new CommandCatalog(schema, ["shell", "edit"]), new CommandSchemaValueProvider(
+            schema,
+            provider));
+
+        var suggestions = session.UpdateInputText("edit ");
+        var parsed = new LaunchPad.Ignite.Core.Parsing.CommandLineParser(
+            new CommandCatalog(schema, ["shell", "edit"]),
+            new CommandSchemaValueProvider(schema, provider)).Parse("edit tools:build");
+        var bare = new LaunchPad.Ignite.Core.Parsing.CommandLineParser(
+            new CommandCatalog(schema, ["shell", "edit"]),
+            new CommandSchemaValueProvider(schema, provider)).Parse("edit");
+
+        Assert.Equal("open", suggestions.GhostText);
+        Assert.Equal(["open", "tools:build"], provider.GetValues("list:commands"));
+        Assert.Equal(LaunchPad.Ignite.Core.Parsing.CommandParseStatus.Valid, parsed.Status);
+        Assert.Equal("tools:build", parsed.ParsedCommand?.Arguments["name"]);
+        Assert.Equal(LaunchPad.Ignite.Core.Parsing.CommandParseStatus.Valid, bare.Status);
+        Assert.Empty(bare.ParsedCommand!.Arguments);
+    }
+
     private static CommandCompletionSession CreateSecretListSession()
         => new(
             new CommandCatalog(TestCommandSchemas.SecretList()),

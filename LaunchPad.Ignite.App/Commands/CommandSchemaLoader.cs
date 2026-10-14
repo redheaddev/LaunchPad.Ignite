@@ -24,6 +24,8 @@ public sealed class CommandSchemaLoader
     private readonly string _migrationMarkerPath;
     private readonly HashSet<string> _packedCommandNames;
 
+    public IReadOnlySet<string> UserCommandNames { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     public CommandSchemaLoader(CommandSchema appSchema)
         : this(
             appSchema,
@@ -78,6 +80,9 @@ public sealed class CommandSchemaLoader
         MigrateLegacyCommandsOnce();
         var userSchema = ReadSchema(_userCommandsPath);
         RemovePackedCommands(userSchema);
+        UserCommandNames = userSchema.Commands
+            .Select(command => command.QualifiedName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return Merge(_appSchema, userSchema);
     }
 
@@ -91,6 +96,210 @@ public sealed class CommandSchemaLoader
             .Append(variable)
             .ToArray();
         WriteSchema(userSchema with { Variables = variables });
+        return Load();
+    }
+
+    public CommandSchema UpdateUserList(CommandListDefinition originalList, CommandListDefinition updatedList)
+    {
+        EnsureUserCommandsFileExists();
+        var userSchema = ReadSchema(_userCommandsPath);
+        var listIndex = userSchema.Lists.ToList().FindIndex(list =>
+            string.Equals(GetListKey(list), GetListKey(originalList), StringComparison.OrdinalIgnoreCase));
+        if (listIndex < 0)
+        {
+            throw new InvalidOperationException($"List '{originalList.QualifiedName}' was not found in the user schema.");
+        }
+
+        var lists = userSchema.Lists.ToArray();
+        lists[listIndex] = updatedList with { Name = userSchema.Lists[listIndex].Name, Namespace = userSchema.Lists[listIndex].Namespace };
+        var updatedUserSchema = userSchema with { Lists = lists };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandSchema AddUserCommand(CommandDefinition command)
+    {
+        EnsureUserCommandsFileExists();
+        var userSchema = ReadSchema(_userCommandsPath);
+        EnsureAvailableCommandName(command.QualifiedName, userSchema);
+        var updatedUserSchema = userSchema with { Commands = userSchema.Commands.Append(command).ToArray() };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandSchema RemoveUserCommand(string name)
+    {
+        EnsureUserCommandsFileExists();
+        var qualifiedName = ParseQualifiedName(name);
+        var userSchema = ReadSchema(_userCommandsPath);
+        var commands = userSchema.Commands
+            .Where(command => !string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (commands.Length == userSchema.Commands.Count)
+        {
+            throw new InvalidOperationException($"Command '{qualifiedName}' was not found in the user schema.");
+        }
+
+        var updatedUserSchema = userSchema with { Commands = commands };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandSchema AddUserList(CommandListDefinition list)
+    {
+        EnsureUserCommandsFileExists();
+        var userSchema = ReadSchema(_userCommandsPath);
+        EnsureAvailableListName(list, userSchema);
+        var updatedUserSchema = userSchema with { Lists = userSchema.Lists.Append(list).ToArray() };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandSchema UpdateUserList(CommandListDefinition updatedList)
+    {
+        EnsureUserCommandsFileExists();
+        var userSchema = ReadSchema(_userCommandsPath);
+        var listIndex = userSchema.Lists.ToList().FindIndex(list =>
+            string.Equals(GetListKey(list), GetListKey(updatedList), StringComparison.OrdinalIgnoreCase));
+        if (listIndex < 0)
+        {
+            throw new InvalidOperationException($"List '{updatedList.QualifiedName}' was not found in the user schema.");
+        }
+
+        var lists = userSchema.Lists.ToArray();
+        lists[listIndex] = updatedList with { Name = userSchema.Lists[listIndex].Name, Namespace = userSchema.Lists[listIndex].Namespace };
+        var updatedUserSchema = userSchema with { Lists = lists };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandSchema RemoveUserList(string name)
+    {
+        EnsureUserCommandsFileExists();
+        var qualifiedName = ParseQualifiedName(name);
+        var userSchema = ReadSchema(_userCommandsPath);
+        var list = userSchema.Lists.FirstOrDefault(candidate =>
+            string.Equals(candidate.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase));
+        if (list is null)
+        {
+            throw new InvalidOperationException($"List '{qualifiedName}' was not found in the user schema.");
+        }
+
+        var references = _appSchema.Commands.Concat(userSchema.Commands)
+            .SelectMany(command => command.Actions.SelectMany(action => action.Arguments
+                .Where(argument => IsEnumReferenceTo(argument.Ref, list))
+                .Select(argument => $"{command.QualifiedName} {action.Name} ({argument.Name})")))
+            .ToArray();
+        if (references.Length > 0)
+        {
+            throw new InvalidOperationException($"Cannot remove list '{qualifiedName}'; it is referenced by: {string.Join(", ", references)}.");
+        }
+
+        var updatedUserSchema = userSchema with
+        {
+            Lists = userSchema.Lists.Where(candidate => !string.Equals(GetListKey(candidate), GetListKey(list), StringComparison.OrdinalIgnoreCase)).ToArray()
+        };
+        ValidateAndWrite(updatedUserSchema);
+        return Load();
+    }
+
+    public CommandDefinition? FindUserCommand(string name)
+    {
+        var qualifiedName = ParseQualifiedName(name);
+        return ReadSchema(_userCommandsPath).Commands.FirstOrDefault(command =>
+            string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public CommandListDefinition? FindUserList(string name)
+    {
+        var qualifiedName = ParseQualifiedName(name);
+        return ReadSchema(_userCommandsPath).Lists.FirstOrDefault(list =>
+            string.Equals(list.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public IReadOnlyList<CommandDefinition> GetUserCommands() => ReadSchema(_userCommandsPath).Commands;
+    public IReadOnlyList<CommandListDefinition> GetUserLists() => ReadSchema(_userCommandsPath).Lists;
+
+    private void ValidateAndWrite(CommandSchema userSchema)
+    {
+        var merged = Merge(_appSchema, userSchema);
+        var errors = new CommandSchemaValidator().Validate(merged, SupportedKinds(merged));
+        if (errors.Count > 0)
+        {
+            throw new InvalidDataException(string.Join(Environment.NewLine, errors));
+        }
+
+        WriteSchema(userSchema);
+    }
+
+    private void EnsureAvailableCommandName(string qualifiedName, CommandSchema userSchema)
+    {
+        if (Merge(_appSchema, userSchema).Commands.Any(command =>
+            string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"Command name '{qualifiedName}' is already in use. Extension and pack commands cannot be overwritten.");
+        }
+    }
+
+    private void EnsureAvailableListName(CommandListDefinition list, CommandSchema userSchema)
+    {
+        if (Merge(_appSchema, userSchema).Lists.Any(existing =>
+            string.Equals(GetListKey(existing), GetListKey(list), StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"List name '{list.QualifiedName}' is already in use. Extension and pack lists cannot be overwritten.");
+        }
+    }
+
+    private static bool IsEnumReferenceTo(string? reference, CommandListDefinition list)
+        => reference is not null && reference.StartsWith("enum:", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(reference[5..], list.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(reference[5..], list.QualifiedName, StringComparison.OrdinalIgnoreCase));
+
+    private static string ParseQualifiedName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsWhiteSpace))
+        {
+            throw new ArgumentException("Names must be non-empty and contain no whitespace.", nameof(name));
+        }
+
+        var separator = name.IndexOf(':');
+        if (separator < 0) return name;
+        if (separator == 0 || separator == name.Length - 1 || name.IndexOf(':', separator + 1) >= 0)
+        {
+            throw new ArgumentException("Namespaced names must use the form namespace:name.", nameof(name));
+        }
+
+        return name;
+    }
+
+    public CommandSchema UpdateUserCommand(CommandDefinition updatedCommand, string? originalQualifiedName = null)
+    {
+        EnsureUserCommandsFileExists();
+        var userSchema = ReadSchema(_userCommandsPath);
+        originalQualifiedName ??= updatedCommand.QualifiedName;
+        var commandIndex = userSchema.Commands.ToList().FindIndex(command =>
+            string.Equals(command.QualifiedName, originalQualifiedName, StringComparison.OrdinalIgnoreCase));
+        if (commandIndex < 0 || _packedCommandNames.Contains(originalQualifiedName))
+        {
+            throw new InvalidOperationException($"Command '{originalQualifiedName}' is not owned by the user schema.");
+        }
+
+        var commands = userSchema.Commands.ToArray();
+        commands[commandIndex] = updatedCommand with { Kind = commands[commandIndex].Kind };
+        var updatedUserSchema = userSchema with { Commands = commands };
+        var mergedSchema = Merge(_appSchema, updatedUserSchema);
+        if (mergedSchema.Commands.Count(command => string.Equals(
+            command.QualifiedName, updatedCommand.QualifiedName, StringComparison.OrdinalIgnoreCase)) > 1)
+        {
+            throw new InvalidOperationException($"Command name '{updatedCommand.QualifiedName}' is already in use.");
+        }
+        var errors = new CommandSchemaValidator().Validate(mergedSchema, SupportedKinds(mergedSchema));
+        if (errors.Count > 0)
+        {
+            throw new InvalidDataException(string.Join(Environment.NewLine, errors));
+        }
+
+        WriteSchema(updatedUserSchema);
         return Load();
     }
 
@@ -201,7 +410,27 @@ public sealed class CommandSchemaLoader
             ?? throw new InvalidDataException($"Command schema '{path}' is empty.");
 
     private void WriteSchema(CommandSchema schema)
-        => File.WriteAllText(_userCommandsPath, JsonSerializer.Serialize(schema, SerializerOptions));
+    {
+        var temporaryPath = _userCommandsPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(schema, SerializerOptions));
+            File.Move(temporaryPath, _userCommandsPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> SupportedKinds(CommandSchema schema)
+        => schema.Commands.Select(command => command.Kind)
+            .Concat(["shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet", "extension"])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     private static CommandVariableDefinition ParseVariable(string name, string? value)
     {

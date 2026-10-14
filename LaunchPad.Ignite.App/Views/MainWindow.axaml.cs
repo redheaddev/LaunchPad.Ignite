@@ -64,6 +64,17 @@ public partial class MainWindow : Window
         ColorThemeService.ThemeChanged += UpdateCommandInputBorder;
         DataContextChanged += (_, _) =>
         {
+            if (_shortcutViewModel is not null)
+            {
+                _shortcutViewModel.CommandEditorRequested -= OpenCommandEditor;
+            }
+
+            _shortcutViewModel = DataContext as MainViewModel;
+            if (_shortcutViewModel is not null)
+            {
+                _shortcutViewModel.CommandEditorRequested += OpenCommandEditor;
+            }
+
             if (DataContext is INotifyPropertyChanged viewModel)
             {
                 viewModel.PropertyChanged += (_, args) =>
@@ -72,6 +83,7 @@ public partial class MainWindow : Window
                     {
                         UpdateUsageText();
                     }
+
                 };
             }
 
@@ -189,6 +201,26 @@ public partial class MainWindow : Window
 
             _usageTextBlock.Inlines.Add(run);
             position = placeholderEnd;
+        }
+    }
+
+    private async void OpenCommandEditor(string? commandName)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            var settingsViewModel = viewModel.CreateSettingsViewModel();
+            settingsViewModel.OpenCommandEditor(commandName);
+            await new SettingsWindow(settingsViewModel).ShowDialog(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
         }
     }
 

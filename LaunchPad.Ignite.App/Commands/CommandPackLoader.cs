@@ -27,6 +27,33 @@ public sealed record LoadedCommandPacks(
             };
 }
 
+public static class CommandSourceLabels
+{
+    public static string GetLabel(
+        CommandDefinition command,
+        IReadOnlyDictionary<string, string>? commandSources,
+        IReadOnlySet<string>? userCommandNames,
+        IReadOnlyDictionary<string, string>? commandPackSources = null)
+    {
+        if (userCommandNames?.Contains(command.QualifiedName) == true)
+        {
+            return "User";
+        }
+
+        if (commandPackSources is not null && commandPackSources.TryGetValue(command.QualifiedName, out var packId))
+        {
+            return $"Pack [{packId}]";
+        }
+
+        if (commandSources is not null && commandSources.TryGetValue(command.QualifiedName, out var extensionId))
+        {
+            return $"Extension [{extensionId}]";
+        }
+
+        return "App";
+    }
+}
+
 public sealed record LoadedCommandPackInfo(string Id, bool Enabled);
 
 public sealed class CommandPackLoader
@@ -91,6 +118,43 @@ public sealed class CommandPackLoader
 
     public string InstallPack(string sourcePath, bool replaceExisting)
         => InstallPack(sourcePath, _profilePackDirectory, replaceExisting);
+
+    public void UpdatePackCommand(string packId, string originalQualifiedName, CommandDefinition updatedCommand)
+    {
+        var path = GetInstalledPackPath(packId);
+        if (!File.Exists(path))
+        {
+            throw new InvalidOperationException($"Command pack '{packId}' is not installed in the profile pack directory.");
+        }
+
+        var manifest = ReadManifest(path);
+        var commandIndex = manifest.Schema.Commands.ToList().FindIndex(command =>
+            string.Equals(
+                (command with { Namespace = command.Namespace ?? manifest.Namespace }).QualifiedName,
+                originalQualifiedName,
+                StringComparison.OrdinalIgnoreCase));
+        if (commandIndex < 0)
+        {
+            throw new InvalidOperationException($"Command '{originalQualifiedName}' is not defined by pack '{packId}'.");
+        }
+
+        var commands = manifest.Schema.Commands.ToArray();
+        commands[commandIndex] = updatedCommand;
+        var updatedManifest = manifest with { Schema = manifest.Schema with { Commands = commands } };
+        ValidateManifest(updatedManifest, packId, path);
+        foreach (var command in updatedManifest.Schema.Commands)
+        {
+            ValidateCommand(command with { Namespace = command.Namespace ?? updatedManifest.Namespace }, path);
+        }
+
+        if (commands.Select(command => (command with { Namespace = command.Namespace ?? updatedManifest.Namespace }).QualifiedName)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count() != commands.Length)
+        {
+            throw new InvalidOperationException($"Command name '{updatedCommand.QualifiedName}' is already defined by pack '{packId}'.");
+        }
+
+        WriteManifestAtomically(path, updatedManifest);
+    }
 
     public CommandSchema Load(CommandSchema? existingSchema = null)
         => LoadWithSources(existingSchema).Schema;
@@ -223,6 +287,23 @@ public sealed class CommandPackLoader
         catch (JsonException exception)
         {
             throw new InvalidDataException($"Command pack manifest '{path}' is invalid: {exception.Message}", exception);
+        }
+    }
+
+    private static void WriteManifestAtomically(string path, CommandPackManifest manifest)
+    {
+        var temporaryPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(manifest, SerializerOptions));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
         }
     }
 

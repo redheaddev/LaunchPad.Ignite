@@ -8,6 +8,26 @@ namespace LaunchPad.Ignite.Tests;
 public class CommandPackLoaderTests
 {
     [Fact]
+    public void UpdatesInstalledPackCommandIdentityAndDescription()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "tools", "tools", "tools", "status", "Before");
+        var loader = new CommandPackLoader([directory.Path]);
+        var original = Assert.Single(loader.Load().Commands);
+
+        loader.UpdatePackCommand("tools", original.QualifiedName, original with
+        {
+            Name = "health",
+            Namespace = "infra",
+            Description = "After"
+        });
+
+        var updated = Assert.Single(loader.Load().Commands);
+        Assert.Equal("infra:health", updated.QualifiedName);
+        Assert.Equal("After", updated.Description);
+    }
+
+    [Fact]
     public void LoadsCommandsWithDefaultAndCommandSpecificNamespaces()
     {
         using var directory = new TemporaryDirectory();

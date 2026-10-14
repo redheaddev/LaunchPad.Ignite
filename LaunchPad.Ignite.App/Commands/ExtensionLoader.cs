@@ -181,7 +181,8 @@ public sealed class ExtensionLoader
         var secretEnvironmentHandoffs = new List<ISecretEnvironmentHandoff>();
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
-            lists.AddRange(manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>());
+            lists.AddRange((manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>())
+                .Select(list => list with { Namespace = list.Namespace ?? manifest.Namespace }));
             foreach (var command in (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>()).Select(command => command with
             {
                 Namespace = command.Namespace ?? manifest.Namespace

@@ -115,8 +115,10 @@
                     <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="6"
                           Margin="0,0,0,8">
                         <TextBlock Text="Target:" Foreground="{DynamicResource ThemeMutedText}" FontSize="12" />
-                        <TextBlock Grid.Column="1" Text="{Binding TargetPreviewDisplay}" Foreground="{DynamicResource ThemeTarget}"
-                                   FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding TargetPreviewDisplay}" ToolTip.Tip="{Binding TargetPreviewDisplay}"
+                                   Foreground="{DynamicResource ThemeTarget}"
+                                   FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" />
                     </Grid>
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6"
                                 IsVisible="{Binding HasCommandExpansionPreview}" Margin="0,0,0,8">

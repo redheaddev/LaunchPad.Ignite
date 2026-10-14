@@ -107,29 +107,215 @@
 					</ItemsControl>
 				</ScrollViewer>
 			</Grid>
-			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSecretsSelected}">
-				<ItemsControl ItemsSource="{Binding ExtensionSecretPermissions}">
-					<ItemsControl.ItemTemplate>
-						<DataTemplate>
-							<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,0,12">
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsExtensionSelected}">
+				<StackPanel Spacing="12">
+					<ItemsControl ItemsSource="{Binding Settings}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate>
+								<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" Margin="0,0,0,12">
+									<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+										<TextBlock Text="{Binding Label}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+										<TextBlock Grid.Row="1" Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" Margin="0,5,0,10" />
+										<ComboBox Grid.Row="2" Grid.ColumnSpan="2" ItemsSource="{Binding Options}" SelectedItem="{Binding Value, Mode=TwoWay}" IsVisible="{Binding IsSelect}" />
+										<TextBox Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding Value, Mode=TwoWay}" Watermark="{Binding Label}" IsVisible="{Binding IsNotSelect}" />
+										<TextBlock Grid.Row="3" Text="{Binding Token}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Foreground="{DynamicResource ThemeAccent}" Margin="0,8,0,0" />
+										<Button Grid.Row="3" Grid.Column="1" Content="Save" Command="{Binding SaveSettingCommand}" Margin="10,5,0,0" />
+									</Grid>
+								</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+					<StackPanel Spacing="8" IsVisible="{Binding HasSelectedList}">
+						<TextBlock Text="Extension list defaults" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+						<TextBlock Text="Each list has one default. The extension supplies the baseline; you can override it for this list only." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+						<ComboBox ItemsSource="{Binding ListDefaultEditors}" SelectedItem="{Binding SelectedListDefaultEditor, Mode=TwoWay}">
+						<ComboBox.ItemTemplate>
+							<DataTemplate x:DataType="vm:ListDefaultEditorViewModel">
+								<TextBlock Text="{Binding ListName}" />
+							</DataTemplate>
+						</ComboBox.ItemTemplate>
+					</ComboBox>
+					<ContentControl Content="{Binding SelectedListDefaultEditor}">
+						<ContentControl.ContentTemplate>
+							<DataTemplate x:DataType="vm:ListDefaultEditorViewModel">
 								<StackPanel Spacing="8">
-									<TextBlock Text="{Binding ExtensionName}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
-									<TextBlock Text="Secret access is denied unless explicitly allowed below." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
-									<ItemsControl ItemsSource="{Binding Secrets}">
-										<ItemsControl.ItemTemplate>
-											<DataTemplate x:DataType="vm:SecretPermissionChoiceViewModel">
-												<StackPanel Orientation="Horizontal" Spacing="8">
-													<CheckBox IsChecked="{Binding IsAllowed, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" />
-													<TextBlock Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
-												</StackPanel>
-											</DataTemplate>
-										</ItemsControl.ItemTemplate>
-									</ItemsControl>
+									<TextBlock Text="Default for this list" Foreground="{DynamicResource ThemeText}" />
+									<ComboBox ItemsSource="{Binding Values}" SelectedItem="{Binding SelectedDefault, Mode=TwoWay}" />
+									<TextBlock Text="Choose 'Use extension default' to remove your override and follow the extension's default again." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
 								</StackPanel>
-							</Border>
-						</DataTemplate>
-					</ItemsControl.ItemTemplate>
-				</ItemsControl>
+							</DataTemplate>
+						</ContentControl.ContentTemplate>
+					</ContentControl>
+					</StackPanel>
+					<TextBlock Text="No extension enum lists are available." IsVisible="{Binding HasNoLists}" Foreground="{DynamicResource ThemeSecondaryText}" />
+					<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" IsVisible="{Binding HasSelectedExtensionSecretPermissions}">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Allowed secrets" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Secret access is denied unless explicitly allowed for this extension." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<ItemsControl ItemsSource="{Binding SelectedExtensionSecretPermissions.Secrets}">
+								<ItemsControl.ItemTemplate>
+									<DataTemplate x:DataType="vm:SecretPermissionChoiceViewModel">
+										<StackPanel Orientation="Horizontal" Spacing="8">
+											<CheckBox IsChecked="{Binding IsAllowed, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" />
+											<TextBlock Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
+										</StackPanel>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</StackPanel>
+					</Border>
+				</StackPanel>
+			</ScrollViewer>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsCommandsSelected}">
+				<StackPanel Spacing="12">
+					<ComboBox ItemsSource="{Binding CommandSourceFilters}" SelectedItem="{Binding SelectedCommandSourceFilter, Mode=TwoWay}" />
+					<ComboBox ItemsSource="{Binding FilteredCommandDetails}" SelectedItem="{Binding SelectedCommandDetails, Mode=TwoWay}">
+						<ComboBox.ItemTemplate>
+							<DataTemplate x:DataType="vm:CommandDetailsViewModel">
+								<TextBlock Text="{Binding QualifiedName}" />
+							</DataTemplate>
+						</ComboBox.ItemTemplate>
+					</ComboBox>
+					<ContentControl Content="{Binding SelectedCommandDetails}">
+						<ContentControl.ContentTemplate>
+							<DataTemplate x:DataType="vm:CommandDetailsViewModel">
+								<ScrollViewer VerticalScrollBarVisibility="Auto">
+									<StackPanel Spacing="10">
+										<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
+											<StackPanel Spacing="8">
+												<TextBlock Text="Command details" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+												<Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="6">
+													<TextBlock Text="Name" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+													<TextBlock Grid.Row="1" Text="Namespace" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Namespace, Mode=TwoWay}" Watermark="(global)" IsEnabled="{Binding IsEditable}" />
+													<TextBlock Grid.Row="2" Text="Qualified name" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding QualifiedName}" Foreground="{DynamicResource ThemeText}" />
+													<TextBlock Grid.Row="3" Text="Kind" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Kind}" Foreground="{DynamicResource ThemeText}" />
+													<TextBlock Grid.Row="4" Text="Description" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Description, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" TextWrapping="Wrap" />
+													<TextBlock Grid.Row="5" Text="Source" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding SourceLocation}" Foreground="{DynamicResource ThemeText}" />
+												</Grid>
+												<Grid ColumnDefinitions="*,Auto">
+													<StackPanel Spacing="3">
+														<TextBlock Text="Actions" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+														<TextBlock Text="Choose an action to edit its usage, target, argument templates and inputs." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+													</StackPanel>
+													<Button Grid.Column="1" Content="Add action" Command="{Binding AddNewActionCommand}" IsVisible="{Binding IsEditable}" />
+												</Grid>
+												<ComboBox ItemsSource="{Binding Actions}" SelectedItem="{Binding SelectedAction, Mode=TwoWay}" IsEnabled="{Binding IsEditable}">
+													<ComboBox.ItemTemplate>
+														<DataTemplate x:DataType="vm:CommandActionEditorViewModel"><TextBlock Text="{Binding Name}" /></DataTemplate>
+													</ComboBox.ItemTemplate>
+												</ComboBox>
+												<ContentControl Content="{Binding SelectedAction}">
+													<ContentControl.ContentTemplate>
+														<DataTemplate x:DataType="vm:CommandActionEditorViewModel">
+															<StackPanel Spacing="8">
+																<Grid ColumnDefinitions="*,Auto">
+																	<TextBlock Text="Action details" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+																	<Button Grid.Column="1" Content="Remove action" Command="{Binding RemoveSelectedActionCommand}" IsVisible="{Binding CanRemove}" />
+																</Grid>
+																<TextBlock Text="Action name" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding Name, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																<TextBlock Text="Description" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding Description, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																<TextBlock Text="Usage - syntax shown to users; brackets usually mark optional arguments." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding Usage, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																<TextBlock Text="Target template - program, URL, or path opened by this action." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding TargetTemplate, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																<TextBlock Text="Argument templates - one target argument per line; {name} inserts the supplied value." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding ArgumentTemplates, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" AcceptsReturn="True" MinHeight="60" />
+																<Grid ColumnDefinitions="*,Auto">
+																	<TextBlock Text="Arguments (in positional order)" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+																	<Button Grid.Column="1" Content="Add argument" Command="{Binding AddArgumentCommand}" IsVisible="{Binding IsEditable}" />
+																</Grid>
+																<ItemsControl ItemsSource="{Binding Arguments}">
+																	<ItemsControl.ItemTemplate>
+																		<DataTemplate x:DataType="vm:CommandArgumentEditorViewModel">
+																			<Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,6">
+																				<StackPanel Spacing="6">
+																			<Grid ColumnDefinitions="*,Auto,Auto,Auto">
+												<TextBox Text="{Binding Name, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" Watermark="Argument name" />
+																				<Button Grid.Column="1" Content="Move up" Command="{Binding MoveEarlierCommand}" IsEnabled="{Binding CanMoveEarlier}" IsVisible="{Binding IsEditable}" Margin="6,0,0,0" />
+																				<Button Grid.Column="2" Content="Move down" Command="{Binding MoveLaterCommand}" IsEnabled="{Binding CanMoveLater}" IsVisible="{Binding IsEditable}" Margin="6,0,0,0" />
+																				<Button Grid.Column="3" Content="Remove" Command="{Binding $parent[ItemsControl].DataContext.RemoveArgumentCommand}" CommandParameter="{Binding}" IsVisible="{Binding IsEditable}" Margin="6,0,0,0" />
+																					</Grid>
+																					<Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
+																						<CheckBox Content="Optional (not required)" IsChecked="{Binding IsOptional, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																						<StackPanel Grid.Column="1" Spacing="3">
+																							<TextBlock Text="Input format" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+																							<ComboBox ItemsSource="{Binding InputTypes}" SelectedItem="{Binding InputType, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																						</StackPanel>
+																						<StackPanel Grid.Row="1" Spacing="3">
+																							<TextBlock Text="Value source (enum/list or free text)" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+																					<ComboBox ItemsSource="{Binding ReferenceChoices}" SelectedItem="{Binding SelectedReference, Mode=TwoWay}" IsEnabled="{Binding IsEditable}">
+																						<ComboBox.ItemTemplate><DataTemplate x:DataType="vm:CommandListReferenceChoice"><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+																							</ComboBox>
+											<TextBox Text="{Binding ListReference, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" Watermark="Runtime list reference: list:dynamicName" />
+																						</StackPanel>
+																						<StackPanel Grid.Row="1" Grid.Column="1" Spacing="3">
+																							<CheckBox Content="Allow values outside the list" IsChecked="{Binding AllowCustomValues, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																							<CheckBox Content="Single selection (list references only)" IsChecked="{Binding IsSingleSelection, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" IsVisible="{Binding IsListReference}" />
+																							<CheckBox Content="Sensitive value" IsChecked="{Binding IsSensitive, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																						</StackPanel>
+																					</Grid>
+																				</StackPanel>
+																			</Border>
+																		</DataTemplate>
+																</ItemsControl.ItemTemplate>
+															</ItemsControl>
+														</StackPanel>
+													</DataTemplate>
+												</ContentControl.ContentTemplate>
+											</ContentControl>
+												<Button Content="Save changes" Command="{Binding SaveCommand}" IsVisible="{Binding IsEditable}" IsEnabled="{Binding HasUnsavedChanges}" HorizontalAlignment="Left" />
+												<StackPanel IsVisible="{Binding IsShellCommand}" Spacing="6">
+													<TextBlock Text="Launch behavior when Enter is pressed" Foreground="{DynamicResource ThemeText}" />
+												<ComboBox ItemsSource="{Binding LaunchModes}" SelectedItem="{Binding SelectedLaunchMode, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+												</StackPanel>
+										</StackPanel>
+									</Border>
+								</StackPanel>
+							</ScrollViewer>
+							</DataTemplate>
+						</ContentControl.ContentTemplate>
+					</ContentControl>
+				</StackPanel>
+			</ScrollViewer>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsListsSelected}">
+				<StackPanel Spacing="12">
+					<ComboBox ItemsSource="{Binding EnumListEditors}" SelectedItem="{Binding SelectedEnumListEditor, Mode=TwoWay}">
+						<ComboBox.ItemTemplate>
+							<DataTemplate x:DataType="vm:EnumListEditorViewModel">
+								<TextBlock Text="{Binding ListName}" />
+							</DataTemplate>
+						</ComboBox.ItemTemplate>
+					</ComboBox>
+					<ContentControl Content="{Binding SelectedEnumListEditor}">
+						<ContentControl.ContentTemplate>
+							<DataTemplate x:DataType="vm:EnumListEditorViewModel">
+								<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
+									<StackPanel Spacing="10">
+										<TextBlock Text="Enum list" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+										<TextBlock Text="Enter one option per line. Saving puts the selected default first and sorts the remaining values alphabetically." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<TextBlock Text="Values" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<TextBox Text="{Binding ValuesText, Mode=TwoWay}" AcceptsReturn="True" MinHeight="150" TextWrapping="Wrap" />
+										<TextBlock Text="Default value" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<ComboBox ItemsSource="{Binding Values}" SelectedItem="{Binding SelectedDefault, Mode=TwoWay}" />
+										<StackPanel Orientation="Horizontal" Spacing="10">
+											<Button Content="Save list" Command="{Binding SaveCommand}" />
+											<TextBlock Text="{Binding Status}" Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
+										</StackPanel>
+									</StackPanel>
+								</Border>
+							</DataTemplate>
+						</ContentControl.ContentTemplate>
+					</ContentControl>
+					<TextBlock Text="No enum lists are available." IsVisible="{Binding HasNoEnumLists}" Foreground="{DynamicResource ThemeSecondaryText}" />
+				</StackPanel>
 			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSettingsListVisible}">
 				<ItemsControl ItemsSource="{Binding Settings}">

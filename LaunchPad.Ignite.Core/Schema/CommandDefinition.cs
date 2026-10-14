@@ -39,7 +39,11 @@ public sealed record CommandListDefinition(
     string Type,
     string Name,
     IReadOnlyList<string> Values,
-    string? Default = null);
+    string? Default = null,
+    string? Namespace = null)
+{
+    public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
+}
 
 public sealed record CommandSettingDefinition(
     string Name,

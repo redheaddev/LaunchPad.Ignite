@@ -31,6 +31,55 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void LoaderUpdatesExistingUserCommandAndPreservesIdentityAndOtherCommands()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        File.WriteAllText(userPath, """
+            {
+              "lists": [], "variables": [], "functions": [],
+              "commands": [
+                { "name": "mine", "namespace": "custom", "kind": "shell", "description": "old", "actions": [
+                  { "name": "default", "description": "", "usage": "old", "targetTemplate": "old.exe", "arguments": [], "argumentTemplates": ["old-arg"] }
+                ]},
+                { "name": "untouched", "kind": "shell", "description": "keep", "actions": [
+                  { "name": "default", "description": "", "usage": "", "targetTemplate": "keep.exe", "arguments": [] }
+                ]}
+              ]
+            }
+            """);
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        var edited = new CommandDefinition("renamed", "other-kind", "new description", [
+            new CommandActionDefinition("default", "", "new usage", "new.exe", [])
+        ], "other-namespace");
+
+        var result = loader.UpdateUserCommand(edited with { Name = "mine", Namespace = "custom" });
+
+        var command = Assert.Single(result.Commands.Where(item => item.Name == "mine"));
+        Assert.Equal("custom:mine", command.QualifiedName);
+        Assert.Equal("shell", command.Kind);
+        Assert.Equal("new description", command.Description);
+        Assert.Equal("new usage", command.Actions[0].Usage);
+        Assert.Equal("new.exe", command.Actions[0].TargetTemplate);
+        Assert.Contains(result.Commands, item => item.Name == "untouched" && item.Description == "keep");
+        Assert.Contains("new description", File.ReadAllText(userPath));
+    }
+
+    [Fact]
+    public void LoaderRejectsUpdatingCommandNotOwnedByUserWithoutWriting()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var appCommand = new CommandDefinition("app-command", "shell", "app", [
+            new CommandActionDefinition("default", "", "", "app.exe", [])
+        ]);
+        var loader = new CommandSchemaLoader(new CommandSchema([], [appCommand]), userPath);
+
+        Assert.Throws<InvalidOperationException>(() => loader.UpdateUserCommand(appCommand with { Description = "changed" }));
+        Assert.DoesNotContain("changed", File.ReadAllText(userPath));
+    }
+
+    [Fact]
     public void LoaderMigratesBundledCommandsIntoUserSchemaOnlyOnce()
     {
         using var directory = new TemporaryDirectory();
@@ -507,6 +556,25 @@ public class CommandModelTests
 
         Assert.False(result.Succeeded);
         Assert.Contains("not found", result.Message);
+    }
+
+    [Fact]
+    public void EditCommandModelRequestsEditorWithOptionalCommandName()
+    {
+        var definition = EditCommandDefinition.Definition;
+        var action = Assert.Single(definition.Actions);
+        string? requestedName = null;
+        var model = new EditCommandModel(name => requestedName = name);
+
+        var namedCommand = new ParsedCommand(definition, action, new Dictionary<string, string> { ["name"] = "build" });
+        var namedResult = model.Execute(namedCommand);
+        Assert.True(namedResult.Succeeded);
+        Assert.Equal("build", requestedName);
+
+        var bareCommand = new ParsedCommand(definition, action, new Dictionary<string, string>());
+        var bareResult = model.Execute(bareCommand);
+        Assert.True(bareResult.Succeeded);
+        Assert.Null(requestedName);
     }
 
     [Fact]

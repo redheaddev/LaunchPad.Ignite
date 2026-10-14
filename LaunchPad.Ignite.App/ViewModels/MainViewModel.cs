@@ -15,6 +15,8 @@ using LaunchPad.Ignite.App.Views;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -22,6 +24,7 @@ namespace LaunchPad.Ignite.App.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
+    public event Action<string?>? CommandEditorRequested;
     private CommandCompletionSession _completionSession = null!;
     private CommandCatalog _catalog = null!;
     private CommandLineParser _parser = null!;
@@ -32,6 +35,11 @@ public partial class MainViewModel : ViewModelBase
     private IReadOnlyDictionary<string, ICommandExecutor> _commandExecutors = null!;
     private IReadOnlyDictionary<string, IAsyncCommandExecutor> _asyncCommandExecutors = null!;
     private IReadOnlyDictionary<string, string> _commandSources = null!;
+    private IReadOnlyDictionary<string, string> _commandPackSources = null!;
+    private IReadOnlySet<string> _userCommandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private CommandSchemaLoader _commandSchemaLoader = null!;
+    private CommandPackLoader _commandPackLoader = null!;
+    private DefinitionManagementCommandModel _definitionManagementCommandModel = null!;
     private SnippetStore _snippetStore = null!;
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
@@ -55,6 +63,8 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISecretTerminalLauncher _terminalLauncher;
     private bool _isExtensionListVisible;
     private bool _isDirectPathCompletionActive;
+    private bool _isManagementCompletionActive;
+    private string _managementCompletionInput = string.Empty;
     private bool _isHistoryPathStepping;
     private IReadOnlyList<string> _directPathSuggestions = Array.Empty<string>();
     private int _directPathHighlightedIndex;
@@ -102,16 +112,18 @@ public partial class MainViewModel : ViewModelBase
             extensions.SecretEnvironmentHandoffs.FirstOrDefault(),
             extensionSecretAccessPolicy);
         var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
-        var commandPacks = new CommandPackLoader(_extensionStateStore)
+        _commandPackLoader = new CommandPackLoader(_extensionStateStore);
+        var commandPacks = _commandPackLoader
             .LoadWithSources(extensions.Schema, extensionIds);
         var commandPackIds = commandPacks.Packs.Select(pack => pack.Id).ToArray();
         var componentIds = extensionIds.Concat(commandPackIds).ToArray();
         var appSchema = commandPacks.Schema;
-        var commandSources = extensions.CommandSources
-            .Concat(commandPacks.CommandSources)
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
-        var schemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
-        var schema = commandPacks.FilterDisabledCommands(schemaLoader.Load());
+        var commandSources = extensions.CommandSources;
+        var commandPackSources = commandPacks.CommandSources;
+        _commandSchemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
+        var schema = commandPacks.FilterDisabledCommands(_commandSchemaLoader.Load());
+        _definitionManagementCommandModel = new DefinitionManagementCommandModel(_commandSchemaLoader, InitializeCommandRuntime);
+        _userCommandNames = _commandSchemaLoader.UserCommandNames;
         var settings = _applicationSettings.Concat(schema.Settings).ToArray();
         var profileBackupService = new ProfileBackupService();
         var profileVariable = new CommandVariableDefinition("profile", profileBackupService.ProfileDirectory);
@@ -142,16 +154,22 @@ public partial class MainViewModel : ViewModelBase
         schema = schema with
         {
             Commands = commands.Append(SecretCommandDefinition.Definition)
+                .Append(DefinitionManagementCommandModel.Definition)
                 .Append(SecretListCommandDefinition.Definition)
                 .Append(ThemeCommandDefinition.Definition)
+                .Append(EditCommandDefinition.Definition)
                 .Append(ProfileBackupCommandDefinitions.Backup)
                 .Append(ProfileBackupCommandDefinitions.Restore)
                 .Append(SnippetCommandDefinition.Definition)
                 .Append(ExitCommandModel.Definition)
                 .ToArray()
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet" };
-        builtInKinds = [.. builtInKinds, "extension"];
+        schema = schema with
+        {
+            Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
+        };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet" };
+        builtInKinds = [.. builtInKinds, "extension", "definitionManagement"];
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
@@ -164,6 +182,7 @@ public partial class MainViewModel : ViewModelBase
                 new SnippetNamesArgumentValueProvider(_snippetStore),
                 new SecretNamesArgumentValueProvider(_secretStore),
                 new ThemeNamesArgumentValueProvider(_profileSettingsStore),
+                new CommandNamesArgumentValueProvider(() => _catalog?.Commands.ToArray() ?? []),
                 new ProfileBackupFilesArgumentValueProvider(profileBackupService),
                 new ExtensionPackageNamesArgumentValueProvider(extensionPackageManager),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
@@ -179,7 +198,7 @@ public partial class MainViewModel : ViewModelBase
         var parser = new CommandLineParser(catalog, valueProvider);
         var urlCommandModel = new UrlCommandModel(urlTargetOpener, schema.Variables);
         var variableCommandModel = new VariableCommandModel(
-            schemaLoader,
+            _commandSchemaLoader,
             updatedSchema =>
             {
                 var customVariableNames = updatedSchema.Variables
@@ -202,6 +221,7 @@ public partial class MainViewModel : ViewModelBase
             ConfirmVariableOverwrite);
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
+            ["edit"] = new EditCommandModel(name => CommandEditorRequested?.Invoke(name)),
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
             ["secretList"] = new SecretListCommandModel(_secretStore),
@@ -258,6 +278,7 @@ public partial class MainViewModel : ViewModelBase
         _commandExecutors = commandExecutors;
         _asyncCommandExecutors = asyncCommandExecutors;
         _commandSources = commandSources;
+        _commandPackSources = commandPackSources;
         ApplyCompletionState(_completionSession.State);
     }
 
@@ -278,14 +299,68 @@ public partial class MainViewModel : ViewModelBase
     }
 
     public SettingsViewModel CreateSettingsViewModel()
-        => new(
+    {
+        return new(
             _applicationSettings,
             _extensions,
             _profileSettingsStore,
             _extensionStateStore,
             InitializeCommandRuntime,
             ColorThemeService.Apply,
-            _secretStore.GetNames());
+            _secretStore.GetNames(),
+            _catalog.Commands.ToArray(),
+            _catalog.Schema.Lists,
+            _commandSources,
+            _userCommandNames,
+            SaveUserCommandDefinition,
+            _commandPackSources,
+            SaveOwnedCommandDefinition);
+    }
+
+    private bool SaveOwnedCommandDefinition(string? packId, CommandDefinition command, CommandDefinition original)
+    {
+        try
+        {
+            if (_catalog.Schema.Commands.Any(existing =>
+                !string.Equals(existing.QualifiedName, original.QualifiedName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(existing.QualifiedName, command.QualifiedName, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Command name '{command.QualifiedName}' is already in use.");
+            }
+
+            if (packId is null)
+            {
+                _commandSchemaLoader.UpdateUserCommand(command, original.QualifiedName);
+            }
+            else
+            {
+                _commandPackLoader.UpdatePackCommand(packId, original.QualifiedName, command);
+            }
+
+            InitializeCommandRuntime();
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or DataException or IOException or ArgumentException)
+        {
+            SetStatusMessage($"Could not save command: {exception.Message}");
+            return false;
+        }
+    }
+
+    private bool SaveUserCommandDefinition(CommandDefinition command)
+    {
+        try
+        {
+            _commandSchemaLoader.UpdateUserCommand(command);
+            InitializeCommandRuntime();
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or DataException or IOException or ArgumentException)
+        {
+            SetStatusMessage($"Could not save command: {exception.Message}");
+            return false;
+        }
+    }
 
     public async Task ImportCommandPackAsync(string path)
     {
@@ -400,7 +475,9 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCommandExpansionPreview => !string.IsNullOrEmpty(CommandExpansionPreview);
 
-    public bool CanComplete => _isExtensionListVisible
+    public bool CanComplete => _isManagementCompletionActive
+        ? CompletionItems.Count > 0
+        : _isExtensionListVisible
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
                 || _historySuggestionCycler.TryGetSuggestions(CommandText, out _)
@@ -519,6 +596,11 @@ public partial class MainViewModel : ViewModelBase
     {
         if (key == CommandInputKey.Enter)
         {
+            if (_definitionManagementCommandModel.Handles(CommandText))
+            {
+                return await ExecuteCommandAsync(newWindow, launchMode);
+            }
+
             if (TryGetShortcutFilter(CommandText, out _))
             {
                 var matchingShortcuts = GetShortcutSuggestions(CommandText);
@@ -537,6 +619,18 @@ public partial class MainViewModel : ViewModelBase
             }
 
             return await ExecuteCommandAsync(newWindow, launchMode);
+        }
+
+        if (_definitionManagementCommandModel.Handles(CommandText)
+            && (!_isManagementCompletionActive
+                || !string.Equals(_managementCompletionInput, CommandText, StringComparison.Ordinal)))
+        {
+            ApplyManagementCompletion(CommandText);
+        }
+
+        if (_isManagementCompletionActive && HandleManagementCompletionKey(key))
+        {
+            return false;
         }
 
         if (_isExtensionListVisible
@@ -850,11 +944,113 @@ public partial class MainViewModel : ViewModelBase
         {
             _historySuggestionCycler.Reset();
             _isHistoryPathStepping = false;
+            if (_definitionManagementCommandModel?.Handles(value) == true)
+            {
+                ApplyManagementCompletion(value);
+                return;
+            }
+
+            _isManagementCompletionActive = false;
             ApplyCompletionState(_completionSession.UpdateInputText(value));
             if (string.Equals(value.Trim(), "!", StringComparison.Ordinal))
             {
                 ShowExtensionList();
             }
+        }
+    }
+
+    private void ApplyManagementCompletion(string input)
+    {
+        var help = _definitionManagementCommandModel!.GetHelp(input);
+        if (!string.Equals(_managementCompletionInput, input, StringComparison.Ordinal))
+        {
+            _managementCompletionInput = input;
+            _highlightedCompletionIndex = 0;
+        }
+
+        _isManagementCompletionActive = true;
+        var highlightedIndex = help.Suggestions.Count == 0
+            ? -1
+            : Math.Clamp(_highlightedCompletionIndex, 0, help.Suggestions.Count - 1);
+        _highlightedCompletionIndex = Math.Max(0, highlightedIndex);
+        CompletionItems = help.Suggestions
+            .Select((suggestion, index) => new CompletionOptionViewModel(suggestion, index == highlightedIndex, false))
+            .ToArray();
+        CompletionGhostText = highlightedIndex >= 0
+            && help.Suggestions[highlightedIndex].StartsWith(input, StringComparison.OrdinalIgnoreCase)
+                ? help.Suggestions[highlightedIndex][input.Length..]
+                : string.Empty;
+        UsageText = $"{help.Usage}{Environment.NewLine}{help.Example}";
+        UsageCommandText = help.Usage["Usage: ".Length..];
+        TargetPreview = string.Empty;
+        _isExtensionListVisible = false;
+        OnPropertyChanged(nameof(HasCompletionOptions));
+        OnPropertyChanged(nameof(CanComplete));
+        OnPropertyChanged(nameof(CanExpandTypedShortcut));
+        OnPropertyChanged(nameof(UsageCommandText));
+    }
+
+    private bool HandleManagementCompletionKey(CommandInputKey key)
+    {
+        if (key == CommandInputKey.Tab
+            && _definitionManagementCommandModel!.ShouldAppendSeparatorOnTab(CommandText))
+        {
+            var acceptedText = CommandText + " ";
+            CommandText = acceptedText;
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                && desktop.MainWindow is MainWindow mainWindow)
+            {
+                mainWindow.SetPendingCaretIndex(acceptedText.Length);
+            }
+
+            return true;
+        }
+
+        var suggestions = CompletionItems;
+        if (suggestions.Count == 0)
+        {
+            return key is CommandInputKey.Tab or CommandInputKey.Right
+                or CommandInputKey.Up or CommandInputKey.Down or CommandInputKey.PageUp or CommandInputKey.PageDown
+                or CommandInputKey.First or CommandInputKey.Last;
+        }
+
+        switch (key)
+        {
+            case CommandInputKey.Up:
+            case CommandInputKey.Down:
+            case CommandInputKey.PageUp:
+            case CommandInputKey.PageDown:
+            case CommandInputKey.First:
+            case CommandInputKey.Last:
+                _highlightedCompletionIndex = key switch
+                {
+                    CommandInputKey.First => 0,
+                    CommandInputKey.Last => suggestions.Count - 1,
+                    _ => MoveCompletionIndex(_highlightedCompletionIndex, key, suggestions.Count)
+                };
+                ApplyManagementCompletion(CommandText);
+                return true;
+            case CommandInputKey.Tab:
+            {
+                var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, suggestions.Count - 1);
+                var acceptedText = suggestions[selectedIndex].DisplayText.TrimEnd() + " ";
+                CommandText = acceptedText;
+                if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                    && desktop.MainWindow is MainWindow mainWindow)
+                {
+                    mainWindow.SetPendingCaretIndex(acceptedText.Length);
+                }
+
+                return true;
+            }
+            case CommandInputKey.Right:
+            {
+                var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, suggestions.Count - 1);
+                AcceptNextSuggestionToken(CommandText, suggestions[selectedIndex].DisplayText);
+                return true;
+            }
+            default:
+                return false;
         }
     }
 
@@ -1413,6 +1609,17 @@ public sealed record CompletionOptionViewModel(
         bool newWindow = false,
         CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
+        if (_definitionManagementCommandModel.Handles(CommandText))
+        {
+            var managementResult = _definitionManagementCommandModel.Execute(CommandText);
+            SetStatusMessage(managementResult.Message, managementResult.IsValueOutput);
+            if (managementResult.Succeeded)
+            {
+                CommandText = string.Empty;
+            }
+            return managementResult.Succeeded;
+        }
+
         if (string.Equals(CommandText.Trim(), "!", StringComparison.Ordinal))
         {
             SetStatusMessage(ExtensionCommandModel.FormatList(_extensions.Extensions, _commandPacks), isValueOutput: true);
@@ -1552,6 +1759,13 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        if (launchMode == CommandLaunchMode.Normal
+            && string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            launchMode = new CommandLaunchPreferenceStore(_profileSettingsStore)
+                .GetLaunchMode(parsedCommand.Definition);
+        }
+
         if (launchMode != CommandLaunchMode.Normal
             && !string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
         {
@@ -1709,6 +1923,13 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        if (launchMode == CommandLaunchMode.Normal
+            && string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            launchMode = new CommandLaunchPreferenceStore(_profileSettingsStore)
+                .GetLaunchMode(parsedCommand.Definition);
+        }
+
         if (launchMode != CommandLaunchMode.Normal
             && !string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
         {

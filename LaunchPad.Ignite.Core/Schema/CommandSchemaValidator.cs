@@ -245,7 +245,8 @@ public sealed class CommandSchemaValidator
             {
                 if (!schema.Lists.Any(list =>
                     string.Equals(list.Type, "enum", StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(list.Name, refName, StringComparison.OrdinalIgnoreCase)))
+                    && (string.Equals(list.Name, refName, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(list.QualifiedName, refName, StringComparison.OrdinalIgnoreCase))))
                 {
                     errors.Add($"Argument '{argument.Name}' references undefined enum '{refName}'.");
                 }
