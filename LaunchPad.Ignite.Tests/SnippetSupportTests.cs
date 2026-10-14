@@ -21,7 +21,7 @@ public sealed class SnippetSupportTests
         var store = new SnippetStore(directory.Path);
 
         var saved = store.Save("deploy", "powershell", ["PROJECT"], ["TOKEN"], "Write-Output $env:TOKEN");
-        var snippetDirectory = Path.Combine(directory.Path, saved.Metadata.Id);
+        var snippetDirectory = Path.Combine(directory.Path, "deploy");
         var metadataPath = Path.Combine(snippetDirectory, "metadata.json");
         var scriptPath = Path.Combine(snippetDirectory, "script.ps1");
 
@@ -33,8 +33,62 @@ public sealed class SnippetSupportTests
 
         Assert.True(store.Rename("deploy", "release"));
         Assert.Equal("release", Assert.Single(store.GetAll()).Metadata.Name);
+        Assert.True(Directory.Exists(Path.Combine(directory.Path, "release")));
+        Assert.False(Directory.Exists(snippetDirectory));
         Assert.True(store.Remove("release"));
         Assert.Empty(store.GetNames());
+    }
+
+    [Fact]
+    public void StoreMigratesLegacyIdDirectoryToSnippetName()
+    {
+        using var directory = new TemporaryDirectory();
+        var id = Guid.NewGuid().ToString("N");
+        var legacyDirectory = Path.Combine(directory.Path, id);
+        Directory.CreateDirectory(legacyDirectory);
+        File.WriteAllText(Path.Combine(legacyDirectory, "metadata.json"), $$"""
+            {
+              "id": "{{id}}",
+              "name": "deploy",
+              "type": "powershell",
+              "arguments": [],
+              "allowedSecrets": []
+            }
+            """);
+        File.WriteAllText(Path.Combine(legacyDirectory, "script.ps1"), "Write-Output 'migrated'");
+        var store = new SnippetStore(directory.Path);
+
+        var migrated = Assert.Single(store.GetAll());
+
+        Assert.Equal("deploy", migrated.Metadata.Name);
+        Assert.Equal("Write-Output 'migrated'", migrated.Script);
+        Assert.True(Directory.Exists(Path.Combine(directory.Path, "deploy")));
+        Assert.False(Directory.Exists(legacyDirectory));
+    }
+
+    [Fact]
+    public void StoreRefusesToMigrateLegacyDirectoryOverExistingNameDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new SnippetStore(directory.Path);
+        store.Save("deploy", "powershell", [], [], "Write-Output 'current'");
+        var id = Guid.NewGuid().ToString("N");
+        var legacyDirectory = Path.Combine(directory.Path, id);
+        Directory.CreateDirectory(legacyDirectory);
+        File.WriteAllText(Path.Combine(legacyDirectory, "metadata.json"), $$"""
+            {
+              "id": "{{id}}",
+              "name": "deploy",
+              "type": "powershell",
+              "arguments": [],
+              "allowedSecrets": []
+            }
+            """);
+        File.WriteAllText(Path.Combine(legacyDirectory, "script.ps1"), "Write-Output 'legacy'");
+
+        Assert.Throws<InvalidDataException>(() => store.GetAll());
+        Assert.True(Directory.Exists(legacyDirectory));
+        Assert.Equal("Write-Output 'current'", File.ReadAllText(Path.Combine(directory.Path, "deploy", "script.ps1")));
     }
 
     [Fact]

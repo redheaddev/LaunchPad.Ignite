@@ -516,6 +516,65 @@ public partial class MainWindow : Window
         return files.Count == 0 ? null : files[0].TryGetLocalPath();
     }
 
+    internal async Task<bool> ConfirmAddonReplacementAsync(AddonImportPreview preview)
+    {
+        var content = new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"The add-on '{preview.Manifest.Name}' contains content that already exists. Replace these items?",
+                    TextWrapping = TextWrapping.Wrap
+                },
+                new TextBlock
+                {
+                    Text = string.Join(Environment.NewLine, preview.Conflicts),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            }
+        };
+        var dialog = new Window
+        {
+            Title = "Replace add-on content?",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    content,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Replace", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     private async void ImportExportButton_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel)

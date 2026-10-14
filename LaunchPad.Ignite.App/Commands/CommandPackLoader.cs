@@ -410,6 +410,17 @@ public sealed class CommandPackLoader
             ValidateCommand(namespacedCommand, sourcePath);
         }
 
+        var commandNames = schema.Commands
+            .Select(command => (command with { Namespace = command.Namespace ?? manifest.Namespace }).QualifiedName)
+            .ToArray();
+        var duplicateCommandName = commandNames
+            .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1)?.Key;
+        if (duplicateCommandName is not null)
+        {
+            throw new InvalidDataException($"Command pack manifest '{sourcePath}' defines command '{duplicateCommandName}' more than once.");
+        }
+
         foreach (var variable in schema.Variables)
         {
             ValidateQualifiedNamespace(variable.Namespace ?? manifest.Namespace, $"variable '{variable.Name}'", sourcePath);

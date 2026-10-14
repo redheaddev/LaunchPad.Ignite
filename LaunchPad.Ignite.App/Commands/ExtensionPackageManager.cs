@@ -46,6 +46,38 @@ public sealed class ExtensionPackageManager
         _packageDirectory = Path.GetFullPath(packageDirectory);
     }
 
+    public string ValidatePackage(string packagePath)
+    {
+        var stagingRoot = Path.Combine(Path.GetTempPath(), $"launchpad-extension-validation-{Guid.NewGuid():N}");
+        var extensionDirectory = Path.Combine(stagingRoot, "extension");
+        Directory.CreateDirectory(extensionDirectory);
+        try
+        {
+            ExtractPackage(packagePath, extensionDirectory);
+            var manifestPath = Path.Combine(extensionDirectory, ManifestFileName);
+            if (!File.Exists(manifestPath))
+            {
+                throw new InvalidDataException($"Extension package must contain '{ManifestFileName}' at its root.");
+            }
+
+            var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
+                ?? throw new InvalidDataException($"Extension package manifest '{manifestPath}' is empty.");
+            ValidateManifestId(manifest.Id);
+            _ = new ExtensionLoader([stagingRoot]).Load();
+            return manifest.Id;
+        }
+        finally
+        {
+            if (Directory.Exists(stagingRoot))
+            {
+                Directory.Delete(stagingRoot, recursive: true);
+            }
+        }
+    }
+
+    public bool IsUserExtensionInstalled(string extensionId)
+        => FindUserExtensionDirectory(extensionId) is not null;
+
     public string Install(string packagePath, Action<string>? runtimeRefresh = null)
         => InstallPackages([packagePath], ids => runtimeRefresh?.Invoke(ids[0]))[0];
 

@@ -36,6 +36,7 @@ public sealed class SnippetStore
 
     public IReadOnlyList<SnippetDefinition> GetAll()
     {
+        MigrateLegacyDirectories();
         if (!Directory.Exists(_snippetsDirectory))
         {
             return Array.Empty<SnippetDefinition>();
@@ -49,6 +50,7 @@ public sealed class SnippetStore
 
     public IReadOnlyList<string> GetNames()
     {
+        MigrateLegacyDirectories();
         if (!Directory.Exists(_snippetsDirectory))
         {
             return Array.Empty<string>();
@@ -67,7 +69,7 @@ public sealed class SnippetStore
             StringComparison.OrdinalIgnoreCase));
 
     public string GetScriptPath(SnippetDefinition snippet)
-        => Path.Combine(GetSnippetDirectory(snippet.Metadata.Id), GetScriptFileName(snippet.Metadata.Type));
+        => Path.Combine(GetSnippetDirectory(snippet.Metadata.Name), GetScriptFileName(snippet.Metadata.Type));
 
     public SnippetDefinition Save(
         string name,
@@ -97,7 +99,7 @@ public sealed class SnippetStore
             normalizedType,
             normalizedArguments,
             normalizedSecrets);
-        var directory = GetSnippetDirectory(metadata.Id);
+        var directory = GetSnippetDirectory(metadata.Name);
         Directory.CreateDirectory(directory);
         var metadataPath = Path.Combine(directory, MetadataFileName);
         var scriptPath = Path.Combine(directory, GetScriptFileName(metadata.Type));
@@ -135,7 +137,7 @@ public sealed class SnippetStore
             return false;
         }
 
-        Directory.Delete(GetSnippetDirectory(snippet.Metadata.Id), recursive: true);
+        Directory.Delete(GetSnippetDirectory(snippet.Metadata.Name), recursive: true);
         return true;
     }
 
@@ -156,7 +158,19 @@ public sealed class SnippetStore
         }
 
         var renamedMetadata = snippet.Metadata with { Name = normalizedName };
-        var metadataPath = Path.Combine(GetSnippetDirectory(snippet.Metadata.Id), MetadataFileName);
+        var oldDirectory = GetSnippetDirectory(snippet.Metadata.Name);
+        var newDirectory = GetSnippetDirectory(normalizedName);
+        if (!string.Equals(oldDirectory, newDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            if (Directory.Exists(newDirectory))
+            {
+                throw new ArgumentException($"A snippet directory named '{normalizedName}' already exists.", nameof(newName));
+            }
+
+            Directory.Move(oldDirectory, newDirectory);
+        }
+
+        var metadataPath = Path.Combine(newDirectory, MetadataFileName);
         var temporaryPath = metadataPath + ".tmp";
         try
         {
@@ -169,6 +183,68 @@ public sealed class SnippetStore
         }
 
         return true;
+    }
+
+    public SnippetDefinition Validate(SnippetDefinition snippet)
+    {
+        if (!Guid.TryParseExact(snippet.Metadata.Id, "N", out _))
+        {
+            throw new ArgumentException("Snippet ID is invalid.", nameof(snippet));
+        }
+
+        ValidateMetadata(snippet.Metadata);
+        if (string.IsNullOrWhiteSpace(snippet.Script))
+        {
+            throw new ArgumentException("Snippet script cannot be empty.", nameof(snippet));
+        }
+
+        return snippet;
+    }
+
+    public static string ValidateSnippetName(string name)
+        => NormalizeName(name);
+
+    private void MigrateLegacyDirectories()
+    {
+        if (!Directory.Exists(_snippetsDirectory))
+        {
+            return;
+        }
+
+        foreach (var legacyDirectory in Directory.EnumerateDirectories(_snippetsDirectory))
+        {
+            var legacyId = Path.GetFileName(Path.TrimEndingDirectorySeparator(legacyDirectory));
+            if (!Guid.TryParseExact(legacyId, "N", out _))
+            {
+                continue;
+            }
+
+            var metadataPath = Path.Combine(legacyDirectory, MetadataFileName);
+            var metadata = JsonSerializer.Deserialize<SnippetMetadata>(File.ReadAllText(metadataPath), JsonOptions)
+                ?? throw new InvalidDataException($"Snippet metadata in '{metadataPath}' is invalid.");
+            if (!string.Equals(metadata.Id, legacyId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Snippet ID in '{metadataPath}' does not match its legacy directory.");
+            }
+
+            try
+            {
+                ValidateMetadata(metadata);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException($"Snippet metadata in '{metadataPath}' is invalid.", exception);
+            }
+
+            var namedDirectory = GetSnippetDirectory(metadata.Name);
+            if (Directory.Exists(namedDirectory))
+            {
+                throw new InvalidDataException(
+                    $"Cannot migrate snippet '{metadata.Name}' because its name-based directory already exists: '{namedDirectory}'.");
+            }
+
+            Directory.Move(legacyDirectory, namedDirectory);
+        }
     }
 
     private SnippetDefinition ReadSnippet(string directory)
@@ -184,9 +260,12 @@ public sealed class SnippetStore
         var metadata = JsonSerializer.Deserialize<SnippetMetadata>(File.ReadAllText(metadataPath), JsonOptions)
             ?? throw new InvalidDataException($"Snippet metadata in '{metadataPath}' is invalid.");
         if (!Guid.TryParseExact(metadata.Id, "N", out _)
-            || !string.Equals(Path.GetFullPath(directory), Path.GetFullPath(GetSnippetDirectory(metadata.Id)), StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(
+                Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)),
+                metadata.Name,
+                StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"Snippet ID in '{metadataPath}' is invalid.");
+            throw new InvalidDataException($"Snippet directory in '{metadataPath}' must match its name.");
         }
 
         try
@@ -201,14 +280,9 @@ public sealed class SnippetStore
         return metadata;
     }
 
-    private string GetSnippetDirectory(string id)
+    private string GetSnippetDirectory(string name)
     {
-        if (!Guid.TryParseExact(id, "N", out _))
-        {
-            throw new ArgumentException("Snippet ID is invalid.", nameof(id));
-        }
-
-        return Path.Combine(_snippetsDirectory, id);
+        return Path.Combine(_snippetsDirectory, NormalizeName(name));
     }
 
     private static void ValidateMetadata(SnippetMetadata metadata)

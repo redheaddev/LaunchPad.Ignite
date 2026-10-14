@@ -395,7 +395,13 @@ public partial class MainViewModel : ViewModelBase
             _commandPacks,
             reservedCommandNames,
             InitializeCommandRuntime);
-        return new ImportExportViewModel(manager, ImportCommandPackForDialogAsync, close);
+        return new ImportExportViewModel(
+            manager,
+            ImportCommandPackForDialogAsync,
+            close,
+            new AddonPackageService(_commandPackLoader, _snippetStore, new ExtensionPackageManager()),
+            InitializeCommandRuntime,
+            ConfirmAddonReplacementAsync);
     }
 
     private async Task<CommandExecutionResult> ImportCommandPackForDialogAsync(string path)
@@ -412,6 +418,12 @@ public partial class MainViewModel : ViewModelBase
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow
                 ? mainWindow.ConfirmCommandPackReplacementAsync(id)
+                : Task.FromResult(false);
+
+    private static Task<bool> ConfirmAddonReplacementAsync(AddonImportPreview preview)
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow
+                ? mainWindow.ConfirmAddonReplacementAsync(preview)
                 : Task.FromResult(false);
 
     private static Task<bool> ConfirmProfileRestore(string fileName)

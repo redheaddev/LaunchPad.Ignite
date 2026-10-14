@@ -36,6 +36,20 @@ public partial class ImportExportWindow : Window
         }
     }
 
+    private async void BrowseAddon_Click(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import add-on",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("LaunchPad add-on") { Patterns = ["*.zip"] }]
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
+        {
+            _viewModel.AddonPath = path;
+        }
+    }
+
     private async void Export_Click(object? sender, RoutedEventArgs e)
     {
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions

@@ -3,9 +3,11 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 
 namespace LaunchPad.Ignite.App.ViewModels;
@@ -15,6 +17,9 @@ public sealed class ImportExportViewModel : ViewModelBase
     private readonly CommandOwnershipManager _ownershipManager;
     private readonly Func<string, Task<CommandExecutionResult>> _importPack;
     private readonly Action _close;
+    private readonly AddonPackageService _addonPackageService;
+    private readonly Action _runtimeRefresh;
+    private readonly Func<AddonImportPreview, Task<bool>> _confirmAddonReplacement;
     private readonly ObservableCollection<CommandSourceViewModel> _sources = [];
     private CommandDestinationViewModel _selectedDestination;
     private string _importPath = string.Empty;
@@ -25,6 +30,10 @@ public sealed class ImportExportViewModel : ViewModelBase
     private string _exportNamespace = "exported";
     private string _exportPreview = "Select commands to preview the pack export.";
     private string _exportStatus = string.Empty;
+    private string _addonPath = string.Empty;
+    private string _addonPreview = "Choose an add-on ZIP to preview its contents.";
+    private string _addonStatus = string.Empty;
+    private AddonImportPreview? _addonImportPreview;
     private bool _isWorking;
     private CommandPackExportPlan? _exportPlan;
 
@@ -107,6 +116,28 @@ public sealed class ImportExportViewModel : ViewModelBase
         }
     }
     public IAsyncRelayCommand ImportCommand { get; }
+    public IAsyncRelayCommand ImportAddonCommand { get; }
+    public string AddonPath
+    {
+        get => _addonPath;
+        set
+        {
+            if (SetProperty(ref _addonPath, value))
+            {
+                RefreshAddonPreview();
+            }
+        }
+    }
+    public string AddonPreview
+    {
+        get => _addonPreview;
+        private set => SetProperty(ref _addonPreview, value);
+    }
+    public string AddonStatus
+    {
+        get => _addonStatus;
+        private set => SetProperty(ref _addonStatus, value);
+    }
     public IRelayCommand MoveCommand { get; }
     public int SelectedCommandCount => _sources.SelectMany(source => source.Commands).Count(command => command.IsSelected);
 
@@ -115,18 +146,92 @@ public sealed class ImportExportViewModel : ViewModelBase
     public ImportExportViewModel(
         CommandOwnershipManager ownershipManager,
         Func<string, Task<CommandExecutionResult>> importPack,
-        Action close)
+        Action close,
+        AddonPackageService addonPackageService,
+        Action runtimeRefresh,
+        Func<AddonImportPreview, Task<bool>> confirmAddonReplacement)
     {
         _ownershipManager = ownershipManager;
         _importPack = importPack;
         _close = close;
+        _addonPackageService = addonPackageService;
+        _runtimeRefresh = runtimeRefresh;
+        _confirmAddonReplacement = confirmAddonReplacement;
         ImportCommand = new AsyncRelayCommand(ImportPackFromPathAsync, () => !IsWorking);
+        ImportAddonCommand = new AsyncRelayCommand(ImportAddonAsync, () => !IsWorking && _addonImportPreview is not null);
         MoveCommand = new RelayCommand(MoveSelectedCommands);
         Destinations = new[] { new CommandDestinationViewModel(CommandOwnershipManager.UserOwnerId, "User commands", null) }
             .Concat(ownershipManager.EnabledPacks.Select(pack => new CommandDestinationViewModel(pack.Id, $"Pack: {pack.Id}", pack.Id)))
             .ToArray();
         _selectedDestination = Destinations[0];
         RefreshInventory();
+    }
+
+    private void RefreshAddonPreview()
+    {
+        _addonImportPreview = null;
+        if (string.IsNullOrWhiteSpace(AddonPath))
+        {
+            AddonPreview = "Choose an add-on ZIP to preview its contents.";
+        }
+        else
+        {
+            try
+            {
+                _addonImportPreview = _addonPackageService.Preview(AddonPath.Trim());
+                var lines = new List<string>
+                {
+                    $"{_addonImportPreview.Manifest.Name} ({_addonImportPreview.Manifest.Id}) v{_addonImportPreview.Manifest.Version}",
+                    $"Command packs: {string.Join(", ", _addonImportPreview.PackIds)}",
+                    $"Snippets: {string.Join(", ", _addonImportPreview.SnippetNames)}",
+                    $"Extensions: {string.Join(", ", _addonImportPreview.ExtensionIds)}"
+                };
+                if (_addonImportPreview.Conflicts.Count > 0)
+                {
+                    lines.Add($"Will ask before replacing: {string.Join(", ", _addonImportPreview.Conflicts)}");
+                }
+
+                AddonPreview = string.Join(Environment.NewLine, lines);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException or JsonException)
+            {
+                AddonPreview = $"Could not read add-on: {exception.Message}";
+            }
+        }
+
+        ImportAddonCommand.NotifyCanExecuteChanged();
+    }
+
+    private async Task ImportAddonAsync()
+    {
+        if (_addonImportPreview is null || string.IsNullOrWhiteSpace(AddonPath))
+        {
+            return;
+        }
+
+        IsWorking = true;
+        try
+        {
+            var replaceExisting = _addonImportPreview.Conflicts.Count == 0
+                || await _confirmAddonReplacement(_addonImportPreview);
+            if (!replaceExisting)
+            {
+                AddonStatus = "Add-on import canceled.";
+                return;
+            }
+
+            _addonPackageService.Install(AddonPath.Trim(), _addonImportPreview, replaceExisting: true, _runtimeRefresh);
+            AddonStatus = $"Installed add-on '{_addonImportPreview.Manifest.Name}'.";
+            CloseRequested?.Invoke();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
+        {
+            AddonStatus = $"Could not install add-on: {exception.Message}";
+        }
+        finally
+        {
+            IsWorking = false;
+        }
     }
 
     public void RefreshInventory()
