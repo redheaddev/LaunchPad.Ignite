@@ -174,7 +174,10 @@ public class CommandPackLoaderTests
 
         Assert.Empty(loaded.Schema.Commands);
         Assert.Empty(loaded.CommandSources);
-        Assert.Equal(new LoadedCommandPackInfo("tools", false), Assert.Single(loaded.Packs));
+        var pack = Assert.Single(loaded.Packs);
+        Assert.Equal("tools", pack.Id);
+        Assert.False(pack.Enabled);
+        Assert.Equal(["tools:status"], pack.Commands);
         Assert.Contains("tools:status", loaded.DisabledCommandNames);
         Assert.Contains("tools:status", loaded.PackedCommandNames);
 

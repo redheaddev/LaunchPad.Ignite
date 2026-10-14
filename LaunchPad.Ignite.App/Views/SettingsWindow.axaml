@@ -107,6 +107,37 @@
 					</ItemsControl>
 				</ScrollViewer>
 			</Grid>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsExtensionsSelected}">
+				<TextBlock Text="Select an extension from the navigation list to manage its settings, secrets, and enabled status." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+			</ScrollViewer>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsPacksSelected}">
+				<ItemsControl ItemsSource="{Binding CommandPacks}">
+					<ItemsControl.ItemTemplate>
+						<DataTemplate x:DataType="vm:CommandPackSettingsViewModel">
+							<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+								<Grid ColumnDefinitions="*,Auto">
+									<Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+										<Expander.Header>
+											<StackPanel Orientation="Horizontal" Spacing="10">
+												<TextBlock Text="{Binding Id}" Foreground="{DynamicResource ThemeText}" FontWeight="SemiBold" />
+												<TextBlock Text="{Binding Details}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" VerticalAlignment="Center" />
+											</StackPanel>
+										</Expander.Header>
+										<ItemsControl ItemsSource="{Binding Commands}" Margin="8,8,0,0">
+											<ItemsControl.ItemTemplate>
+												<DataTemplate>
+													<TextBlock Text="{Binding}" Foreground="{DynamicResource ThemeText}" Margin="0,2" />
+												</DataTemplate>
+											</ItemsControl.ItemTemplate>
+										</ItemsControl>
+									</Expander>
+									<CheckBox Grid.Column="1" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" Margin="12,0,0,0" />
+								</Grid>
+							</Border>
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
+			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsExtensionSelected}">
 				<StackPanel Spacing="12">
 					<ItemsControl ItemsSource="{Binding Settings}">
@@ -125,27 +156,21 @@
 							</DataTemplate>
 						</ItemsControl.ItemTemplate>
 					</ItemsControl>
-					<StackPanel Spacing="8" IsVisible="{Binding HasSelectedList}">
+					<StackPanel Spacing="8" IsVisible="{Binding IsExtensionSelected}">
 						<TextBlock Text="Extension list defaults" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
-						<TextBlock Text="Each list has one default. The extension supplies the baseline; you can override it for this list only." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
-						<ComboBox ItemsSource="{Binding ListDefaultEditors}" SelectedItem="{Binding SelectedListDefaultEditor, Mode=TwoWay}">
-						<ComboBox.ItemTemplate>
-							<DataTemplate x:DataType="vm:ListDefaultEditorViewModel">
-								<TextBlock Text="{Binding ListName}" />
-							</DataTemplate>
-						</ComboBox.ItemTemplate>
-					</ComboBox>
-					<ContentControl Content="{Binding SelectedListDefaultEditor}">
-						<ContentControl.ContentTemplate>
-							<DataTemplate x:DataType="vm:ListDefaultEditorViewModel">
-								<StackPanel Spacing="8">
-									<TextBlock Text="Default for this list" Foreground="{DynamicResource ThemeText}" />
-									<ComboBox ItemsSource="{Binding Values}" SelectedItem="{Binding SelectedDefault, Mode=TwoWay}" />
-									<TextBlock Text="Choose 'Use extension default' to remove your override and follow the extension's default again." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
-								</StackPanel>
-							</DataTemplate>
-						</ContentControl.ContentTemplate>
-					</ContentControl>
+						<TextBlock Text="Choose a default for each list. Select 'Use extension default' to remove your override." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+						<ItemsControl ItemsSource="{Binding ListDefaultEditors}">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate x:DataType="vm:ListDefaultEditorViewModel">
+									<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+										<Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+											<TextBlock Text="{Binding ListName}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
+											<ComboBox Grid.Column="1" ItemsSource="{Binding Values}" SelectedItem="{Binding SelectedDefault, Mode=TwoWay}" MinWidth="180" />
+										</Grid>
+									</Border>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
 					</StackPanel>
 					<TextBlock Text="No extension enum lists are available." IsVisible="{Binding HasNoLists}" Foreground="{DynamicResource ThemeSecondaryText}" />
 					<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" IsVisible="{Binding HasSelectedExtensionSecretPermissions}">
@@ -307,6 +332,7 @@
 										<ComboBox ItemsSource="{Binding Values}" SelectedItem="{Binding SelectedDefault, Mode=TwoWay}" />
 										<StackPanel Orientation="Horizontal" Spacing="10">
 											<Button Content="Save list" Command="{Binding SaveCommand}" />
+							<Button Content="Reset to defaults" Command="{Binding ResetCommand}" />
 											<TextBlock Text="{Binding Status}" Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
 										</StackPanel>
 									</StackPanel>

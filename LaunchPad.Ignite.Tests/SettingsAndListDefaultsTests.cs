@@ -109,6 +109,52 @@ public sealed class SettingsAndListDefaultsTests
     }
 
     [Fact]
+    public void EnumListEditor_ResetToDefaultsRestoresSchemaValuesAndClearsOverrides()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var overrideStore = new ListDefaultOverrideStore(settings);
+        var extensionList = new CommandListDefinition("enum", "project", ["architecture", "claims"], "architecture", "ado");
+        overrideStore.SetList(extensionList, ["custom", "claims"], "custom");
+        var editedList = Assert.Single(overrideStore.ApplyOverrides([extensionList]));
+        overrideStore.SetDefault(editedList, "claims");
+        var extensions = new LoadedExtensions(
+            new CommandSchema([extensionList], []),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            [new LoadedExtensionInfo("ado", "1.0", true) { Namespace = "ado" }]);
+        var settingsChangedCount = 0;
+        var viewModel = new SettingsViewModel(
+            [],
+            extensions,
+            settings,
+            new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json")),
+            () => settingsChangedCount++,
+            _ => { },
+            lists: [editedList],
+            listDefaults: [extensionList]);
+        var editor = Assert.Single(viewModel.EnumListEditors);
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Category == "extension");
+        var listDefaultEditor = Assert.Single(viewModel.ListDefaultEditors);
+
+        Assert.Equal(string.Join(Environment.NewLine, "custom", "claims"), editor.ValuesText);
+        Assert.Equal("claims", listDefaultEditor.SelectedDefault);
+        editor.ResetToDefaults();
+
+        Assert.Equal(string.Join(Environment.NewLine, "architecture", "claims"), editor.ValuesText);
+        Assert.Equal("architecture", editor.SelectedDefault);
+        Assert.Equal("List reset to defaults.", editor.Status);
+        Assert.Equal(ListDefaultEditorViewModel.ExtensionDefaultOption, listDefaultEditor.SelectedDefault);
+        Assert.Equal([ListDefaultEditorViewModel.ExtensionDefaultOption, "architecture", "claims"], listDefaultEditor.Values);
+        Assert.False(settings.HasValue(ListDefaultOverrideStore.GetListOverrideSettingName(extensionList)));
+        Assert.False(settings.HasValue(ListDefaultOverrideStore.GetSettingName(extensionList)));
+        var restoredList = Assert.Single(overrideStore.ApplyOverrides([extensionList]));
+        Assert.Equal(extensionList.Values, restoredList.Values);
+        Assert.Equal(extensionList.Default, restoredList.Default);
+        Assert.Equal(1, settingsChangedCount);
+    }
+
+    [Fact]
     public void EnumListEditor_RejectsDefaultRemovedFromValues()
     {
         using var directory = new TemporaryDirectory();
@@ -158,6 +204,59 @@ public sealed class SettingsAndListDefaultsTests
         Assert.True(viewModel.IsListsSelected);
         Assert.Single(viewModel.EnumListEditors);
         Assert.Equal("enum:ado:project", viewModel.SelectedEnumListEditor?.ListName);
+    }
+
+    [Fact]
+    public void CommandPacksSettings_ListsAndPersistsPackEnabledStatesSeparatelyFromExtensions()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json"));
+        stateStore.SetEnabled("tools", enabled: false);
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], []),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            [new LoadedExtensionInfo("sample", "1.2.3", true) { Namespace = "sample" }]);
+        var runtimeReloadCount = 0;
+        var viewModel = new SettingsViewModel(
+            [],
+            extensions,
+            new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json")),
+            stateStore,
+            () => runtimeReloadCount++,
+            _ => { },
+            commandPacks: [new LoadedCommandPackInfo("tools", false) { Commands = ["tools:status", "tools:version"] }]);
+
+        var extensionsIndex = viewModel.NavigationItems.ToList().FindIndex(item => item.Category == "extensions");
+        var extensionIndex = viewModel.NavigationItems.ToList().FindIndex(item => item.Category == "extension");
+        var commandsIndex = viewModel.NavigationItems.ToList().FindIndex(item => item.Category == "commands");
+        var packsIndex = viewModel.NavigationItems.ToList().FindIndex(item => item.Category == "packs");
+        Assert.True(extensionsIndex >= 0);
+        Assert.Equal(extensionsIndex + 1, extensionIndex);
+        Assert.Equal("Packs", viewModel.NavigationItems[packsIndex].Name);
+        Assert.Equal(commandsIndex + 1, packsIndex);
+        Assert.True(viewModel.NavigationItems[extensionIndex].Indent.Left > 0);
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems[extensionsIndex];
+        Assert.True(viewModel.IsExtensionsSelected);
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Category == "extension");
+        Assert.True(viewModel.IsExtensionSelected);
+        Assert.True(viewModel.IsExtensionEnabled);
+        viewModel.SetExtensionEnabled(false);
+        Assert.False(stateStore.IsEnabled("sample"));
+
+        viewModel.SelectedNavigationItem = viewModel.NavigationItems.Single(item => item.Category == "packs");
+        Assert.True(viewModel.IsPacksSelected);
+        var pack = Assert.Single(viewModel.CommandPacks);
+        Assert.Equal("tools", pack.Id);
+        Assert.Equal(["tools:status", "tools:version"], pack.Commands);
+        Assert.False(pack.IsEnabled);
+        Assert.False(pack.IsExpanded);
+        pack.IsExpanded = true;
+        Assert.True(pack.IsExpanded);
+
+        pack.IsEnabled = true;
+        Assert.True(stateStore.IsEnabled("tools"));
+        Assert.Equal(2, runtimeReloadCount);
     }
 
     [Fact]

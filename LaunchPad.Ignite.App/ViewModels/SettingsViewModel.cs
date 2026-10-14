@@ -22,6 +22,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly Action<ColorTheme> _themeChanged;
     private readonly IReadOnlyList<ExtensionSecretPermissionViewModel> _extensionSecretPermissions;
+    private readonly IReadOnlyList<CommandPackSettingsViewModel> _commandPacks;
     private readonly IReadOnlyList<CommandLaunchPreferenceViewModel> _commandLaunchPreferences;
     private readonly IReadOnlyList<CommandDetailsViewModel> _commandDetails;
     private readonly IReadOnlyList<EnumListEditorViewModel> _enumListEditors;
@@ -33,7 +34,6 @@ public partial class SettingsViewModel : ViewModelBase
     private string _renameThemeName = string.Empty;
     private string _themeReferenceUrl = string.Empty;
     private string _selectedCommandSourceFilter = "User";
-    private ListDefaultEditorViewModel? _selectedListDefaultEditor;
     private CommandDetailsViewModel? _selectedCommandDetails;
     private EnumListEditorViewModel? _selectedEnumListEditor;
 
@@ -41,6 +41,7 @@ public partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<SettingsNavigationItem> NavigationItems { get; }
     public IReadOnlyList<SettingEditorViewModel> Settings { get; private set; } = [];
     public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
+    public IReadOnlyList<CommandPackSettingsViewModel> CommandPacks => _commandPacks;
     public IReadOnlyList<CommandLaunchPreferenceViewModel> CommandLaunchPreferences => _commandLaunchPreferences;
     public IReadOnlyList<CommandDetailsViewModel> CommandDetails => _commandDetails;
     public IReadOnlyList<CommandDetailsViewModel> FilteredCommandDetails => _commandDetails
@@ -109,28 +110,18 @@ public partial class SettingsViewModel : ViewModelBase
         ? _extensionSecretPermissions.FirstOrDefault(extension => string.Equals(extension.ExtensionNamespace, selected.Namespace, StringComparison.OrdinalIgnoreCase))
         : null;
     public bool HasSelectedExtensionSecretPermissions => SelectedExtensionSecretPermissions is not null;
-    public ListDefaultEditorViewModel? SelectedListDefaultEditor
-    {
-        get => _selectedListDefaultEditor;
-        set
-        {
-            if (SetProperty(ref _selectedListDefaultEditor, value))
-            {
-                OnPropertyChanged(nameof(HasSelectedList));
-            }
-        }
-    }
-    public bool HasSelectedList => SelectedListDefaultEditor is not null;
     public bool HasNoLists => IsExtensionSelected && ListDefaultEditors.Count == 0;
     public string Header { get; private set; } = "General";
     public string Subheader { get; private set; } = string.Empty;
     public bool IsExtensionEnabled { get; private set; } = true;
     public bool IsExtensionSelected => SelectedNavigationItem?.Category == "extension";
+    public bool IsExtensionsSelected => SelectedNavigationItem?.Category == "extensions";
+    public bool IsPacksSelected => SelectedNavigationItem?.Category == "packs";
     public bool IsThemeSelected => SelectedNavigationItem?.Category == "theme";
     public bool IsCommandsSelected => SelectedNavigationItem?.Category == "commands";
     public bool IsListsSelected => SelectedNavigationItem?.Category == "lists";
     public bool IsSecretsSelected => false;
-    public bool IsSettingsListVisible => !IsExtensionSelected && !IsThemeSelected && !IsSecretsSelected && !IsCommandsSelected && !IsListsSelected;
+    public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsSecretsSelected && !IsCommandsSelected && !IsListsSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
     public string NewThemeName
     {
@@ -186,13 +177,23 @@ public partial class SettingsViewModel : ViewModelBase
         IReadOnlySet<string>? userCommandNames = null,
         Func<CommandDefinition, bool>? saveUserCommand = null,
         IReadOnlyDictionary<string, string>? commandPackSources = null,
-        Func<string?, CommandDefinition, CommandDefinition, bool>? saveOwnedCommand = null)
+        Func<string?, CommandDefinition, CommandDefinition, bool>? saveOwnedCommand = null,
+        IReadOnlyList<LoadedCommandPackInfo>? commandPacks = null,
+        IReadOnlyList<CommandListDefinition>? listDefaults = null)
     {
         _settingsStore = settingsStore;
         _settingsChanged = settingsChanged;
         _applicationSettings = applicationSettings;
         _extensionStateStore = extensionStateStore;
         _themeChanged = themeChanged;
+        _commandPacks = (commandPacks ?? [])
+            .OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(pack => new CommandPackSettingsViewModel(
+                pack.Id,
+                pack.Commands,
+                pack.Enabled,
+                SetComponentEnabled))
+            .ToArray();
         var commandList = commands ?? [];
         var launchPreferences = commandList
             .Where(command => string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
@@ -219,10 +220,22 @@ public partial class SettingsViewModel : ViewModelBase
         var availableLists = (lists ?? []).Concat(extensions.Schema.Lists)
             .DistinctBy(list => $"{list.Type}:{list.QualifiedName}", StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var defaultListsByKey = (listDefaults ?? []).Concat(extensions.Schema.Lists)
+            .DistinctBy(list => $"{list.Type}:{list.QualifiedName}", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(list => $"{list.Type}:{list.QualifiedName}", StringComparer.OrdinalIgnoreCase);
         _enumListEditors = availableLists
             .Where(list => string.Equals(list.Type, "enum", StringComparison.OrdinalIgnoreCase))
             .OrderBy(list => list.QualifiedName, StringComparer.OrdinalIgnoreCase)
-            .Select(list => new EnumListEditorViewModel(list, new ListDefaultOverrideStore(_settingsStore), _settingsChanged))
+            .Select(list =>
+            {
+                var defaultList = defaultListsByKey.GetValueOrDefault($"{list.Type}:{list.QualifiedName}") ?? list;
+                return new EnumListEditorViewModel(
+                    list,
+                    new ListDefaultOverrideStore(_settingsStore),
+                    _settingsChanged,
+                    defaultList,
+                    ResetListDefaultEditors);
+            })
             .ToArray();
         _commandDetails = commandList
             .OrderBy(command => command.QualifiedName, StringComparer.OrdinalIgnoreCase)
@@ -264,7 +277,6 @@ public partial class SettingsViewModel : ViewModelBase
                 SaveGrantedSecrets))
             .ToArray();
         SelectedColorThemeId = _settingsStore.GetValue("app:colorTheme", ColorTheme.Default.Id);
-        SelectedListDefaultEditor = null;
         ColorThemeService.MigrateLegacyThemes(_settingsStore);
         ThemeReferenceUrl = SelectedColorThemeUrl ?? string.Empty;
         RefreshColorThemes();
@@ -276,6 +288,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             new("General", "application", "") { AvailableSettings = applicationSettings },
             new("Commands", "commands", ""),
+            new("Packs", "packs", ""),
             new("Lists", "lists", ""),
             new("Theme", "theme", ""),
             new("Extensions", "extensions", "")
@@ -291,7 +304,6 @@ public partial class SettingsViewModel : ViewModelBase
                 AvailableSettings = settingsForExtension ?? []
             });
         }
-
         NavigationItems = navigation;
         SelectedNavigationItem = navigation.FirstOrDefault(item => item.Category == "application");
         SelectedCommandDetails = FilteredCommandDetails.FirstOrDefault();
@@ -406,13 +418,22 @@ public partial class SettingsViewModel : ViewModelBase
     private void UpdateSelection(SettingsNavigationItem value)
     {
         Header = value.Name;
-        if (value.Category == "extension")
+        if (value.Category == "extensions")
+        {
+            Subheader = "Select an extension below to configure its settings, secrets, and enabled status.";
+            Settings = [];
+        }
+        else if (value.Category == "packs")
+        {
+            Subheader = "Enable or disable installed command packs.";
+            Settings = [];
+        }
+        else if (value.Category == "extension")
         {
             var settingDefinitions = value.AvailableSettings;
             Subheader = $"{settingDefinitions.Count} setting(s) available. Token prefix: {value.Id}";
             IsExtensionEnabled = _extensionStateStore.IsEnabled(value.Id);
             Settings = settingDefinitions.Select(CreateEditor).ToArray();
-            SelectedListDefaultEditor = ListDefaultEditors.FirstOrDefault();
             Subheader = ListDefaultEditors.Count == 0
                 ? $"{settingDefinitions.Count} setting(s) available. Token prefix: {value.Id}"
                 : $"{settingDefinitions.Count} setting(s) available. Token prefix: {value.Id}. Configure extension list defaults below.";
@@ -431,13 +452,11 @@ public partial class SettingsViewModel : ViewModelBase
         {
             Subheader = "Choose whether each shell command runs normally, elevated, or as another user when you press Enter.";
             Settings = [];
-            SelectedListDefaultEditor = null;
         }
         else if (value.Category == "lists")
         {
             Subheader = "Edit enum list values and choose the default. The default is listed first; remaining values are alphabetical.";
             Settings = [];
-            SelectedListDefaultEditor = null;
             SelectedEnumListEditor = _enumListEditors.FirstOrDefault();
         }
         else
@@ -450,6 +469,8 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(Subheader));
         OnPropertyChanged(nameof(IsExtensionEnabled));
         OnPropertyChanged(nameof(IsExtensionSelected));
+        OnPropertyChanged(nameof(IsExtensionsSelected));
+        OnPropertyChanged(nameof(IsPacksSelected));
         OnPropertyChanged(nameof(IsThemeSelected));
         OnPropertyChanged(nameof(IsSettingsListVisible));
         OnPropertyChanged(nameof(IsSecretsSelected));
@@ -463,7 +484,6 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(CommandDetails));
         OnPropertyChanged(nameof(EnumListEditors));
         OnPropertyChanged(nameof(ListDefaultEditors));
-        OnPropertyChanged(nameof(HasSelectedList));
         OnPropertyChanged(nameof(HasNoLists));
         OnPropertyChanged(nameof(Settings));
     }
@@ -811,6 +831,21 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsExtensionEnabled));
     }
 
+    private void SetComponentEnabled(string id, bool enabled)
+    {
+        _extensionStateStore.SetEnabled(id, enabled);
+        _settingsChanged();
+    }
+
+    private void ResetListDefaultEditors(CommandListDefinition defaultList)
+    {
+        foreach (var editor in _listDefaultEditorsByNamespace.Values.SelectMany(editors => editors)
+            .Where(editor => string.Equals(editor.ListName, $"{defaultList.Type}:{defaultList.QualifiedName}", StringComparison.OrdinalIgnoreCase)))
+        {
+            editor.ResetToDefaults(defaultList);
+        }
+    }
+
     public sealed class SettingsNavigationItem(string name, string category, string id)
     {
         public string Name { get; } = name;
@@ -824,6 +859,41 @@ public partial class SettingsViewModel : ViewModelBase
     }
 }
 
+public sealed class CommandPackSettingsViewModel : ViewModelBase
+{
+    private readonly Action<string, bool> _setEnabled;
+    private bool _isEnabled;
+    private bool _isExpanded;
+
+    public string Id { get; }
+    public IReadOnlyList<string> Commands { get; }
+    public string Details => Commands.Count == 1 ? "1 command" : $"{Commands.Count} commands";
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set
+        {
+            if (SetProperty(ref _isEnabled, value))
+            {
+                _setEnabled(Id, value);
+            }
+        }
+    }
+
+    public CommandPackSettingsViewModel(string id, IReadOnlyList<string> commands, bool isEnabled, Action<string, bool> setEnabled)
+    {
+        Id = id;
+        Commands = commands;
+        _isEnabled = isEnabled;
+        _setEnabled = setEnabled;
+    }
+}
+
 public sealed class ListDefaultEditorViewModel : ViewModelBase
 {
     public const string ExtensionDefaultOption = "(Use extension default)";
@@ -833,7 +903,7 @@ public sealed class ListDefaultEditorViewModel : ViewModelBase
     private string _selectedDefault;
 
     public string ListName => $"{_list.Type}:{_list.QualifiedName}";
-    public IReadOnlyList<string> Values { get; }
+    public IReadOnlyList<string> Values { get; private set; }
     public string SelectedDefault
     {
         get => _selectedDefault;
@@ -855,13 +925,22 @@ public sealed class ListDefaultEditorViewModel : ViewModelBase
         Values = new[] { ExtensionDefaultOption }.Concat(list.Values).ToArray();
         _selectedDefault = overrideStore.GetDefaultOverride(list) ?? ExtensionDefaultOption;
     }
+
+    public void ResetToDefaults(CommandListDefinition defaultList)
+    {
+        Values = new[] { ExtensionDefaultOption }.Concat(defaultList.Values).ToArray();
+        SelectedDefault = ExtensionDefaultOption;
+        OnPropertyChanged(nameof(Values));
+    }
 }
 
 public sealed partial class EnumListEditorViewModel : ViewModelBase
 {
     private readonly CommandListDefinition _list;
+    private readonly CommandListDefinition _defaultList;
     private readonly ListDefaultOverrideStore _overrideStore;
     private readonly Action _settingsChanged;
+    private readonly Action<CommandListDefinition>? _resetRelatedListDefaults;
     private string _valuesText;
     private string _selectedDefault;
     private string _status = string.Empty;
@@ -890,17 +969,37 @@ public sealed partial class EnumListEditorViewModel : ViewModelBase
         private set => SetProperty(ref _status, value);
     }
 
-    public EnumListEditorViewModel(CommandListDefinition list, ListDefaultOverrideStore overrideStore, Action settingsChanged)
+    public EnumListEditorViewModel(
+        CommandListDefinition list,
+        ListDefaultOverrideStore overrideStore,
+        Action settingsChanged,
+        CommandListDefinition? defaultList = null,
+        Action<CommandListDefinition>? resetRelatedListDefaults = null)
     {
         _list = list;
+        _defaultList = defaultList ?? list;
         _overrideStore = overrideStore;
         _settingsChanged = settingsChanged;
+        _resetRelatedListDefaults = resetRelatedListDefaults;
         _valuesText = string.Join(Environment.NewLine, list.Values);
         _selectedDefault = list.Default ?? list.Values.FirstOrDefault() ?? string.Empty;
     }
 
+    public void ResetToDefaults()
+    {
+        _overrideStore.ResetList(_list);
+        ValuesText = string.Join(Environment.NewLine, _defaultList.Values);
+        SelectedDefault = _defaultList.Default ?? _defaultList.Values.FirstOrDefault() ?? string.Empty;
+        _resetRelatedListDefaults?.Invoke(_defaultList);
+        Status = "List reset to defaults.";
+        _settingsChanged();
+    }
+
     [RelayCommand]
     private void Save() => SaveChanges();
+
+    [RelayCommand]
+    private void Reset() => ResetToDefaults();
 
     public bool SaveChanges()
     {

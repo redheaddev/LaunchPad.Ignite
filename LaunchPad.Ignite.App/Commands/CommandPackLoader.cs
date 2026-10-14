@@ -54,7 +54,10 @@ public static class CommandSourceLabels
     }
 }
 
-public sealed record LoadedCommandPackInfo(string Id, bool Enabled);
+public sealed record LoadedCommandPackInfo(string Id, bool Enabled)
+{
+    public IReadOnlyList<string> Commands { get; init; } = [];
+}
 
 public sealed class CommandPackLoader
 {
@@ -173,10 +176,7 @@ public sealed class CommandPackLoader
 
         var disabledIds = _stateStore?.GetDisabledExtensionIds()
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var packs = manifestPaths.Keys
-            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
-            .Select(id => new LoadedCommandPackInfo(id, !disabledIds.Contains(id)))
-            .ToArray();
+        var packs = new List<LoadedCommandPackInfo>();
         var schema = existingSchema ?? new CommandSchema([], []);
         var lists = schema.Lists.ToList();
         var commands = schema.Commands.ToList();
@@ -195,6 +195,14 @@ public sealed class CommandPackLoader
         {
             var manifest = ReadManifest(manifestPath);
             ValidateManifest(manifest, id, manifestPath);
+            packs.Add(new LoadedCommandPackInfo(id, !disabledIds.Contains(id))
+            {
+                Commands = manifest.Schema.Commands
+                    .Select(command => (command with { Namespace = command.Namespace ?? manifest.Namespace }).QualifiedName)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            });
+
             foreach (var command in manifest.Schema.Commands)
             {
                 var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
@@ -247,7 +255,7 @@ public sealed class CommandPackLoader
             Variables = variables,
             Functions = functions,
             Settings = settings
-        }, commandSources, packs, disabledCommandNames, packedCommandNames);
+        }, commandSources, packs.OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase).ToArray(), disabledCommandNames, packedCommandNames);
     }
 
     private Dictionary<string, string> DiscoverManifestPaths()

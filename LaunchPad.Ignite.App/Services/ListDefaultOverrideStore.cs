@@ -71,6 +71,12 @@ public sealed class ListDefaultOverrideStore(ProfileSettingsStore settingsStore)
             JsonSerializer.Serialize(new ListOverride(orderedValues, canonicalDefault)));
     }
 
+    public void ResetList(CommandListDefinition list)
+    {
+        settingsStore.RemoveValue(GetListOverrideSettingName(list));
+        settingsStore.RemoveValue(GetSettingName(list));
+    }
+
     private static bool IsValidOverride(ListOverride listOverride)
         => listOverride.Values is { Count: > 0 }
             && listOverride.Values.All(value => !string.IsNullOrWhiteSpace(value))

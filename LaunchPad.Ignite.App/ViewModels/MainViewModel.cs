@@ -56,6 +56,7 @@ public partial class MainViewModel : ViewModelBase
     private int _highlightedCompletionIndex;
     private LoadedExtensions _extensions = null!;
     private IReadOnlyList<LoadedCommandPackInfo> _commandPacks = null!;
+    private IReadOnlyList<CommandListDefinition> _commandListDefaults = [];
     private readonly ISecretStore _secretStore;
     private readonly ProfileSettingsStore _profileSettingsStore;
     private readonly IReadOnlyList<CommandSettingDefinition> _applicationSettings;
@@ -115,6 +116,7 @@ public partial class MainViewModel : ViewModelBase
         _commandPackLoader = new CommandPackLoader(_extensionStateStore);
         var commandPacks = _commandPackLoader
             .LoadWithSources(extensions.Schema, extensionIds);
+        var commandListDefaults = commandPacks.Schema.Lists;
         var commandPackIds = commandPacks.Packs.Select(pack => pack.Id).ToArray();
         var componentIds = extensionIds.Concat(commandPackIds).ToArray();
         var appSchema = commandPacks.Schema;
@@ -268,6 +270,7 @@ public partial class MainViewModel : ViewModelBase
 
         _extensions = extensions;
         _commandPacks = commandPacks.Packs;
+        _commandListDefaults = commandListDefaults;
         _catalog = catalog;
         _variableExpander = variableExpander;
         _shortcutResolver = shortcutResolver;
@@ -314,7 +317,9 @@ public partial class MainViewModel : ViewModelBase
             _userCommandNames,
             SaveUserCommandDefinition,
             _commandPackSources,
-            SaveOwnedCommandDefinition);
+            SaveOwnedCommandDefinition,
+            _commandPacks,
+            _commandListDefaults);
     }
 
     private bool SaveOwnedCommandDefinition(string? packId, CommandDefinition command, CommandDefinition original)
