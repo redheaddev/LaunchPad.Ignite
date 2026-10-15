@@ -275,7 +275,7 @@ public class CommandPackLoaderTests
 
         var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
 
-        Assert.Contains("unsupported command kind 'plugin'", exception.Message);
+        Assert.Contains("unsupported command kind 'system' or handler 'plugin'", exception.Message);
     }
 
     [Fact]

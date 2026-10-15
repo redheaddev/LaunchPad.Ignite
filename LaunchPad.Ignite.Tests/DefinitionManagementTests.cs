@@ -139,7 +139,7 @@ public sealed class DefinitionManagementTests
 
         Assert.True(added.Succeeded, added.Message);
         Assert.True(edited.Succeeded, edited.Message);
-        Assert.Contains("workitem [url] - Updated description", listed.Message);
+        Assert.Contains("workitem [url/url] - Updated description", listed.Message);
         var command = Assert.Single(loader.GetUserCommands());
         Assert.Equal("https://example.test/items/<id>", command.Actions[0].TargetTemplate);
         Assert.Equal(2, refreshCount);

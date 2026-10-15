@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
@@ -42,5 +43,32 @@ public sealed class ExtensionSecretAccessPolicy(
 
         var found = secretStore.TryGet(secretName, out var value);
         return (found, value);
+    }
+
+    public IReadOnlyDictionary<string, string> GetAllowedSecrets(
+        string extensionNamespace,
+        IEnumerable<string> secretNames,
+        out string? deniedSecret)
+    {
+        var names = secretNames.ToArray();
+        deniedSecret = names.FirstOrDefault(name => !IsAllowed(extensionNamespace, name));
+        if (deniedSecret is not null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in names)
+        {
+            if (!secretStore.TryGet(name, out var value))
+            {
+                deniedSecret = name;
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            secrets.Add(name, value);
+        }
+
+        return secrets;
     }
 }

@@ -40,6 +40,13 @@ public sealed class CommandCompletionSession
         return State;
     }
 
+    public CommandCompletionState UpdateCommandFilter(Func<CommandDefinition, bool>? commandFilter)
+    {
+        _resolver.UpdateCommandFilter(commandFilter);
+        Recalculate(resetSelection: true);
+        return State;
+    }
+
     public CommandCompletionState UpdateInputText(string inputText)
     {
         if (string.Equals(_inputText, inputText, StringComparison.Ordinal))

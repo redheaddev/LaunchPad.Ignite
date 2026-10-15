@@ -237,7 +237,10 @@ public partial class MainWindow : Window
         }
     }
 
-    internal void SetPendingCaretIndex(int caretIndex) => _pendingCaretIndex = caretIndex;
+    internal void SetPendingCaretIndex(int caretIndex)
+        => _pendingCaretIndex = DataContext is MainViewModel viewModel
+            ? viewModel.GetCommandInputCaretIndex(caretIndex)
+            : caretIndex;
 
     private void UpdateCommandTextOverlayOffset()
     {
@@ -587,8 +590,8 @@ public partial class MainWindow : Window
         {
             var dialogViewModel = viewModel.CreateImportExportViewModel(() => { });
             await new ImportExportWindow(dialogViewModel).ShowDialog(this);
-            _commandBox.Text = viewModel.CommandText;
-            _commandBox.CaretIndex = viewModel.CommandText.Length;
+            _commandBox.Text = viewModel.CommandInputText;
+            _commandBox.CaretIndex = viewModel.CommandInputText.Length;
         }
         finally
         {
@@ -719,7 +722,7 @@ public partial class MainWindow : Window
                 {
                     viewModel.CommandText = expansion;
                     ShowAndActivate();
-                    _commandBox.CaretIndex = expansion.Length;
+                    _commandBox.CaretIndex = viewModel.GetCommandInputCaretIndex(expansion.Length);
                 });
             }
         }
@@ -848,6 +851,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Enter
             && e.KeyModifiers == KeyModifiers.Shift
+            && !viewModel.IsCommandMetadataFilterMode
             && DirectFilePathSelection.TryGetPath(
                 _commandBox.Text ?? string.Empty,
                 _commandBox.SelectionStart,
@@ -890,6 +894,7 @@ public partial class MainWindow : Window
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control)
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+            && !viewModel.IsCommandMetadataFilterMode
             && e.Key is Key.Left or Key.Right
             && TrySelectPathLevel(e.Key == Key.Right))
         {
@@ -899,6 +904,7 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Right
             && e.KeyModifiers == KeyModifiers.None
+            && !viewModel.IsCommandMetadataFilterMode
             && PathLevelSelection.IsPathSelection(
                 _commandBox.Text ?? string.Empty,
                 _commandBox.SelectionStart,
@@ -979,7 +985,7 @@ public partial class MainWindow : Window
                     && _commandBox.SelectionStart == _commandBox.SelectionEnd
                     && _commandBox.CaretIndex == (_commandBox.Text?.Length ?? 0) => CommandInputKey.Right,
                 Key.Enter => CommandInputKey.Enter,
-                Key.Space when viewModel.IsChecklistActive => CommandInputKey.Space,
+                Key.Space when viewModel.IsChecklistActive || viewModel.IsCommandMetadataFilterInputActive => CommandInputKey.Space,
                 Key.Up when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Up,
                 Key.Down when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.Down,
                 Key.PageUp when viewModel.HasCompletionOptions || viewModel.IsChecklistActive => CommandInputKey.PageUp,
@@ -990,7 +996,7 @@ public partial class MainWindow : Window
 
         if (inputKey is not null)
         {
-            var previousText = viewModel.CommandText;
+            var previousText = viewModel.CommandInputText;
             await viewModel.HandleInputKeyAsync(inputKey.Value);
             var pendingCaretIndex = _pendingCaretIndex;
             _pendingCaretIndex = null;
@@ -1007,9 +1013,9 @@ public partial class MainWindow : Window
                 }
             }, DispatcherPriority.Background);
 
-            if (!string.Equals(previousText, viewModel.CommandText, StringComparison.Ordinal))
+            if (!string.Equals(previousText, viewModel.CommandInputText, StringComparison.Ordinal))
             {
-                var updatedText = viewModel.CommandText;
+                var updatedText = viewModel.CommandInputText;
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (_commandBox.IsFocused)

@@ -38,9 +38,9 @@ public sealed class UrlTargetBuilder
 
     public UrlTargetBuildResult Build(ParsedCommand parsedCommand)
     {
-        if (!string.Equals(parsedCommand.Definition.Kind, "url", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(parsedCommand.Definition.ExecutionHandler, "url", StringComparison.OrdinalIgnoreCase))
         {
-            return new UrlTargetBuildResult([], $"Command kind '{parsedCommand.Definition.Kind}' is not supported.");
+            return new UrlTargetBuildResult([], $"Command handler '{parsedCommand.Definition.ExecutionHandler}' is not supported.");
         }
 
         var action = parsedCommand.Action;

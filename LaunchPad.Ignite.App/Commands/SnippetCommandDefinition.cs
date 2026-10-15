@@ -45,5 +45,5 @@ public static class SnippetCommandDefinition
             {
                 AllowAdditionalNamedArguments = true
             }
-        ]);
+        ]) { Handler = "snippet" };
 }

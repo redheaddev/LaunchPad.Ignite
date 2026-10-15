@@ -6,12 +6,12 @@ public static class ThemeCommandDefinition
 {
     public static CommandDefinition Definition { get; } = new(
         "theme",
-        "theme",
+        "system",
         "Select an available color theme",
         [new CommandActionDefinition(
             "default",
             "Apply a saved color theme",
             "theme <list:themes>",
             "theme",
-            [new CommandArgumentDefinition("name", Ref: "list:themes", ListMode: ListSelectionMode.Single)])]);
+            [new CommandArgumentDefinition("name", Ref: "list:themes", ListMode: ListSelectionMode.Single)])]) { Handler = "theme" };
 }

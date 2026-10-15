@@ -12,7 +12,7 @@ public sealed class CommandLaunchPreferenceStore(ProfileSettingsStore settingsSt
 
     public CommandLaunchMode GetLaunchMode(CommandDefinition command)
     {
-        if (!string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(command.ExecutionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             return CommandLaunchMode.Normal;
         }
@@ -25,7 +25,7 @@ public sealed class CommandLaunchPreferenceStore(ProfileSettingsStore settingsSt
 
     public void SetLaunchMode(CommandDefinition command, CommandLaunchMode mode)
     {
-        if (!string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(command.ExecutionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("Launch preferences can only be set for shell commands.", nameof(command));
         }

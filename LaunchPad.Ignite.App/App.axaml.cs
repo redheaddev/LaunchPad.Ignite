@@ -27,6 +27,7 @@ public partial class App : Application
                 DataContext = new MainViewModel(),
             };
             desktop.MainWindow = _mainWindow;
+            desktop.Exit += Desktop_Exit;
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -40,5 +41,13 @@ public partial class App : Application
     private void Exit_Click(object? sender, EventArgs e)
     {
         _desktopLifetime?.Shutdown();
+    }
+
+    private void Desktop_Exit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+    {
+        if (_mainWindow?.DataContext is MainViewModel viewModel)
+        {
+            viewModel.ShutdownExtensions();
+        }
     }
 }

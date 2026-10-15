@@ -11,6 +11,7 @@ internal sealed class CommandCompletionResolver
     private readonly CommandLineTokenizer _tokenizer = new();
     private IReadOnlyList<CommandVariableDefinition> _variables;
     private readonly IReadOnlyList<CommandFunctionDefinition> _functions;
+    private Func<CommandDefinition, bool>? _commandFilter;
 
     public CommandCompletionResolver(
         CommandCatalog catalog,
@@ -26,6 +27,9 @@ internal sealed class CommandCompletionResolver
 
     public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
         => _variables = variables.ToArray();
+
+    public void UpdateCommandFilter(Func<CommandDefinition, bool>? commandFilter)
+        => _commandFilter = commandFilter;
 
     public CompletionResolution Resolve(string input)
     {
@@ -83,14 +87,18 @@ internal sealed class CommandCompletionResolver
         if (tokens.Count == 0)
         {
             return CreateResolution(CompletionKind.Command, string.Empty, input.Length,
-                _catalog.Commands.Select(command => command.QualifiedName).ToArray());
+                _catalog.Commands
+                    .Where(IsCommandAllowed)
+                    .Select(command => command.QualifiedName)
+                    .ToArray());
         }
 
         if (!trailingWhitespace && tokens.Count == 1
             && _catalog.TryGetCommand(tokens[0].Value, out _))
         {
             var matchingCommands = _catalog.Commands
-                .Where(candidate => MatchesCommandPrefix(candidate, tokens[0].Value))
+                .Where(candidate => IsCommandAllowed(candidate)
+                    && MatchesCommandPrefix(candidate, tokens[0].Value))
                 .ToArray();
             if (matchingCommands.Length > 1)
             {
@@ -114,7 +122,8 @@ internal sealed class CommandCompletionResolver
                 tokens[0].Value,
                 tokens[0].Start,
                 _catalog.Commands
-                    .Where(candidate => MatchesCommandPrefix(candidate, tokens[0].Value))
+                    .Where(candidate => IsCommandAllowed(candidate)
+                        && MatchesCommandPrefix(candidate, tokens[0].Value))
                     .Select(candidate => candidate.QualifiedName)
                     .ToArray());
         }
@@ -263,6 +272,9 @@ internal sealed class CommandCompletionResolver
         => command.QualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Namespace?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    private bool IsCommandAllowed(CommandDefinition command)
+        => _commandFilter?.Invoke(command) != false;
 
     private static bool EndsWithUnquotedWhitespace(string input)
     {

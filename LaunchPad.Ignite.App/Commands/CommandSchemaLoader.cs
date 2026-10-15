@@ -78,7 +78,12 @@ public sealed class CommandSchemaLoader
     {
         EnsureUserCommandsFileExists();
         MigrateLegacyCommandsOnce();
-        var userSchema = ReadSchema(_userCommandsPath);
+        var storedUserSchema = ReadSchema(_userCommandsPath);
+        var userSchema = NormalizeCommandHandlers(storedUserSchema);
+        if (storedUserSchema.Commands.Any(command => string.IsNullOrWhiteSpace(command.Handler)))
+        {
+            WriteSchema(userSchema);
+        }
         RemovePackedCommands(userSchema);
         UserCommandNames = userSchema.Commands
             .Select(command => command.QualifiedName)
@@ -327,7 +332,11 @@ public sealed class CommandSchemaLoader
         }
 
         var commands = userSchema.Commands.ToArray();
-        commands[commandIndex] = updatedCommand with { Kind = commands[commandIndex].Kind };
+        commands[commandIndex] = updatedCommand with
+        {
+            Kind = commands[commandIndex].Kind,
+            Handler = commands[commandIndex].ExecutionHandler
+        };
         var updatedUserSchema = userSchema with { Commands = commands };
         var mergedSchema = Merge(_appSchema, updatedUserSchema);
         if (mergedSchema.Commands.Count(command => string.Equals(
@@ -469,10 +478,13 @@ public sealed class CommandSchemaLoader
     }
 
     private static IReadOnlyList<string> SupportedKinds(CommandSchema schema)
-        => schema.Commands.Select(command => command.Kind)
-            .Concat(["shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet", "extension"])
+        => schema.Commands.Select(command => command.ExecutionHandler)
+            .Concat(["url", "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet", "extension", "edit", "shortcut", "definitionManagement"])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    private static CommandSchema NormalizeCommandHandlers(CommandSchema schema)
+        => schema with { Commands = schema.Commands.Select(command => command.NormalizeLegacyHandler()).ToArray() };
 
     private static CommandVariableDefinition ParseVariable(string name, string? value)
     {

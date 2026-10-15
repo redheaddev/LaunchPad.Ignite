@@ -18,15 +18,15 @@ public sealed class ExitCommandModel : ICommandModel
 
     public static CommandDefinition Definition { get; } = new(
         "exit",
-        "exit",
+        "system",
         "Close the application",
-        [new CommandActionDefinition("default", "Close the application", "exit", "exit", [])]);
+        [new CommandActionDefinition("default", "Close the application", "exit", "exit", [])]) { Handler = "exit" };
 
     public CommandExecutionResult Execute(ParsedCommand command)
     {
-        if (!string.Equals(command.Definition.Kind, Kind, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(command.Definition.ExecutionHandler, Kind, StringComparison.OrdinalIgnoreCase))
         {
-            return new CommandExecutionResult(false, $"Command kind '{command.Definition.Kind}' is not supported.");
+            return new CommandExecutionResult(false, $"Command handler '{command.Definition.ExecutionHandler}' is not supported.");
         }
 
         try

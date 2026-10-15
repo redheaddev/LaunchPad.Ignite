@@ -196,7 +196,7 @@ public partial class SettingsViewModel : ViewModelBase
             .ToArray();
         var commandList = commands ?? [];
         var launchPreferences = commandList
-            .Where(command => string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            .Where(command => string.Equals(command.ExecutionHandler, "shell", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(command => command.QualifiedName, command => new CommandLaunchPreferenceViewModel(
                 command.QualifiedName,
                 CommandLaunchPreferenceStore.GetSettingName(command),
@@ -1128,7 +1128,7 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
         _originalCommand = command;
         _name = command.Name;
         _namespace = command.Namespace ?? string.Empty;
-        Kind = command.Kind;
+        Kind = command.ExecutionHandler;
         SourceLocation = sourceLocation;
         _description = command.Description;
         _saveUserCommand = saveUserCommand;

@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Schema;
 
@@ -17,7 +18,7 @@ public sealed record LoadedExtensions(
     IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
     IReadOnlyList<LoadedExtensionInfo> Extensions)
 {
-    public IReadOnlyList<ISecretEnvironmentHandoff> SecretEnvironmentHandoffs { get; init; } = [];
+    public IReadOnlyList<IExtensionShutdownAware> ShutdownAwareExecutors { get; init; } = [];
 
     public IReadOnlyList<ExtensionLoadFailure> Failures { get; init; } = [];
 
@@ -31,7 +32,8 @@ public sealed record LoadedExtensions(
         IEnumerable<CommandVariableDefinition> variables,
         IReadOnlyDictionary<string, string> settingValues,
         Func<string, string, (bool Found, string Value)> tryGetSecret,
-        Action<string> openUrl)
+        Action<string> openUrl,
+        Func<string, IReadOnlyList<string>, Task<ExtensionSecretResolutionResult>> resolveSecrets)
     {
         var settingsByNamespace = variables
             .GroupBy(variable => variable.Namespace ?? string.Empty, StringComparer.OrdinalIgnoreCase)
@@ -52,29 +54,43 @@ public sealed record LoadedExtensions(
 
         foreach (var executor in Executors.Values.Cast<object>().Concat(AsyncExecutors.Values))
         {
-            if (executor is not IExtensionCommandContextAware contextAware)
+            var extensionNamespace = executor switch
+            {
+                IExtensionCommandContextAware contextAware => contextAware.Namespace,
+                IExtensionSecretResolverAware secretResolverAware => secretResolverAware.Namespace,
+                _ => null
+            };
+            if (extensionNamespace is null)
             {
                 continue;
             }
 
-            var extensionNamespace = contextAware.Namespace;
-            var settings = settingsByNamespace.TryGetValue(extensionNamespace, out var namespaceSettings)
-                ? namespaceSettings
-                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (definitionsByNamespace.TryGetValue(extensionNamespace, out var settingDefinitions))
+            if (executor is IExtensionCommandContextAware contextAwareExecutor)
             {
-                var configuredSettings = settings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
-                foreach (var setting in settingDefinitions)
+                var settings = settingsByNamespace.TryGetValue(extensionNamespace, out var namespaceSettings)
+                    ? namespaceSettings
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (definitionsByNamespace.TryGetValue(extensionNamespace, out var settingDefinitions))
                 {
-                    configuredSettings[setting.Name] = profileValues.GetValueOrDefault(setting.QualifiedName, setting.DefaultValue);
+                    var configuredSettings = settings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                    foreach (var setting in settingDefinitions)
+                    {
+                        configuredSettings[setting.Name] = profileValues.GetValueOrDefault(setting.QualifiedName, setting.DefaultValue);
+                    }
+
+                    settings = configuredSettings;
                 }
 
-                settings = configuredSettings;
+                contextAwareExecutor.Configure(
+                    settings,
+                    name => tryGetSecret(extensionNamespace, name),
+                    openUrl);
             }
-            contextAware.Configure(
-                settings,
-                name => tryGetSecret(extensionNamespace, name),
-                openUrl);
+
+            if (executor is IExtensionSecretResolverAware secretResolverExecutor)
+            {
+                secretResolverExecutor.ConfigureSecretResolver(names => resolveSecrets(extensionNamespace, names));
+            }
 
         }
     }
@@ -200,7 +216,6 @@ public sealed class ExtensionLoader
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
-        var secretEnvironmentHandoffs = new List<ISecretEnvironmentHandoff>();
         var extensionLoadErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
@@ -209,10 +224,13 @@ public sealed class ExtensionLoader
                 var extensionLists = (manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>())
                     .Select(list => list with { Namespace = list.Namespace ?? manifest.Namespace })
                     .ToArray();
-                var extensionCommands = (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>()).Select(command => command with
-                {
-                    Namespace = command.Namespace ?? manifest.Namespace
-                }).ToArray();
+                var extensionCommands = (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>())
+                    .Select(command =>
+                    {
+                        var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
+                        return namespacedCommand.NormalizeLegacyHandler();
+                    })
+                    .ToArray();
                 var extensionVariables = (manifest.Schema.Variables ?? Array.Empty<CommandVariableDefinition>())
                     .Select(variable => variable with { Namespace = manifest.Namespace })
                     .ToArray();
@@ -225,14 +243,12 @@ public sealed class ExtensionLoader
                 var extensionExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
                 var extensionAsyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
                 var extensionFunctionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
-                var extensionSecretHandoffs = new List<ISecretEnvironmentHandoff>();
                 var registeredFunctionNames = LoadExecutors(
                     manifest,
                     extensionDirectory,
                     extensionExecutors,
                     extensionAsyncExecutors,
-                    extensionFunctionExecutors,
-                    extensionSecretHandoffs);
+                    extensionFunctionExecutors);
                 var extensionFunctionNameSet = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var function in extensionFunctions)
                 {
@@ -306,7 +322,6 @@ public sealed class ExtensionLoader
                     functionExecutors.Add(executor.Key, executor.Value);
                 }
 
-                secretEnvironmentHandoffs.AddRange(extensionSecretHandoffs);
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -332,8 +347,13 @@ public sealed class ExtensionLoader
         {
             CommandSources = commandSources,
             AsyncExecutors = asyncExecutors,
-            SecretEnvironmentHandoffs = secretEnvironmentHandoffs,
-            Failures = failures
+            Failures = failures,
+            ShutdownAwareExecutors = executors.Values
+                .Cast<object>()
+                .Concat(asyncExecutors.Values)
+                .OfType<IExtensionShutdownAware>()
+                .Distinct()
+                .ToArray()
         };
     }
 
@@ -459,8 +479,7 @@ public sealed class ExtensionLoader
         string extensionDirectory,
         IDictionary<string, ICommandExecutor> executors,
         IDictionary<string, IAsyncCommandExecutor> asyncExecutors,
-        IDictionary<string, ICommandFunctionExecutor> functionExecutors,
-        ICollection<ISecretEnvironmentHandoff> secretEnvironmentHandoffs)
+        IDictionary<string, ICommandFunctionExecutor> functionExecutors)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
         {
@@ -487,8 +506,7 @@ public sealed class ExtensionLoader
                 && !type.IsInterface
                 && (typeof(ICommandExecutor).IsAssignableFrom(type)
                     || typeof(IAsyncCommandExecutor).IsAssignableFrom(type)
-                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)
-                    || typeof(ISecretEnvironmentHandoff).IsAssignableFrom(type)))
+                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)))
             .ToArray();
         if (executorTypes.Length == 0)
         {
@@ -536,10 +554,9 @@ public sealed class ExtensionLoader
                 registeredFunctionNames.Add(functionQualifiedName);
             }
 
-            if (instance is ISecretEnvironmentHandoff secretEnvironmentHandoff)
+            if (instance is IExtensionRootAware extensionRootAware)
             {
-                secretEnvironmentHandoff.ConfigureExtensionRoot(extensionDirectory);
-                secretEnvironmentHandoffs.Add(secretEnvironmentHandoff);
+                extensionRootAware.ConfigureExtensionRoot(extensionDirectory);
             }
         }
 

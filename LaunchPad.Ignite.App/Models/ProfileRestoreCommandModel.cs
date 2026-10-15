@@ -23,9 +23,9 @@ public sealed class ProfileRestoreCommandModel : IAsyncCommandExecutor
 
     public async Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command)
     {
-        if (!string.Equals(command.Definition.Kind, Kind, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(command.Definition.ExecutionHandler, Kind, StringComparison.OrdinalIgnoreCase))
         {
-            return new CommandExecutionResult(false, $"Command kind '{command.Definition.Kind}' is not supported.");
+            return new CommandExecutionResult(false, $"Command handler '{command.Definition.ExecutionHandler}' is not supported.");
         }
 
         if (!command.Arguments.TryGetValue("file", out var fileName)

@@ -47,7 +47,7 @@ public sealed class ExtensionCommandModel : ICommandModel
 
     public static CommandDefinition Definition { get; } = new(
             "extension",
-            "extension",
+            "system",
             "Manage installed extensions and command packs",
             [
                 new CommandActionDefinition(
@@ -93,7 +93,7 @@ public sealed class ExtensionCommandModel : ICommandModel
                         "id",
                         Ref: InstalledComponentIdsArgumentValueProvider.DisableReference,
                         ListMode: ListSelectionMode.Multiple)])
-            ]);
+            ]) { Handler = "extension" };
 
     public static string FormatList(IEnumerable<LoadedExtensionInfo> extensions, ExtensionStateStore stateStore)
     {

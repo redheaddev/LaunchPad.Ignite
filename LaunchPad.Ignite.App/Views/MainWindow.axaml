@@ -82,7 +82,7 @@
             <Border x:Name="CommandInputBorder" Grid.Row="1" Classes="command-input" Background="{DynamicResource ThemeInputBackground}" BorderBrush="{DynamicResource ThemeBorder}"
                     BorderThickness="1" CornerRadius="10" Padding="12,8">
                 <Grid ClipToBounds="True" ColumnDefinitions="12,*">
-                    <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandText}"
+                    <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandInputText}"
                              FontFamily="Cascadia Mono, Consolas"
                               FontSize="22" Foreground="{DynamicResource ThemeText}"
                              Background="{DynamicResource ThemeInputBackground}" BorderThickness="0" Padding="12,0,0,0"
@@ -101,7 +101,7 @@
                     <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
                                TextWrapping="NoWrap" ClipToBounds="True">
-                        <TextBlock.Inlines><Run Text="{Binding CommandText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="{DynamicResource ThemeMutedText}"/></TextBlock.Inlines>
+                        <TextBlock.Inlines><Run Text="{Binding CommandInputText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="{DynamicResource ThemeMutedText}"/></TextBlock.Inlines>
                     </TextBlock>
                 </Grid>
             </Border>

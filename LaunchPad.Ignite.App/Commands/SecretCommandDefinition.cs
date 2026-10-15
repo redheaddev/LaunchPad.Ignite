@@ -23,20 +23,6 @@ public static class SecretCommandDefinition
                     new CommandArgumentDefinition("path", Optional: true)
                 ]),
             new CommandActionDefinition(
-                "vscode",
-                "Open a VS Code terminal with selected secrets in its environment",
-                "secret vscode <list:secretName> [path] [terminalName]",
-                "vscode",
-                [
-                    new CommandArgumentDefinition(
-                        "secretNames",
-                        Ref: "list:secrets",
-                        InputType: "csv",
-                        ListMode: ListSelectionMode.Multiple),
-                    new CommandArgumentDefinition("path", Optional: true),
-                    new CommandArgumentDefinition("terminalName", Optional: true)
-                ]),
-            new CommandActionDefinition(
                 "copy-env",
                 "Copy a secret as an environment assignment",
                 "secret copy-env <secretName>",
@@ -83,5 +69,5 @@ public static class SecretCommandDefinition
                 "secret set <secretName>",
                 "secret",
                 [new CommandArgumentDefinition("secretName", Ref: "list:secrets", ListMode: ListSelectionMode.Single, AllowCustomValues: true)])
-        ]);
+        ]) { Handler = "secret" };
 }

@@ -53,6 +53,10 @@ public partial class MainViewModel : ViewModelBase
     private readonly HistorySuggestionCycler _historySuggestionCycler = new();
     private IReadOnlyList<CommandHistoryEntry> _historyCommands = Array.Empty<CommandHistoryEntry>();
     private string _historyInputText = string.Empty;
+    private CommandMetadataFilter? _activeCommandMetadataFilter;
+    private string _commandMetadataFilterPrefix = string.Empty;
+    private CommandMetadataFilterInput _commandMetadataFilterInput;
+    private IReadOnlyList<string> _commandMetadataFilterValueSuggestions = Array.Empty<string>();
     private int _highlightedCompletionIndex;
     private LoadedExtensions _extensions = null!;
     private IReadOnlyList<LoadedCommandPackInfo> _commandPacks = null!;
@@ -65,6 +69,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _isExtensionListVisible;
     private bool _isDirectPathCompletionActive;
     private bool _isManagementCompletionActive;
+    private bool _isEditingCommandMetadataFilter;
     private string _managementCompletionInput = string.Empty;
     private bool _isHistoryPathStepping;
     private IReadOnlyList<string> _directPathSuggestions = Array.Empty<string>();
@@ -104,13 +109,17 @@ public partial class MainViewModel : ViewModelBase
         var extensionSecretAccessPolicy = new ExtensionSecretAccessPolicy(
             _profileSettingsStore,
             _secretStore);
+        Func<string, IReadOnlyList<string>, Task<ExtensionSecretResolutionResult>> resolveExtensionSecrets = async (extensionId, names) =>
+        {
+            var result = await _secretCommandModel.ResolveExtensionSecretsAsync(extensionId, names);
+            return result;
+        };
         _secretCommandModel = new SecretCommandModel(
             _secretStore,
             _secretAccessGate,
             new AvaloniaSecretEntryDialogService(),
             new AvaloniaClipboardService(GetSystemClipboard),
             _terminalLauncher,
-            extensions.SecretEnvironmentHandoffs.FirstOrDefault(),
             extensionSecretAccessPolicy);
         var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
         _commandPackLoader = new CommandPackLoader(_extensionStateStore);
@@ -143,7 +152,8 @@ public partial class MainViewModel : ViewModelBase
             schema.Variables,
             profileSettings,
             (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
-            url => urlTargetOpener.Open([new UrlTarget(url)]));
+            url => urlTargetOpener.Open([new UrlTarget(url)]),
+            resolveExtensionSecrets);
 
         var commands = schema.Commands
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
@@ -170,8 +180,7 @@ public partial class MainViewModel : ViewModelBase
         {
             Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet" };
-        builtInKinds = [.. builtInKinds, "extension", "definitionManagement"];
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "extension", "shortcut", "definitionManagement" };
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
@@ -217,7 +226,8 @@ public partial class MainViewModel : ViewModelBase
                     effectiveVariables,
                     _profileSettingsStore.GetValues(),
                     (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
-                    url => urlTargetOpener.Open([new UrlTarget(url)]));
+                    url => urlTargetOpener.Open([new UrlTarget(url)]),
+                    resolveExtensionSecrets);
                 ApplyCompletionState(_completionSession.UpdateVariables(effectiveVariables));
             },
             ConfirmVariableOverwrite);
@@ -447,6 +457,9 @@ public partial class MainViewModel : ViewModelBase
     private string _commandText = string.Empty;
 
     [ObservableProperty]
+    private string _commandInputText = string.Empty;
+
+    [ObservableProperty]
     private string _completionGhostText = string.Empty;
 
     private string _commandExpansionPreview = string.Empty;
@@ -527,18 +540,29 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCommandExpansionPreview => !string.IsNullOrEmpty(CommandExpansionPreview);
 
+    public bool IsCommandMetadataFilterMode
+        => _activeCommandMetadataFilter is not null || _isEditingCommandMetadataFilter;
+
+    public bool IsCommandMetadataFilterCompletionActive
+        => _isEditingCommandMetadataFilter && _commandMetadataFilterValueSuggestions.Count > 0;
+
+    public bool IsCommandMetadataFilterInputActive => _isEditingCommandMetadataFilter;
+
     public bool CanComplete => _isManagementCompletionActive
         ? CompletionItems.Count > 0
         : _isExtensionListVisible
+        || IsCommandMetadataFilterCompletionActive
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
                 || _historySuggestionCycler.TryGetSuggestions(CommandText, out _)
             : _completionSession.State.CanComplete
-                || GetHistorySuggestions(CommandText).Count > 0
-                || GetShortcutSuggestions(CommandText).Count > 0
-                || GetSnippetSuggestions(CommandText).Count > 0);
+                || (!IsCommandMetadataFilterMode
+                    && (GetHistorySuggestions(CommandText).Count > 0
+                        || GetShortcutSuggestions(CommandText).Count > 0
+                        || GetSnippetSuggestions(CommandText).Count > 0)));
 
-    public bool CanExpandTypedShortcut => _shortcutResolver.TryExpandAlias(CommandText, out _);
+    public bool CanExpandTypedShortcut
+        => !IsCommandMetadataFilterMode && _shortcutResolver.TryExpandAlias(CommandText, out _);
 
     public bool TryGetKeyboardShortcutExpansion(KeyboardShortcutChord chord, out string expansion)
         => _shortcutResolver.TryExpandChord(chord, out expansion!);
@@ -600,6 +624,11 @@ public partial class MainViewModel : ViewModelBase
 
     public bool SelectHistoryBoundary(bool newest)
     {
+        if (IsCommandMetadataFilterMode)
+        {
+            return false;
+        }
+
         var prefix = TryGetHistoryFilter(CommandText, out var historySearchText)
             ? historySearchText
             : CommandText;
@@ -624,6 +653,20 @@ public partial class MainViewModel : ViewModelBase
         _isHistoryPathStepping = false;
         _highlightedCompletionIndex = 0;
         ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+    }
+
+    public void ShutdownExtensions()
+    {
+        foreach (var executor in _extensions.ShutdownAwareExecutors)
+        {
+            try
+            {
+                executor.Shutdown();
+            }
+            catch (Exception)
+            {
+            }
+        }
     }
 
     public bool OpenDirectPathInTerminal(string path)
@@ -653,16 +696,38 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
-    public bool ShowCommandPlaceholder => IsCommandTextEmpty && string.IsNullOrEmpty(CompletionGhostText);
+    public bool ShowCommandPlaceholder => string.IsNullOrEmpty(CommandInputText) && string.IsNullOrEmpty(CompletionGhostText);
+
+    public int GetCommandInputCaretIndex(int commandCaretIndex)
+        => Math.Clamp(_commandMetadataFilterPrefix.Length + commandCaretIndex, 0, CommandInputText.Length);
 
     public async Task<bool> HandleInputKeyAsync(
         CommandInputKey key,
         bool newWindow = false,
         CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
+        if (key is CommandInputKey.Clear or CommandInputKey.Escape)
+        {
+            if (_isEditingCommandMetadataFilter)
+            {
+                _isEditingCommandMetadataFilter = false;
+                UpdateCommandMetadataCompletionFilter();
+            }
+        }
+
+        if (key == CommandInputKey.Enter && _isEditingCommandMetadataFilter)
+        {
+            return false;
+        }
+
         if (key == CommandInputKey.Clear)
         {
             ResetHistoryNavigation();
+        }
+
+        if (_isEditingCommandMetadataFilter)
+        {
+            return HandleCommandMetadataFilterInputKey(key);
         }
 
         if (key == CommandInputKey.Enter)
@@ -720,7 +785,8 @@ public partial class MainViewModel : ViewModelBase
             && _directFilePathHandler.TryGetCompletionPath(
                 historySuggestions[_highlightedCompletionIndex].CommandText,
                 out _);
-        if (_isDirectPathCompletionActive
+        if (!IsCommandMetadataFilterMode
+            && _isDirectPathCompletionActive
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
                 or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
                 or CommandInputKey.Right
@@ -1010,24 +1076,271 @@ public partial class MainViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsCommandTextEmpty));
         OnPropertyChanged(nameof(ShowCommandPlaceholder));
-        UpdateCommandExpansionPreview(value);
-        if (!_syncingInput)
+        if (_syncingInput)
         {
-            _historySuggestionCycler.Reset();
-            _isHistoryPathStepping = false;
-            if (_definitionManagementCommandModel?.Handles(value) == true)
+            UpdateCommandExpansionPreview(value);
+            return;
+        }
+
+        SyncCommandInputText(value);
+        _historySuggestionCycler.Reset();
+        _isHistoryPathStepping = false;
+        UpdateCommandExpansionPreview(value);
+        if (_definitionManagementCommandModel?.Handles(value) == true)
+        {
+            ApplyManagementCompletion(value);
+            return;
+        }
+
+        _isManagementCompletionActive = false;
+        ApplyCompletionState(_completionSession.UpdateInputText(value));
+        if (!IsCommandMetadataFilterMode && string.Equals(value.Trim(), "!", StringComparison.Ordinal))
+        {
+            ShowExtensionList();
+        }
+    }
+
+    partial void OnCommandInputTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowCommandPlaceholder));
+        if (_syncingInput)
+        {
+            return;
+        }
+
+        _historySuggestionCycler.Reset();
+        _isHistoryPathStepping = false;
+        var filterInput = CommandMetadataFilter.ParseInput(value);
+        if (filterInput.IsFilterInput)
+        {
+            _commandMetadataFilterPrefix = filterInput.FilterPrefix;
+            _isManagementCompletionActive = false;
+            if (filterInput.IsComplete && filterInput.Filter is not null)
             {
-                ApplyManagementCompletion(value);
-                return;
+                _isEditingCommandMetadataFilter = false;
+                _commandMetadataFilterInput = default;
+                _commandMetadataFilterValueSuggestions = Array.Empty<string>();
+                SetCommandMetadataFilter(filterInput.Filter);
+                SetCommandTextFromInput(filterInput.CommandText);
+                ApplyCompletionState(_completionSession.UpdateInputText(filterInput.CommandText));
+            }
+            else
+            {
+                _isEditingCommandMetadataFilter = true;
+                _commandMetadataFilterInput = filterInput;
+                SetCommandTextFromInput(string.Empty);
+                UpdateCommandMetadataCompletionFilter();
+                ApplyCompletionState(_completionSession.UpdateInputText(string.Empty));
+                UpdateCommandMetadataFilterValueSuggestions(filterInput);
             }
 
-            _isManagementCompletionActive = false;
-            ApplyCompletionState(_completionSession.UpdateInputText(value));
-            if (string.Equals(value.Trim(), "!", StringComparison.Ordinal))
-            {
-                ShowExtensionList();
-            }
+            return;
         }
+
+        _commandMetadataFilterPrefix = string.Empty;
+        if (_isEditingCommandMetadataFilter || _activeCommandMetadataFilter is not null)
+        {
+            _isEditingCommandMetadataFilter = false;
+            _commandMetadataFilterInput = default;
+            _commandMetadataFilterValueSuggestions = Array.Empty<string>();
+            _activeCommandMetadataFilter = null;
+            UpdateCommandMetadataCompletionFilter();
+        }
+
+        SetCommandTextFromInput(value);
+        UpdateCommandExpansionPreview(value);
+        if (_definitionManagementCommandModel?.Handles(value) == true)
+        {
+            ApplyManagementCompletion(value);
+            return;
+        }
+
+        _isManagementCompletionActive = false;
+        ApplyCompletionState(_completionSession.UpdateInputText(value));
+        if (!IsCommandMetadataFilterMode && string.Equals(value.Trim(), "!", StringComparison.Ordinal))
+        {
+            ShowExtensionList();
+        }
+    }
+
+    private void SetCommandTextFromInput(string commandText)
+    {
+        _syncingInput = true;
+        CommandText = commandText;
+        _syncingInput = false;
+    }
+
+    private void SyncCommandInputText(string commandText)
+    {
+        var inputText = _commandMetadataFilterPrefix + commandText;
+        if (string.Equals(CommandInputText, inputText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _syncingInput = true;
+        CommandInputText = inputText;
+        _syncingInput = false;
+    }
+
+    private void SetCommandMetadataFilter(CommandMetadataFilter filter)
+    {
+        _activeCommandMetadataFilter = filter;
+        UpdateCommandMetadataCompletionFilter();
+    }
+
+    private void UpdateCommandMetadataCompletionFilter()
+    {
+        if (_isEditingCommandMetadataFilter)
+        {
+            _completionSession.UpdateCommandFilter(_ => false);
+            return;
+        }
+
+        if (_activeCommandMetadataFilter is not { } filter)
+        {
+            _completionSession.UpdateCommandFilter(null);
+            return;
+        }
+
+        _completionSession.UpdateCommandFilter(command =>
+        {
+            var packId = _commandPackSources.TryGetValue(command.QualifiedName, out var sourcePackId)
+                ? sourcePackId
+                : null;
+            var extensionId = _commandSources.TryGetValue(command.QualifiedName, out var sourceExtensionId)
+                ? sourceExtensionId
+                : null;
+            return filter.Matches(command, packId, extensionId);
+        });
+    }
+
+    private bool HandleCommandMetadataFilterInputKey(CommandInputKey key)
+    {
+        if (key is CommandInputKey.Up or CommandInputKey.Down
+            or CommandInputKey.PageUp or CommandInputKey.PageDown
+            or CommandInputKey.First or CommandInputKey.Last)
+        {
+            if (_commandMetadataFilterValueSuggestions.Count == 0)
+            {
+                return false;
+            }
+
+            _highlightedCompletionIndex = key switch
+            {
+                CommandInputKey.First => 0,
+                CommandInputKey.Last => _commandMetadataFilterValueSuggestions.Count - 1,
+                _ => MoveCompletionIndex(_highlightedCompletionIndex, key, _commandMetadataFilterValueSuggestions.Count)
+            };
+            UpdateCommandMetadataFilterValueSuggestions(_commandMetadataFilterInput);
+            return false;
+        }
+
+        if (_commandMetadataFilterInput.IsEditingFieldName
+            && key is (CommandInputKey.Tab or CommandInputKey.Right)
+            && _commandMetadataFilterValueSuggestions.Count > 0
+            && _commandMetadataFilterInput.EditingFieldStart >= 0
+            && _commandMetadataFilterInput.EditingFieldStart <= CommandInputText.Length)
+        {
+            var selectedIndex = Math.Clamp(
+                _highlightedCompletionIndex,
+                0,
+                _commandMetadataFilterValueSuggestions.Count - 1);
+            var selectedField = _commandMetadataFilterValueSuggestions[selectedIndex];
+            CommandInputText = CommandInputText[.._commandMetadataFilterInput.EditingFieldStart] + selectedField + ':';
+            return false;
+        }
+
+        if (key is CommandInputKey.Tab or CommandInputKey.Space or CommandInputKey.Right
+            && _commandMetadataFilterValueSuggestions.Count > 0
+            && _commandMetadataFilterInput.EditingValueStart >= 0
+            && _commandMetadataFilterInput.EditingValueStart <= CommandInputText.Length)
+        {
+            var selectedIndex = Math.Clamp(
+                _highlightedCompletionIndex,
+                0,
+                _commandMetadataFilterValueSuggestions.Count - 1);
+            var selectedValue = _commandMetadataFilterValueSuggestions[selectedIndex];
+            CommandInputText = CommandInputText[.._commandMetadataFilterInput.EditingValueStart] + selectedValue + ' ';
+        }
+
+        return false;
+    }
+
+    private void UpdateCommandMetadataFilterValueSuggestions(CommandMetadataFilterInput filterInput)
+    {
+        if (filterInput.IsEditingFieldName)
+        {
+            _commandMetadataFilterValueSuggestions = new[] { "kind", "pack", "extension" }
+                .Where(field => field.StartsWith(filterInput.FieldPrefix, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            _highlightedCompletionIndex = _commandMetadataFilterValueSuggestions.Count == 0
+                ? -1
+                : Math.Clamp(_highlightedCompletionIndex, 0, _commandMetadataFilterValueSuggestions.Count - 1);
+            CompletionItems = _commandMetadataFilterValueSuggestions
+                .Select((field, index) => new CompletionOptionViewModel(field, index == _highlightedCompletionIndex, false))
+                .ToArray();
+            CompletionGhostText = _highlightedCompletionIndex >= 0
+                ? _commandMetadataFilterValueSuggestions[_highlightedCompletionIndex][filterInput.FieldPrefix.Length..]
+                : string.Empty;
+            TargetPreview = string.Empty;
+            UsageText = string.Empty;
+            UsageCommandText = string.Empty;
+            OnPropertyChanged(nameof(HasCompletionOptions));
+            OnPropertyChanged(nameof(CanComplete));
+            OnPropertyChanged(nameof(CanExpandTypedShortcut));
+            OnPropertyChanged(nameof(UsageCommandText));
+            return;
+        }
+
+        var filteredCommands = _catalog.Commands
+            .Select(command =>
+            {
+                var packId = _commandPackSources.TryGetValue(command.QualifiedName, out var sourcePackId)
+                    ? sourcePackId
+                    : null;
+                var extensionId = _commandSources.TryGetValue(command.QualifiedName, out var sourceExtensionId)
+                    ? sourceExtensionId
+                    : null;
+                return (Command: command, PackId: packId, ExtensionId: extensionId);
+            })
+            .Where(candidate => filterInput.CompletedFilter?.Matches(candidate.Command, candidate.PackId, candidate.ExtensionId) != false)
+            .ToArray();
+
+        IEnumerable<string> values = filterInput.EditingField switch
+        {
+            "pack" => filteredCommands
+                .Where(candidate => candidate.PackId is not null)
+                .Select(candidate => candidate.PackId!),
+            "kind" => filteredCommands.Select(candidate => candidate.Command.Kind),
+            "extension" => filteredCommands
+                .Where(candidate => candidate.ExtensionId is not null)
+                .Select(candidate => candidate.ExtensionId!),
+            _ => Array.Empty<string>()
+        };
+
+        _commandMetadataFilterValueSuggestions = values
+            .Where(value => value.StartsWith(filterInput.ValuePrefix, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _highlightedCompletionIndex = _commandMetadataFilterValueSuggestions.Count == 0
+            ? -1
+            : Math.Clamp(_highlightedCompletionIndex, 0, _commandMetadataFilterValueSuggestions.Count - 1);
+        CompletionItems = _commandMetadataFilterValueSuggestions
+            .Select((value, index) => new CompletionOptionViewModel(value, index == _highlightedCompletionIndex, false))
+            .ToArray();
+        CompletionGhostText = _highlightedCompletionIndex >= 0
+            && _commandMetadataFilterValueSuggestions[_highlightedCompletionIndex]
+                .StartsWith(filterInput.ValuePrefix, StringComparison.OrdinalIgnoreCase)
+                ? _commandMetadataFilterValueSuggestions[_highlightedCompletionIndex][filterInput.ValuePrefix.Length..]
+                : string.Empty;
+        TargetPreview = string.Empty;
+        UsageText = string.Empty;
+        UsageCommandText = string.Empty;
+        OnPropertyChanged(nameof(HasCompletionOptions));
+        OnPropertyChanged(nameof(CanComplete));
+        OnPropertyChanged(nameof(CanExpandTypedShortcut));
+        OnPropertyChanged(nameof(UsageCommandText));
     }
 
     private void ApplyManagementCompletion(string input)
@@ -1144,6 +1457,8 @@ public partial class MainViewModel : ViewModelBase
             _syncingInput = false;
         }
 
+        SyncCommandInputText(state.InputText);
+
         UpdateCommandExpansionPreview(state.InputText);
         var historySuggestions = GetHistorySuggestions(state.InputText);
         var shortcutSuggestions = GetShortcutSuggestions(state.InputText);
@@ -1181,7 +1496,8 @@ public partial class MainViewModel : ViewModelBase
                 ? selectedCommandText
                 : state.InputText;
         TargetPreview = GetCommandTargetPreview(previewCommandText);
-        if (_directFilePathHandler.TryGetCompletionPath(state.InputText, out var directPath))
+        if (!IsCommandMetadataFilterMode
+            && _directFilePathHandler.TryGetCompletionPath(state.InputText, out var directPath))
         {
             _activeArgumentPathContext = null;
             ApplyDirectPathCompletion(
@@ -1191,7 +1507,8 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        if (_argumentPathCompletion.TryGetContext(state.InputText, _catalog, _tokenizer, out var pathContext))
+        if (!IsCommandMetadataFilterMode
+            && _argumentPathCompletion.TryGetContext(state.InputText, _catalog, _tokenizer, out var pathContext))
         {
             _activeArgumentPathContext = pathContext;
             ApplyDirectPathCompletion(
@@ -1276,6 +1593,11 @@ public partial class MainViewModel : ViewModelBase
 
     private IReadOnlyList<CommandHistoryEntry> GetHistorySuggestions(string inputText)
     {
+        if (IsCommandMetadataFilterMode)
+        {
+            return Array.Empty<CommandHistoryEntry>();
+        }
+
         if (_historySuggestionCycler.TryGetSuggestions(inputText, out var cycledSuggestions))
         {
             return cycledSuggestions;
@@ -1305,12 +1627,14 @@ public partial class MainViewModel : ViewModelBase
     }
 
     private IReadOnlyList<KeyValuePair<string, string>> GetShortcutSuggestions(string inputText)
-        => TryGetShortcutFilter(inputText, out var prefix)
+        => !IsCommandMetadataFilterMode && TryGetShortcutFilter(inputText, out var prefix)
             ? _shortcutResolver.GetAliasExpansions(prefix)
             : Array.Empty<KeyValuePair<string, string>>();
 
     private IReadOnlyList<string> GetSnippetSuggestions(string inputText)
-        => SnippetCompletion.Filter(_snippetStore.GetNames(), inputText);
+        => IsCommandMetadataFilterMode
+            ? Array.Empty<string>()
+            : SnippetCompletion.Filter(_snippetStore.GetNames(), inputText);
 
     private static bool TryGetShortcutFilter(string inputText, out string prefix)
     {
@@ -1367,8 +1691,8 @@ public partial class MainViewModel : ViewModelBase
 
         var parseResult = _parser.Parse(commandText);
         if (parseResult.Status == CommandParseStatus.Valid
-            && parseResult.ParsedCommand is { Definition.Kind: var kind } parsedCommand
-            && string.Equals(kind, "url", StringComparison.OrdinalIgnoreCase))
+            && parseResult.ParsedCommand is { Definition.ExecutionHandler: var handler } parsedCommand
+            && string.Equals(handler, "url", StringComparison.OrdinalIgnoreCase))
         {
             var targetResult = _urlCommandModel.BuildPreview(parsedCommand);
             if (targetResult.Succeeded && targetResult.Targets.Count > 0)
@@ -1797,7 +2121,7 @@ public sealed record CompletionOptionViewModel(
         {
             var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
             if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.Kind, "url", StringComparison.OrdinalIgnoreCase))
+                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.ExecutionHandler, "url", StringComparison.OrdinalIgnoreCase))
             {
                 parseResult = optionFreeParseResult;
                 parsedWithNewWindowOption = true;
@@ -1830,27 +2154,29 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        var executionHandler = parsedCommand.Definition.ExecutionHandler;
         if (launchMode == CommandLaunchMode.Normal
-            && string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            && string.Equals(executionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             launchMode = new CommandLaunchPreferenceStore(_profileSettingsStore)
                 .GetLaunchMode(parsedCommand.Definition);
         }
 
         if (launchMode != CommandLaunchMode.Normal
-            && !string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(executionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             SetStatusMessage("Elevated and alternate-user launch is only supported for shell commands.");
             return false;
         }
 
         CommandExecutionResult executionResult;
-        if (string.Equals(parsedCommand.Definition.Kind, "secret", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(executionHandler, "secret", StringComparison.OrdinalIgnoreCase))
         {
-            executionResult = await _secretCommandModel.ExecuteAsync(parsedCommand);
+            executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
+                () => _secretCommandModel.ExecuteAsync(parsedCommand));
             RefreshSecretAccessState();
         }
-        else if (_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
+        else if (_commandExecutors.TryGetValue(executionHandler, out var commandExecutor))
         {
             executionResult = commandExecutor switch
             {
@@ -1861,17 +2187,18 @@ public sealed record CompletionOptionViewModel(
                 _ => commandExecutor.Execute(parsedCommand)
             };
         }
-        else if (_asyncCommandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var asyncCommandExecutor))
+        else if (_asyncCommandExecutors.TryGetValue(executionHandler, out var asyncCommandExecutor))
         {
-            executionResult = await asyncCommandExecutor.ExecuteAsync(parsedCommand);
-            if (string.Equals(parsedCommand.Definition.Kind, "snippet", StringComparison.OrdinalIgnoreCase))
+            executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
+                () => asyncCommandExecutor.ExecuteAsync(parsedCommand));
+            if (string.Equals(executionHandler, "snippet", StringComparison.OrdinalIgnoreCase))
             {
                 RefreshSecretAccessState();
             }
         }
         else
         {
-            SetStatusMessage($"Command kind '{parsedCommand.Definition.Kind}' is not supported.");
+            SetStatusMessage($"Command handler '{executionHandler}' is not supported.");
             return false;
         }
 
@@ -1974,7 +2301,7 @@ public sealed record CompletionOptionViewModel(
         {
             var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
             if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.Kind, "url", StringComparison.OrdinalIgnoreCase))
+                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.ExecutionHandler, "url", StringComparison.OrdinalIgnoreCase))
             {
                 parseResult = optionFreeParseResult;
                 parsedWithNewWindowOption = true;
@@ -1994,27 +2321,29 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        var executionHandler = parsedCommand.Definition.ExecutionHandler;
         if (launchMode == CommandLaunchMode.Normal
-            && string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            && string.Equals(executionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             launchMode = new CommandLaunchPreferenceStore(_profileSettingsStore)
                 .GetLaunchMode(parsedCommand.Definition);
         }
 
         if (launchMode != CommandLaunchMode.Normal
-            && !string.Equals(parsedCommand.Definition.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            && !string.Equals(executionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             SetStatusMessage("Elevated and alternate-user launch is only supported for shell commands.");
             return false;
         }
 
         CommandExecutionResult executionResult;
-        if (string.Equals(parsedCommand.Definition.Kind, "secret", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(executionHandler, "secret", StringComparison.OrdinalIgnoreCase))
         {
-            executionResult = await _secretCommandModel.ExecuteAsync(parsedCommand);
+            executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
+                () => _secretCommandModel.ExecuteAsync(parsedCommand));
             RefreshSecretAccessState();
         }
-        else if (_commandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var commandExecutor))
+        else if (_commandExecutors.TryGetValue(executionHandler, out var commandExecutor))
         {
             executionResult = commandExecutor switch
             {
@@ -2025,13 +2354,14 @@ public sealed record CompletionOptionViewModel(
                 _ => commandExecutor.Execute(parsedCommand)
             };
         }
-        else if (_asyncCommandExecutors.TryGetValue(parsedCommand.Definition.Kind, out var asyncCommandExecutor))
+        else if (_asyncCommandExecutors.TryGetValue(executionHandler, out var asyncCommandExecutor))
         {
-            executionResult = await asyncCommandExecutor.ExecuteAsync(parsedCommand);
+            executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
+                () => asyncCommandExecutor.ExecuteAsync(parsedCommand));
         }
         else
         {
-            SetStatusMessage($"Command kind '{parsedCommand.Definition.Kind}' is not supported.");
+            SetStatusMessage($"Command handler '{executionHandler}' is not supported.");
             return false;
         }
 

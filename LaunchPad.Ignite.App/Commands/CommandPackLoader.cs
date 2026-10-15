@@ -223,7 +223,7 @@ public sealed class CommandPackLoader
         var skippedCommands = new List<string>();
         foreach (var command in manifest.Schema.Commands)
         {
-            var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
+                var namespacedCommand = (command with { Namespace = command.Namespace ?? manifest.Namespace }).NormalizeLegacyHandler();
             if (!existingNames.Add(namespacedCommand.QualifiedName))
             {
                 skippedCommands.Add(namespacedCommand.QualifiedName);
@@ -337,7 +337,7 @@ public sealed class CommandPackLoader
 
             foreach (var command in manifest.Schema.Commands)
             {
-                var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
+                var namespacedCommand = (command with { Namespace = command.Namespace ?? manifest.Namespace }).NormalizeLegacyHandler();
                 packedCommandNames.Add(namespacedCommand.QualifiedName);
                 if (disabledIds.Contains(id))
                 {
@@ -358,7 +358,7 @@ public sealed class CommandPackLoader
 
             foreach (var command in manifest.Schema.Commands)
             {
-                var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
+                var namespacedCommand = (command with { Namespace = command.Namespace ?? manifest.Namespace }).NormalizeLegacyHandler();
                 ValidateCommand(namespacedCommand, manifestPath);
                 AddUnique(commandNames, namespacedCommand.QualifiedName, "command", manifestPath);
                 commandSources.Add(namespacedCommand.QualifiedName, manifest.Id);
@@ -542,10 +542,12 @@ public sealed class CommandPackLoader
             ValidateQualifiedNamespace(command.Namespace, $"command '{command.Name}'", path);
         }
 
-        if (!SupportedCommandKinds.Contains(command.Kind))
+        var normalizedCommand = command.NormalizeLegacyHandler();
+        if (!SupportedCommandKinds.Contains(normalizedCommand.Kind)
+            && !SupportedCommandKinds.Contains(normalizedCommand.ExecutionHandler))
         {
             throw new InvalidDataException(
-                $"Command pack manifest '{path}' uses unsupported command kind '{command.Kind}' for command '{command.QualifiedName}'.");
+                $"Command pack manifest '{path}' uses unsupported command kind '{normalizedCommand.Kind}' or handler '{normalizedCommand.ExecutionHandler}' for command '{command.QualifiedName}'.");
         }
     }
 

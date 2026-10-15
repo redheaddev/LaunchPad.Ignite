@@ -6,7 +6,7 @@ public static class SecretListCommandDefinition
 {
     public static CommandDefinition Definition { get; } = new(
         "*",
-        "secretList",
+        "system",
         "List saved secret names",
         [new CommandActionDefinition(
             "default",
@@ -18,5 +18,5 @@ public static class SecretListCommandDefinition
                 Optional: true,
                 Ref: "list:secrets",
                 InputType: "csv",
-                ListMode: ListSelectionMode.Multiple)])]);
+                ListMode: ListSelectionMode.Multiple)])]) { Handler = "secretList" };
 }

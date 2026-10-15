@@ -14,7 +14,7 @@ public sealed class DefinitionManagementCommandModel
     private static readonly Regex UrlBracePlaceholder = new("\\{([^{}]+)\\}", RegexOptions.Compiled);
     public static CommandDefinition Definition { get; } = new(
         "launchpad",
-        "definitionManagement",
+        "system",
         "Create and manage user-defined commands and enum lists",
         [
             new CommandActionDefinition(
@@ -29,7 +29,7 @@ public sealed class DefinitionManagementCommandModel
                 "launchpad list <add|edit|list|show|remove>",
                 "launchpad list",
                 [])
-        ]);
+        ]) { Handler = "definitionManagement" };
     private readonly CommandSchemaLoader _schemaLoader;
     private readonly Action _schemaUpdated;
     private readonly DefinitionManagementParser _parser = new();
@@ -79,13 +79,13 @@ public sealed class DefinitionManagementCommandModel
             case "list":
                 return Value(string.Join(Environment.NewLine, _schemaLoader.GetUserCommands()
                     .OrderBy(command => command.QualifiedName, StringComparer.OrdinalIgnoreCase)
-                    .Select(command => $"{command.QualifiedName} [{command.Kind}] - {command.Description}")), "No user commands.");
+                    .Select(command => $"{command.QualifiedName} [{command.Kind}/{command.ExecutionHandler}] - {command.Description}")), "No user commands.");
             case "show":
             {
                 var command = _schemaLoader.FindUserCommand(request.Name)
                     ?? throw new InvalidOperationException($"Command '{request.Name}' was not found in the user schema.");
                 var action = command.Actions.FirstOrDefault();
-                return Value($"{command.QualifiedName} [{command.Kind}]\n{command.Description}\n{action?.Usage}\nTarget: {action?.TargetTemplate}");
+                return Value($"{command.QualifiedName} [{command.Kind}/{command.ExecutionHandler}]\n{command.Description}\n{action?.Usage}\nTarget: {action?.TargetTemplate}");
             }
             case "remove":
                 _schemaLoader.RemoveUserCommand(request.Name);
@@ -94,9 +94,11 @@ public sealed class DefinitionManagementCommandModel
             case "add":
             {
                 var (name, commandNamespace) = ParseName(request.Name);
-                var command = new CommandDefinition(name, request.Kind!, request.Description ?? string.Empty,
+                var handler = request.Kind!;
+                var kind = GetKindForHandler(handler);
+                var command = new CommandDefinition(name, kind, request.Description ?? string.Empty,
                     [BuildAction(request.Kind!, request.Name, request.Target!, request.Arguments ?? [], request.TargetArguments ?? [])],
-                    commandNamespace);
+                    commandNamespace) { Handler = handler };
                 _schemaLoader.AddUserCommand(command);
                 _schemaUpdated();
                 return Success($"Added user command '{command.QualifiedName}'.");
@@ -116,8 +118,8 @@ public sealed class DefinitionManagementCommandModel
             ?? throw new InvalidOperationException("Only commands with a default action can be edited by this command.");
         var updatedArguments = request.HasArguments ? request.Arguments! : currentAction.Arguments;
         var updatedTemplates = request.HasTargetArguments ? request.TargetArguments! : currentAction.ArgumentTemplates;
-        var updatedTarget = request.HasTarget ? NormalizeTarget(command.Kind, request.Target!) : currentAction.TargetTemplate;
-        ValidateTargetArguments(command.Kind, updatedTarget, updatedTemplates, updatedArguments);
+        var updatedTarget = request.HasTarget ? NormalizeTarget(command.ExecutionHandler, request.Target!) : currentAction.TargetTemplate;
+        ValidateTargetArguments(command.ExecutionHandler, updatedTarget, updatedTemplates, updatedArguments);
         var updatedAction = currentAction with
         {
             TargetTemplate = updatedTarget,
@@ -134,6 +136,18 @@ public sealed class DefinitionManagementCommandModel
         _schemaUpdated();
         return Success($"Updated user command '{command.QualifiedName}'.");
     }
+
+    private static string GetKindForHandler(string handler)
+        => handler.ToLowerInvariant() switch
+        {
+            "url" => "url",
+            "shell" => "shell",
+            "shortcut" => "shortcut",
+            "variable" => "variable",
+            "secret" => "secret",
+            "snippet" => "snippet",
+            _ => "system"
+        };
 
     private CommandExecutionResult ExecuteList(DefinitionManagementRequest request)
     {

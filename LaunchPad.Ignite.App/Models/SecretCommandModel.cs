@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using System.Text;
 using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Services;
@@ -18,8 +19,15 @@ public sealed class SecretCommandModel
     private readonly ISecretEntryDialogService _dialogService;
     private readonly IClipboardService _clipboardService;
     private readonly ISecretTerminalLauncher _terminalLauncher;
-    private readonly ISecretEnvironmentHandoff? _vscodeTerminalHandoff;
     private readonly ExtensionSecretAccessPolicy? _extensionSecretAccessPolicy;
+    private readonly AsyncLocal<CommandSecretAccessScope?> _commandSecretAccessScope = new();
+
+    private sealed class CommandSecretAccessScope(bool wasUnlocked)
+    {
+        public bool WasUnlocked { get; } = wasUnlocked;
+
+        public bool UnlockedByCommand { get; set; }
+    }
 
     public SecretCommandModel(
         ISecretStore secretStore,
@@ -27,7 +35,6 @@ public sealed class SecretCommandModel
         ISecretEntryDialogService dialogService,
         IClipboardService clipboardService,
         ISecretTerminalLauncher terminalLauncher,
-        ISecretEnvironmentHandoff? vscodeTerminalHandoff = null,
         ExtensionSecretAccessPolicy? extensionSecretAccessPolicy = null)
     {
         _secretStore = secretStore;
@@ -35,8 +42,28 @@ public sealed class SecretCommandModel
         _dialogService = dialogService;
         _clipboardService = clipboardService;
         _terminalLauncher = terminalLauncher;
-        _vscodeTerminalHandoff = vscodeTerminalHandoff;
         _extensionSecretAccessPolicy = extensionSecretAccessPolicy;
+    }
+
+    public async Task<CommandExecutionResult> ExecuteWithSecretRelockAsync(
+        Func<Task<CommandExecutionResult>> execute)
+    {
+        var previousScope = _commandSecretAccessScope.Value;
+        var scope = new CommandSecretAccessScope(_accessGate.IsUnlocked);
+        _commandSecretAccessScope.Value = scope;
+        try
+        {
+            return await execute();
+        }
+        finally
+        {
+            if (!scope.WasUnlocked && scope.UnlockedByCommand && _accessGate.IsUnlocked)
+            {
+                _accessGate.Lock();
+            }
+
+            _commandSecretAccessScope.Value = previousScope;
+        }
     }
 
     public async Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command)
@@ -55,7 +82,6 @@ public sealed class SecretCommandModel
                 "copy-value" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: false),
                 "copy-env" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: true),
                 "shell" => await OpenShellAsync(command.Arguments["secretNames"], command.Arguments.GetValueOrDefault("path")),
-                "vscode" => await OpenVsCodeAsync(command),
                 _ => new CommandExecutionResult(false, $"Unknown secret action '{command.Action.Name}'.")
             };
         }
@@ -273,58 +299,45 @@ public sealed class SecretCommandModel
         return new CommandExecutionResult(true, "Terminal opened with the selected secrets in its environment.");
     }
 
-    private async Task<CommandExecutionResult> OpenVsCodeAsync(ParsedCommand command)
+    public async Task<ExtensionSecretResolutionResult> ResolveExtensionSecretsAsync(
+        string extensionId,
+        IReadOnlyList<string> secretNames)
     {
-        var namesCsv = command.Arguments.GetValueOrDefault("secretNames") ?? string.Empty;
-        var names = namesCsv.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (names.Length == 0 || names.Any(name => !IsValidName(name)))
+        if (secretNames.Count == 0 || secretNames.Any(name => !IsValidName(name)))
         {
-            return InvalidName();
+            return new(false, new Dictionary<string, string>(), "Secret names must be valid environment-variable names (letters, digits, and underscores; not starting with a digit).");
         }
 
-        if (names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length)
+        if (secretNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != secretNames.Count)
         {
-            return new CommandExecutionResult(false, "Secret names must not be repeated.");
+            return new(false, new Dictionary<string, string>(), "Secret names must not be repeated.");
         }
 
         if (_extensionSecretAccessPolicy is null)
         {
-            return new CommandExecutionResult(false, "VS Code secret access has not been configured in Settings.");
+            return new(false, new Dictionary<string, string>(), "Extension secret access has not been configured in Settings.");
         }
 
-        var missingGrant = names.FirstOrDefault(name => !_extensionSecretAccessPolicy.IsAllowed("vscode", name));
+        var missingGrant = secretNames.FirstOrDefault(name => !_extensionSecretAccessPolicy.IsAllowed(extensionId, name));
         if (missingGrant is not null)
         {
-            return new CommandExecutionResult(false,
-                $"Secret '{missingGrant}' is not permitted for the vscode extension. Manage access in Settings.");
+            return new(false, new Dictionary<string, string>(),
+                $"Secret '{missingGrant}' is not permitted for the {extensionId} extension. Manage access in Settings.");
         }
 
         var authorizationResult = await EnsureAuthorizedAsync();
         if (authorizationResult is not null)
         {
-            return authorizationResult;
+            return new(false, new Dictionary<string, string>(), authorizationResult.Message);
         }
 
-        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var name in names)
+        var secrets = _extensionSecretAccessPolicy.GetAllowedSecrets(extensionId, secretNames, out var unavailableSecret);
+        if (unavailableSecret is not null)
         {
-            if (!_secretStore.TryGet(name, out var value))
-            {
-                return new CommandExecutionResult(false, $"Secret '{name}' was not found.");
-            }
-
-            environment.Add(name, value);
+            return new(false, new Dictionary<string, string>(), $"Secret '{unavailableSecret}' was not found or is not permitted.");
         }
 
-        if (_vscodeTerminalHandoff is null)
-        {
-            return new CommandExecutionResult(false, "The VS Code terminal extension is unavailable.");
-        }
-
-        return await _vscodeTerminalHandoff.OpenAsync(
-            environment,
-            command.Arguments.GetValueOrDefault("path"),
-            command.Arguments.GetValueOrDefault("terminalName"));
+        return new(true, secrets, string.Empty);
     }
 
     private async Task<CommandExecutionResult?> EnsureAuthorizedAsync()
@@ -340,9 +353,17 @@ public sealed class SecretCommandModel
             return new CommandExecutionResult(false, "Unlock canceled.");
         }
 
-        return _accessGate.TryUnlock(password)
-            ? null
-            : new CommandExecutionResult(false, "The master password is incorrect.");
+        if (!_accessGate.TryUnlock(password))
+        {
+            return new CommandExecutionResult(false, "The master password is incorrect.");
+        }
+
+        if (_commandSecretAccessScope.Value is { WasUnlocked: false } scope)
+        {
+            scope.UnlockedByCommand = true;
+        }
+
+        return null;
     }
 
     private static bool IsValidName(string name)

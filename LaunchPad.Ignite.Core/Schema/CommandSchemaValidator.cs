@@ -122,12 +122,12 @@ public sealed class CommandSchemaValidator
                 errors.Add($"Command name '{command.QualifiedName}' is empty or duplicated.");
             }
 
-            if (!commandKinds.Contains(command.Kind))
+            if (!commandKinds.Contains(command.ExecutionHandler))
             {
-                errors.Add($"Command '{command.Name}' has unsupported kind '{command.Kind}'.");
+                errors.Add($"Command '{command.Name}' has unsupported handler '{command.ExecutionHandler}'.");
             }
 
-            if (string.Equals(command.Kind, "shortcut", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase))
             {
                 if (command.Actions.Count != 1
                     || !string.Equals(command.Actions[0].Name, "default", StringComparison.OrdinalIgnoreCase)
@@ -288,7 +288,7 @@ public sealed class CommandSchemaValidator
             return;
         }
 
-        if (!string.Equals(command.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(command.ExecutionHandler, "shell", StringComparison.OrdinalIgnoreCase))
         {
             errors.Add($"Action '{action.Name}' in command '{command.Name}' can define argument templates only for shell commands.");
             return;

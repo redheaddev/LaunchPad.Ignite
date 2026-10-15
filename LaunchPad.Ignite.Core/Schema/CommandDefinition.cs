@@ -65,9 +65,33 @@ public sealed record CommandDefinition(
     IReadOnlyList<CommandActionDefinition> Actions,
     string? Namespace = null,
     string? KeyboardShortcut = null,
-    bool ExecuteOnKeyboardShortcut = false)
+    bool ExecuteOnKeyboardShortcut = false,
+    string? Handler = null)
 {
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
+
+    public string ExecutionHandler => string.IsNullOrWhiteSpace(Handler) ? Kind : Handler;
+
+    public CommandDefinition NormalizeLegacyHandler()
+    {
+        if (!string.IsNullOrWhiteSpace(Handler))
+        {
+            return this;
+        }
+
+        var handler = Kind;
+        var kind = handler.ToLowerInvariant() switch
+        {
+            "url" => "url",
+            "shell" => "shell",
+            "shortcut" => "shortcut",
+            "variable" => "variable",
+            "secret" => "secret",
+            "snippet" => "snippet",
+            _ => "system"
+        };
+        return this with { Kind = kind, Handler = handler };
+    }
 }
 
 public sealed record CommandActionDefinition(

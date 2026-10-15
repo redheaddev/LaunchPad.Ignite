@@ -16,7 +16,7 @@ public sealed class ShortcutResolver
         foreach (var command in commands)
         {
             string expansion;
-            var isShortcutCommand = string.Equals(command.Kind, "shortcut", StringComparison.OrdinalIgnoreCase);
+            var isShortcutCommand = string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase);
             if (isShortcutCommand)
             {
                 var defaultAction = command.Actions.FirstOrDefault(action =>

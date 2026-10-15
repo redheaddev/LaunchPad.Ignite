@@ -31,7 +31,7 @@ public sealed class VariableCommandModel : ICommandModel
                 "variable remove <name>",
                 "variable remove",
                 [new CommandArgumentDefinition("name")])
-        ]);
+        ]) { Handler = "variable" };
 
     public VariableCommandModel(
         CommandSchemaLoader schemaLoader,

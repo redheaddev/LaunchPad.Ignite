@@ -7,18 +7,18 @@ public static class ProfileBackupCommandDefinitions
 {
     public static CommandDefinition Backup { get; } = new(
         "backup",
-        "profileBackup",
+        "system",
         "Create a ZIP backup of the LaunchPad profile",
         [new CommandActionDefinition(
             "default",
             "Back up profile files",
             "backup [name]",
             "backup",
-            [new CommandArgumentDefinition("name", Optional: true)])]);
+            [new CommandArgumentDefinition("name", Optional: true)])]) { Handler = "profileBackup" };
 
     public static CommandDefinition Restore { get; } = new(
         "restore",
-        "profileRestore",
+        "system",
         "Restore the profile from a backup file",
         [new CommandActionDefinition(
             "default",
@@ -28,5 +28,5 @@ public static class ProfileBackupCommandDefinitions
             [new CommandArgumentDefinition(
                 "file",
                 Ref: ProfileBackupFilesArgumentValueProvider.Reference,
-                ListMode: ListSelectionMode.Single)])]);
+                ListMode: ListSelectionMode.Single)])]) { Handler = "profileRestore" };
 }
