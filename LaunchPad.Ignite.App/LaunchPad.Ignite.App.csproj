@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Remove="CommandPacks\**;Addons\**" />
+    <None Remove="CommandPacks\**;Addons\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="Defaults\app-settings.json" />
     <Content Include="Defaults\user-commands.json" />
     <Content Include="Defaults\app-settings.json">

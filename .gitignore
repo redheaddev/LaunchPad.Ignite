@@ -31,3 +31,5 @@
 *.log
 *.tmp
 /Addons/saif-init
+**/[Cc]ommand[Pp]acks/
+**/[Aa]ddons/

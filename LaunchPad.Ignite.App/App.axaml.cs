@@ -4,6 +4,7 @@ using Avalonia.Markup.Xaml;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.App.Views;
 using System;
+using Avalonia.Threading;
 
 namespace LaunchPad.Ignite.App;
 
@@ -28,6 +29,7 @@ public partial class App : Application
             };
             desktop.MainWindow = _mainWindow;
             desktop.Exit += Desktop_Exit;
+            Program.StartListeningForReplacement(() => Dispatcher.UIThread.Post(() => desktop.Shutdown()));
         }
 
         base.OnFrameworkInitializationCompleted();
