@@ -4,7 +4,7 @@
 		x:Class="LaunchPad.Ignite.App.Views.SettingsWindow"
 		x:DataType="vm:SettingsViewModel"
 		Title="LaunchPad Settings"
-		Width="900" Height="620" MinWidth="760" MinHeight="500"
+		Width="1080" Height="744" MinWidth="912" MinHeight="600"
 		WindowStartupLocation="CenterOwner"
 		Background="{DynamicResource ThemeWindowBackground}">
 	<Grid ColumnDefinitions="240,*">

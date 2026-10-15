@@ -148,6 +148,43 @@ public sealed class CommandOwnershipManager
     public void WriteExportManifest(CommandPackExportPlan plan, string path)
         => _packLoader.WriteExportManifest(plan.Manifest, path);
 
+    public CommandMovePreview PreviewMoveToNewPack(
+        IEnumerable<CommandOwnershipKey> selection,
+        string packId,
+        string? namespacePrefix)
+    {
+        var selectedKeys = selection.Distinct().ToArray();
+        var inventory = GetEligibleCommands().ToDictionary(
+            item => new CommandOwnershipKey(item.OwnerId, item.QualifiedName));
+        var commands = selectedKeys.Select(key => inventory.TryGetValue(key, out var item)
+            ? item
+            : throw new InvalidOperationException($"Command '{key.QualifiedName}' is no longer available from '{key.OwnerId}'. Refresh the dialog and try again."))
+            .ToArray();
+        var conflicts = new List<string>();
+        var packPath = _packLoader.GetInstalledPackPath(packId);
+        if (File.Exists(packPath) || _packs.Any(pack => string.Equals(pack.Id, packId, StringComparison.OrdinalIgnoreCase)))
+        {
+            conflicts.Add($"Command pack '{packId}' already exists.");
+        }
+
+        var exportPlan = CreateExportPlan(selectedKeys, packId, namespacePrefix);
+        var movingKeys = selectedKeys.ToHashSet();
+        var remainingNames = inventory
+            .Where(pair => !movingKeys.Contains(pair.Key))
+            .Select(pair => pair.Value.QualifiedName)
+            .Concat(_reservedCommandNames)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        conflicts.AddRange(exportPlan.ExportedCommandNames
+            .Where(remainingNames.Contains)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => $"'{name}' already exists at the destination or is reserved by another component."));
+        return new CommandMovePreview(
+            commands,
+            commands,
+            packId,
+            conflicts.OrderBy(conflict => conflict, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
     public CommandMovePreview PreviewMove(IEnumerable<CommandOwnershipKey> selection, string? destinationPackId)
     {
         var requested = selection.Distinct().ToArray();
@@ -384,6 +421,163 @@ public sealed class CommandOwnershipManager
                     ? $"Move failed: {exception.Message}"
                     : $"Move failed: {exception.Message} Rollback issues: {string.Join("; ", rollbackErrors)}";
                 return new CommandMoveResult(false, message, []);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
+        {
+            return new CommandMoveResult(false, $"Move could not be validated: {exception.Message}", []);
+        }
+    }
+
+    public CommandMoveResult MoveCommandsToNewPack(
+        IEnumerable<CommandOwnershipKey> selection,
+        string packId,
+        string? namespacePrefix)
+    {
+        try
+        {
+            var selectedKeys = selection.Distinct().ToArray();
+            var preview = PreviewMoveToNewPack(selectedKeys, packId, namespacePrefix);
+            if (preview.Conflicts.Count > 0)
+            {
+                return new CommandMoveResult(false, string.Join(Environment.NewLine, preview.Conflicts), preview.Conflicts);
+            }
+
+            var exportPlan = CreateExportPlan(selectedKeys, packId, namespacePrefix);
+            var originalUserSchema = _userSchemaLoader.ReadUserSchemaForTransfer();
+            var userSchema = originalUserSchema;
+            var originalPacks = new Dictionary<string, CommandPackManifest>(StringComparer.OrdinalIgnoreCase);
+            var updatedPacks = new Dictionary<string, CommandPackManifest>(StringComparer.OrdinalIgnoreCase);
+            var items = preview.Commands;
+            var movedNames = items.Select(item => item.QualifiedName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in items)
+            {
+                if (item.IsUserCommand)
+                {
+                    userSchema = userSchema with
+                    {
+                        Commands = userSchema.Commands
+                            .Where(command => !string.Equals(command.QualifiedName, item.QualifiedName, StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    };
+                    continue;
+                }
+
+                if (!updatedPacks.TryGetValue(item.OwnerId, out var sourceManifest))
+                {
+                    sourceManifest = _packLoader.ReadInstalledManifest(item.OwnerId);
+                    originalPacks[item.OwnerId] = sourceManifest;
+                }
+
+                updatedPacks[item.OwnerId] = sourceManifest with
+                {
+                    Schema = sourceManifest.Schema with
+                    {
+                        Commands = sourceManifest.Schema.Commands
+                            .Where(command => !string.Equals(
+                                (command with { Namespace = command.Namespace ?? sourceManifest.Namespace }).QualifiedName,
+                                item.QualifiedName,
+                                StringComparison.OrdinalIgnoreCase))
+                            .ToArray()
+                    }
+                };
+            }
+
+            _userSchemaLoader.ValidateUserSchemaForTransfer(userSchema, movedNames);
+            foreach (var manifest in updatedPacks.Values)
+            {
+                _packLoader.ValidateInstalledManifest(manifest);
+            }
+
+            var changedSourceIds = new List<string>();
+            var targetPackWritten = false;
+            var userWriteAttempted = false;
+            try
+            {
+                _packLoader.WriteInstalledManifest(exportPlan.Manifest);
+                targetPackWritten = true;
+                foreach (var (sourceId, manifest) in updatedPacks)
+                {
+                    changedSourceIds.Add(sourceId);
+                    if (manifest.Schema.Commands.Count == 0)
+                    {
+                        _packLoader.DeleteInstalledPack(sourceId);
+                    }
+                    else
+                    {
+                        _packLoader.WriteInstalledManifest(manifest);
+                    }
+                }
+
+                if (items.Any(item => item.IsUserCommand))
+                {
+                    userWriteAttempted = true;
+                    _userSchemaLoader.WriteUserSchemaForTransfer(userSchema, movedNames);
+                }
+
+                _runtimeRefresh();
+                return new CommandMoveResult(true, $"Created pack '{packId}' and moved {items.Count} command(s).", []);
+            }
+            catch (Exception exception)
+            {
+                var rollbackErrors = new List<string>();
+                foreach (var sourceId in changedSourceIds.AsEnumerable().Reverse())
+                {
+                    try
+                    {
+                        if (originalPacks[sourceId].Schema.Commands.Count == 0)
+                        {
+                            _packLoader.DeleteInstalledPack(sourceId);
+                        }
+                        else
+                        {
+                            _packLoader.WriteInstalledManifest(originalPacks[sourceId]);
+                        }
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        rollbackErrors.Add($"Pack '{sourceId}': {rollbackException.Message}");
+                    }
+                }
+
+                if (targetPackWritten)
+                {
+                    try
+                    {
+                        _packLoader.DeleteInstalledPack(packId);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        rollbackErrors.Add($"New pack '{packId}': {rollbackException.Message}");
+                    }
+                }
+
+                if (userWriteAttempted)
+                {
+                    try
+                    {
+                        _userSchemaLoader.RestoreUserSchemaForTransfer(originalUserSchema);
+                    }
+                    catch (Exception rollbackException)
+                    {
+                        rollbackErrors.Add($"User commands: {rollbackException.Message}");
+                    }
+                }
+
+                try
+                {
+                    _runtimeRefresh();
+                }
+                catch (Exception rollbackException)
+                {
+                    rollbackErrors.Add($"Runtime refresh: {rollbackException.Message}");
+                }
+
+                var rollbackMessage = rollbackErrors.Count == 0
+                    ? string.Empty
+                    : $" Rollback issues: {string.Join("; ", rollbackErrors)}";
+                return new CommandMoveResult(false, $"Move failed: {exception.Message}{rollbackMessage}", []);
             }
         }
         catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)

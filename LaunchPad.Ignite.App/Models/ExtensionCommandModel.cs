@@ -20,6 +20,7 @@ public sealed class ExtensionCommandModel : ICommandModel
     private readonly ExtensionPackageManager _packageManager;
     private readonly CommandPackLoader _commandPackLoader;
     private readonly Func<string, Task<bool>>? _confirmPackReplacement;
+    private readonly Func<string, IReadOnlySet<string>>? _existingCommandNames;
 
     public ExtensionCommandModel(
         ExtensionStateStore stateStore,
@@ -28,7 +29,8 @@ public sealed class ExtensionCommandModel : ICommandModel
         ExtensionPackageManager? packageManager = null,
         IEnumerable<string>? commandPackIds = null,
         CommandPackLoader? commandPackLoader = null,
-        Func<string, Task<bool>>? confirmPackReplacement = null)
+        Func<string, Task<bool>>? confirmPackReplacement = null,
+        Func<string, IReadOnlySet<string>>? existingCommandNames = null)
     {
         _stateStore = stateStore;
         _extensionIds = extensionIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -38,6 +40,7 @@ public sealed class ExtensionCommandModel : ICommandModel
         _packageManager = packageManager ?? new ExtensionPackageManager();
         _commandPackLoader = commandPackLoader ?? new CommandPackLoader(stateStore);
         _confirmPackReplacement = confirmPackReplacement;
+        _existingCommandNames = existingCommandNames;
     }
 
     public string Kind => "extension";
@@ -103,7 +106,8 @@ public sealed class ExtensionCommandModel : ICommandModel
         return string.Join(
             Environment.NewLine,
             entries.Select(extension =>
-                $"{extension.Id} | {extension.Version} [{(stateStore.IsEnabled(extension.Id) ? "enabled" : "disabled")}]"));
+                $"{extension.Id} | {extension.Version} [{(stateStore.IsEnabled(extension.Id) ? "enabled" : "disabled")}]"
+                + (extension.LoadError is null ? string.Empty : $" [failed to load: {extension.LoadError}]")));
     }
 
     public static string FormatList(
@@ -111,8 +115,8 @@ public sealed class ExtensionCommandModel : ICommandModel
         IEnumerable<LoadedCommandPackInfo> commandPacks)
     {
         var entries = extensions
-            .Select(extension => (extension.Id, Version: extension.Version, Type: "extension", extension.Enabled))
-            .Concat(commandPacks.Select(pack => (pack.Id, Version: "manifest", Type: "pack", pack.Enabled)))
+            .Select(extension => (extension.Id, Version: extension.Version, Type: "extension", extension.Enabled, LoadError: (string?)extension.LoadError))
+            .Concat(commandPacks.Select(pack => (pack.Id, Version: "manifest", Type: "pack", pack.Enabled, LoadError: (string?)null)))
             .OrderBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (entries.Length == 0)
@@ -123,7 +127,8 @@ public sealed class ExtensionCommandModel : ICommandModel
         return string.Join(
             Environment.NewLine,
             entries.Select(entry =>
-                $"{entry.Id} | {entry.Version} [{entry.Type}] [{(entry.Enabled ? "enabled" : "disabled")}]"));
+                $"{entry.Id} | {entry.Version} [{entry.Type}] [{(entry.Enabled ? "enabled" : "disabled")}]"
+                + (entry.LoadError is null ? string.Empty : $" [failed to load: {entry.LoadError}]")));
     }
 
     public CommandExecutionResult Execute(ParsedCommand command)
@@ -224,9 +229,16 @@ public sealed class ExtensionCommandModel : ICommandModel
             }
 
             installedPackPath = destination;
-            installedId = _commandPackLoader.InstallPack(sourcePath, replaceExisting);
+            var importResult = _commandPackLoader.ImportPack(
+                sourcePath,
+                _existingCommandNames?.Invoke(id) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                replaceExisting);
+            installedId = importResult.Id;
             _stateChanged?.Invoke();
-            return new CommandExecutionResult(true, $"Command pack '{id}' installed.");
+            var skippedMessage = importResult.SkippedCommands.Count == 0
+                ? string.Empty
+                : $" Skipped duplicate command(s): {string.Join(", ", importResult.SkippedCommands)}.";
+            return new CommandExecutionResult(true, $"Command pack '{id}' installed.{skippedMessage}");
         }
         catch (Exception exception)
         {

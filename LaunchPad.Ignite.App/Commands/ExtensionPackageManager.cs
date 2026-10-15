@@ -63,7 +63,7 @@ public sealed class ExtensionPackageManager
             var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
                 ?? throw new InvalidDataException($"Extension package manifest '{manifestPath}' is empty.");
             ValidateManifestId(manifest.Id);
-            _ = new ExtensionLoader([stagingRoot]).Load();
+            EnsureValidExtensions(new ExtensionLoader([stagingRoot]).Load());
             return manifest.Id;
         }
         finally
@@ -136,7 +136,7 @@ public sealed class ExtensionPackageManager
                 extensionIds.Add(manifest.Id);
             }
 
-            _ = new ExtensionLoader([stagedRoot]).Load();
+            EnsureValidExtensions(new ExtensionLoader([stagedRoot]).Load());
 
             Directory.CreateDirectory(_extensionRoot);
             foreach (var extensionId in extensionIds)
@@ -484,6 +484,16 @@ public sealed class ExtensionPackageManager
                 or '-')))
         {
             throw new InvalidDataException("Extension package manifest must define an id containing only letters, numbers, '.', '_' or '-'.");
+        }
+    }
+
+    private static void EnsureValidExtensions(LoadedExtensions loaded)
+    {
+        if (loaded.Failures.Count > 0)
+        {
+            throw new InvalidDataException(string.Join(
+                Environment.NewLine,
+                loaded.Failures.Select(failure => $"{failure.Location}: {failure.Message}")));
         }
     }
 }

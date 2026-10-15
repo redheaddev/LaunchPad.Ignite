@@ -131,6 +131,54 @@ public class ExtensionCommandModelTests
     }
 
     [Fact]
+    public async Task PackImportSkipsDuplicateCommandsAndKeepsUniqueCommands()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(directory.Path, "download.json");
+        WritePackManifest(sourcePath, "tools", "new", "New command");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(sourcePath))!;
+        manifest["schema"]!["commands"]!.AsArray().Add(System.Text.Json.Nodes.JsonNode.Parse("""
+            { "name": "existing", "kind": "url", "description": "Duplicate command", "actions": [{ "name": "default", "usage": "tools:existing", "targetTemplate": "https://example.test", "arguments": [] }] }
+            """));
+        File.WriteAllText(sourcePath, manifest.ToJsonString());
+        var packsDirectory = Path.Combine(directory.Path, "profile", "packs");
+        var model = new ExtensionCommandModel(
+            new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json")),
+            [],
+            commandPackLoader: new CommandPackLoader([packsDirectory]),
+            existingCommandNames: _ => new HashSet<string>(["tools:existing"], StringComparer.OrdinalIgnoreCase));
+
+        var result = await model.ExecuteAsync(CreatePackInstallCommand(sourcePath));
+        var loaded = new CommandPackLoader([packsDirectory]).Load();
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("Skipped duplicate command(s): tools:existing", result.Message);
+        Assert.Contains(loaded.Commands, command => command.QualifiedName == "tools:new");
+        Assert.DoesNotContain(loaded.Commands, command => command.QualifiedName == "tools:existing");
+    }
+
+    [Fact]
+    public async Task PackImportSucceedsWhenAllCommandsAreDuplicates()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(directory.Path, "download.json");
+        WritePackManifest(sourcePath, "tools", "existing", "Duplicate command");
+        var packsDirectory = Path.Combine(directory.Path, "profile", "packs");
+        var model = new ExtensionCommandModel(
+            new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json")),
+            [],
+            commandPackLoader: new CommandPackLoader([packsDirectory]),
+            existingCommandNames: _ => new HashSet<string>(["tools:existing"], StringComparer.OrdinalIgnoreCase));
+
+        var result = await model.ExecuteAsync(CreatePackInstallCommand(sourcePath));
+        var loaded = new CommandPackLoader([packsDirectory]).Load();
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("Skipped duplicate command(s): tools:existing", result.Message);
+        Assert.Empty(loaded.Commands);
+    }
+
+    [Fact]
     public async Task PackImportAsksBeforeReplacementAndPreservesPackWhenDeclined()
     {
         using var directory = new TemporaryDirectory();

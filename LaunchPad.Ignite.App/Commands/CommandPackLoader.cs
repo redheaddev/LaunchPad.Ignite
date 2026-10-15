@@ -59,6 +59,8 @@ public sealed record LoadedCommandPackInfo(string Id, bool Enabled)
     public IReadOnlyList<string> Commands { get; init; } = [];
 }
 
+public sealed record CommandPackImportResult(string Id, IReadOnlyList<string> SkippedCommands);
+
 public sealed class CommandPackLoader
 {
     private static readonly Regex IdPattern = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
@@ -190,7 +192,9 @@ public sealed class CommandPackLoader
     public void WriteInstalledManifest(CommandPackManifest manifest)
     {
         ValidateInstalledManifest(manifest);
-        WriteManifestAtomically(GetInstalledPackPath(manifest.Id), manifest);
+        var path = GetInstalledPackPath(manifest.Id);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        WriteManifestAtomically(path, manifest);
     }
 
     public void DeleteInstalledPack(string id)
@@ -206,6 +210,49 @@ public sealed class CommandPackLoader
 
     public string InstallPack(string sourcePath, bool replaceExisting)
         => InstallPack(sourcePath, _profilePackDirectory, replaceExisting);
+
+    public CommandPackImportResult ImportPack(
+        string sourcePath,
+        IEnumerable<string> existingCommandNames,
+        bool replaceExisting)
+    {
+        ValidateManifestFile(sourcePath);
+        var manifest = ReadManifest(sourcePath, requireMatchingFileId: false);
+        var existingNames = existingCommandNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keptCommands = new List<CommandDefinition>();
+        var skippedCommands = new List<string>();
+        foreach (var command in manifest.Schema.Commands)
+        {
+            var namespacedCommand = command with { Namespace = command.Namespace ?? manifest.Namespace };
+            if (!existingNames.Add(namespacedCommand.QualifiedName))
+            {
+                skippedCommands.Add(namespacedCommand.QualifiedName);
+                continue;
+            }
+
+            keptCommands.Add(command);
+        }
+
+        var filteredManifest = manifest with
+        {
+            Schema = manifest.Schema with { Commands = keptCommands }
+        };
+        var temporaryPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(filteredManifest, SerializerOptions));
+            InstallPack(temporaryPath, replaceExisting);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+
+        return new CommandPackImportResult(manifest.Id, skippedCommands);
+    }
 
     public void UpdatePackCommand(string packId, string originalQualifiedName, CommandDefinition updatedCommand)
     {

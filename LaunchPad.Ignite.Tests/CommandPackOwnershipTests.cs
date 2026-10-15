@@ -2,12 +2,33 @@ using System;
 using System.IO;
 using System.Linq;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Tests;
 
 public class CommandPackOwnershipTests
 {
+    [Fact]
+    public void CommandSourceGroupsStartCollapsedAndCanExpand()
+    {
+        var source = new CommandSourceViewModel("sample-pack", "Pack: sample-pack", []);
+
+        Assert.False(source.IsExpanded);
+
+        source.IsExpanded = true;
+
+        Assert.True(source.IsExpanded);
+    }
+
+    [Fact]
+    public void UserCommandSourceIsNotMarkedAsPack()
+    {
+        var source = new CommandSourceViewModel(CommandOwnershipManager.UserOwnerId, "User commands", [], isExpanded: false);
+
+        Assert.False(source.IsExpanded);
+    }
+
     [Fact]
     public void DependencyResolverIncludesEnumListsAndRecursiveVariables()
     {
@@ -148,6 +169,107 @@ public class CommandPackOwnershipTests
         Assert.True(result.Succeeded, result.Message);
         Assert.False(File.Exists(packLoader.GetInstalledPackPath("single-command")));
         Assert.Contains(userLoader.ReadUserSchemaForTransfer().Commands, command => command.QualifiedName == "single:only");
+    }
+
+    [Fact]
+    public void MovingUserCommandToNewPackCreatesPackAndRemovesUserCommand()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "state.json"));
+        var packLoader = new CommandPackLoader([Path.Combine(directory.Path, "packs")], stateStore);
+        var userLoader = CreateUserLoader(directory.Path);
+        userLoader.WriteUserSchemaForTransfer(new CommandSchema([],
+        [CreateCommand("personal", null, new CommandActionDefinition("default", "", "personal", "https://example.test", []))]));
+        var manager = new CommandOwnershipManager(userLoader, packLoader, stateStore, [], [], () => { });
+
+        var result = manager.MoveCommandsToNewPack(
+            [new CommandOwnershipKey(CommandOwnershipManager.UserOwnerId, "personal")],
+            "personal-pack",
+            "personal");
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Empty(userLoader.ReadUserSchemaForTransfer().Commands);
+        var pack = packLoader.ReadInstalledManifest("personal-pack");
+        Assert.Equal("personal", pack.Namespace);
+        Assert.Equal("personal", Assert.Single(pack.Schema.Commands).QualifiedName);
+    }
+
+    [Fact]
+    public void MovingPackCommandToNewPackRemovesEmptySourcePack()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "state.json"));
+        var packLoader = new CommandPackLoader([Path.Combine(directory.Path, "packs")], stateStore);
+        var userLoader = CreateUserLoader(directory.Path);
+        WritePack(packLoader, "source-pack", "source", "command");
+        var manager = new CommandOwnershipManager(
+            userLoader,
+            packLoader,
+            stateStore,
+            [new LoadedCommandPackInfo("source-pack", true) { Commands = ["source:command"] }],
+            [],
+            () => { });
+
+        var result = manager.MoveCommandsToNewPack(
+            [new CommandOwnershipKey("source-pack", "source:command")],
+            "target-pack",
+            "target");
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.False(File.Exists(packLoader.GetInstalledPackPath("source-pack")));
+        var targetPack = packLoader.ReadInstalledManifest("target-pack");
+        var command = Assert.Single(targetPack.Schema.Commands);
+        Assert.Equal("target", targetPack.Namespace);
+        Assert.Equal("target:command", (command with { Namespace = command.Namespace ?? targetPack.Namespace }).QualifiedName);
+    }
+
+    [Fact]
+    public void FailedNewPackMoveRefreshRestoresUserCommandAndRemovesNewPack()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "state.json"));
+        var packLoader = new CommandPackLoader([Path.Combine(directory.Path, "packs")], stateStore);
+        var userLoader = CreateUserLoader(directory.Path);
+        userLoader.WriteUserSchemaForTransfer(new CommandSchema([],
+        [CreateCommand("personal", null, new CommandActionDefinition("default", "", "personal", "https://example.test", []))]));
+        var manager = new CommandOwnershipManager(
+            userLoader,
+            packLoader,
+            stateStore,
+            [],
+            [],
+            () => throw new IOException("runtime refresh failed"));
+
+        var result = manager.MoveCommandsToNewPack(
+            [new CommandOwnershipKey(CommandOwnershipManager.UserOwnerId, "personal")],
+            "personal-pack",
+            "personal");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("runtime refresh failed", result.Message);
+        Assert.Contains(userLoader.ReadUserSchemaForTransfer().Commands, command => command.QualifiedName == "personal");
+        Assert.False(File.Exists(packLoader.GetInstalledPackPath("personal-pack")));
+    }
+
+    [Fact]
+    public void MovingToExistingPackIdIsRejected()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "state.json"));
+        var packLoader = new CommandPackLoader([Path.Combine(directory.Path, "packs")], stateStore);
+        var userLoader = CreateUserLoader(directory.Path);
+        userLoader.WriteUserSchemaForTransfer(new CommandSchema([],
+        [CreateCommand("personal", null, new CommandActionDefinition("default", "", "personal", "https://example.test", []))]));
+        WritePack(packLoader, "existing-pack", "existing", "other");
+        var manager = new CommandOwnershipManager(userLoader, packLoader, stateStore, [], [], () => { });
+
+        var preview = manager.PreviewMoveToNewPack(
+            [new CommandOwnershipKey(CommandOwnershipManager.UserOwnerId, "personal")],
+            "existing-pack",
+            "personal");
+
+        Assert.False(preview.CanCommit);
+        Assert.Contains(preview.Conflicts, conflict => conflict.Contains("already exists", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CommandSchemaLoader CreateUserLoader(string directory)

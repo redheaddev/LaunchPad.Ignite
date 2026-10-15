@@ -19,6 +19,8 @@ public sealed record LoadedExtensions(
 {
     public IReadOnlyList<ISecretEnvironmentHandoff> SecretEnvironmentHandoffs { get; init; } = [];
 
+    public IReadOnlyList<ExtensionLoadFailure> Failures { get; init; } = [];
+
     public IReadOnlyDictionary<string, IAsyncCommandExecutor> AsyncExecutors { get; init; }
         = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
 
@@ -78,9 +80,13 @@ public sealed record LoadedExtensions(
     }
 }
 
+public sealed record ExtensionLoadFailure(string Location, string Message);
+
 public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled)
 {
     public string Namespace { get; init; } = Id;
+
+    public string? LoadError { get; init; }
 }
 
 public sealed class ExtensionLoader
@@ -122,6 +128,7 @@ public sealed class ExtensionLoader
     public LoadedExtensions Load()
     {
         var manifests = new Dictionary<string, (ExtensionManifest Manifest, string Directory)>(StringComparer.OrdinalIgnoreCase);
+        var failures = new List<ExtensionLoadFailure>();
         foreach (var root in _extensionRoots)
         {
             if (!Directory.Exists(root))
@@ -129,7 +136,18 @@ public sealed class ExtensionLoader
                 continue;
             }
 
-            foreach (var extensionDirectory in Directory.EnumerateDirectories(root).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            IEnumerable<string> extensionDirectories;
+            try
+            {
+                extensionDirectories = Directory.EnumerateDirectories(root).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                failures.Add(new ExtensionLoadFailure(root, exception.Message));
+                continue;
+            }
+
+            foreach (var extensionDirectory in extensionDirectories)
             {
                 var manifestPath = Path.Combine(extensionDirectory, ManifestFileName);
                 if (!File.Exists(manifestPath))
@@ -137,16 +155,23 @@ public sealed class ExtensionLoader
                     continue;
                 }
 
-                var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
-                    ?? throw new InvalidDataException($"Extension manifest '{manifestPath}' is empty.");
-                if (string.IsNullOrWhiteSpace(manifest.Id)
-                    || string.IsNullOrWhiteSpace(manifest.Name)
-                    || string.IsNullOrWhiteSpace(manifest.Namespace))
+                try
                 {
-                    throw new InvalidDataException($"Extension manifest '{manifestPath}' must define an id, name, and namespace.");
-                }
+                    var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
+                        ?? throw new InvalidDataException($"Extension manifest '{manifestPath}' is empty.");
+                    if (string.IsNullOrWhiteSpace(manifest.Id)
+                        || string.IsNullOrWhiteSpace(manifest.Name)
+                        || string.IsNullOrWhiteSpace(manifest.Namespace))
+                    {
+                        throw new InvalidDataException($"Extension manifest '{manifestPath}' must define an id, name, and namespace.");
+                    }
 
-                manifests[manifest.Id] = (manifest, extensionDirectory);
+                    manifests[manifest.Id] = (manifest, extensionDirectory);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    failures.Add(new ExtensionLoadFailure(extensionDirectory, GetFailureMessage(exception)));
+                }
             }
         }
 
@@ -170,67 +195,133 @@ public sealed class ExtensionLoader
         var commands = new List<CommandDefinition>();
         var variables = new List<CommandVariableDefinition>();
         var functions = new List<CommandFunctionDefinition>();
-        var settings = manifests.Values
-            .SelectMany(entry => (entry.Manifest.Schema.Settings ?? Array.Empty<CommandSettingDefinition>())
-                .Select(setting => setting with { Namespace = entry.Manifest.Namespace }))
-            .ToList();
+        var settings = new List<CommandSettingDefinition>();
         var commandSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         var secretEnvironmentHandoffs = new List<ISecretEnvironmentHandoff>();
+        var extensionLoadErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
-            lists.AddRange((manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>())
-                .Select(list => list with { Namespace = list.Namespace ?? manifest.Namespace }));
-            foreach (var command in (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>()).Select(command => command with
+            try
             {
-                Namespace = command.Namespace ?? manifest.Namespace
-            }))
-            {
-                commandSources.TryAdd(command.QualifiedName, manifest.Id);
-                commands.Add(command);
-            }
-            variables.AddRange((manifest.Schema.Variables ?? Array.Empty<CommandVariableDefinition>())
-                .Select(variable => variable with { Namespace = manifest.Namespace }));
-            var extensionFunctions = (manifest.Schema.Functions ?? Array.Empty<CommandFunctionDefinition>())
-                .Select(function => LoadFunction(function, manifest, extensionDirectory))
-                .ToArray();
-            var registeredFunctionNames = LoadExecutors(
-                manifest,
-                extensionDirectory,
-                executors,
-                asyncExecutors,
-                functionExecutors,
-                secretEnvironmentHandoffs);
-            var extensionFunctionNames = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var function in extensionFunctions)
-            {
-                var hasExtensionExecutor = extensionFunctionNames.Contains(function.QualifiedName);
-                if (function.Kind is null && !hasExtensionExecutor)
+                var extensionLists = (manifest.Schema.Lists ?? Array.Empty<CommandListDefinition>())
+                    .Select(list => list with { Namespace = list.Namespace ?? manifest.Namespace })
+                    .ToArray();
+                var extensionCommands = (manifest.Schema.Commands ?? Array.Empty<CommandDefinition>()).Select(command => command with
                 {
-                    throw new InvalidDataException($"Function '{function.QualifiedName}' has no matching extension function executor.");
+                    Namespace = command.Namespace ?? manifest.Namespace
+                }).ToArray();
+                var extensionVariables = (manifest.Schema.Variables ?? Array.Empty<CommandVariableDefinition>())
+                    .Select(variable => variable with { Namespace = manifest.Namespace })
+                    .ToArray();
+                var extensionSettings = (manifest.Schema.Settings ?? Array.Empty<CommandSettingDefinition>())
+                    .Select(setting => setting with { Namespace = manifest.Namespace })
+                    .ToArray();
+                var extensionFunctions = (manifest.Schema.Functions ?? Array.Empty<CommandFunctionDefinition>())
+                    .Select(function => LoadFunction(function, manifest, extensionDirectory))
+                    .ToArray();
+                var extensionExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
+                var extensionAsyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
+                var extensionFunctionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+                var extensionSecretHandoffs = new List<ISecretEnvironmentHandoff>();
+                var registeredFunctionNames = LoadExecutors(
+                    manifest,
+                    extensionDirectory,
+                    extensionExecutors,
+                    extensionAsyncExecutors,
+                    extensionFunctionExecutors,
+                    extensionSecretHandoffs);
+                var extensionFunctionNameSet = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var function in extensionFunctions)
+                {
+                    var hasExtensionExecutor = extensionFunctionNameSet.Contains(function.QualifiedName);
+                    if (function.Kind is null && !hasExtensionExecutor)
+                    {
+                        throw new InvalidDataException($"Function '{function.QualifiedName}' has no matching extension function executor.");
+                    }
+
+                    if (function.Kind is not null && hasExtensionExecutor)
+                    {
+                        throw new InvalidDataException($"Function '{function.QualifiedName}' is registered both by kind and by an extension executor.");
+                    }
                 }
 
-                if (function.Kind is not null && hasExtensionExecutor)
+                foreach (var functionName in registeredFunctionNames)
                 {
-                    throw new InvalidDataException($"Function '{function.QualifiedName}' is registered both by kind and by an extension executor.");
+                    if (!extensionFunctions.Any(function =>
+                        string.Equals(function.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase)
+                        && function.Kind is null))
+                    {
+                        throw new InvalidDataException(
+                            $"Extension '{manifest.Id}' function executor '{functionName}' has no matching function definition in its manifest.");
+                    }
                 }
-            }
 
-            foreach (var functionName in registeredFunctionNames)
+                var candidateSchema = new CommandSchema(
+                    lists.Concat(extensionLists).ToArray(),
+                    commands.Concat(extensionCommands).ToArray())
+                {
+                    Variables = variables.Concat(extensionVariables).ToArray(),
+                    Functions = functions.Concat(extensionFunctions).ToArray(),
+                    Settings = settings.Concat(extensionSettings).ToArray()
+                };
+                var supportedKinds = executors.Keys
+                    .Concat(asyncExecutors.Keys)
+                    .Concat(extensionExecutors.Keys)
+                    .Concat(extensionAsyncExecutors.Keys);
+                var schemaErrors = new CommandSchemaValidator().Validate(candidateSchema, supportedKinds);
+                if (schemaErrors.Count > 0)
+                {
+                    throw new InvalidDataException(string.Join(Environment.NewLine, schemaErrors));
+                }
+
+                EnsureNoDuplicates(extensionCommands.Select(command => command.QualifiedName), commandSources.Keys, "command");
+                EnsureNoDuplicates(extensionExecutors.Keys.Concat(extensionAsyncExecutors.Keys), executors.Keys.Concat(asyncExecutors.Keys), "command executor");
+                EnsureNoDuplicates(extensionFunctionExecutors.Keys, functionExecutors.Keys, "function executor");
+
+                lists.AddRange(extensionLists);
+                commands.AddRange(extensionCommands);
+                variables.AddRange(extensionVariables);
+                settings.AddRange(extensionSettings);
+                functions.AddRange(extensionFunctions);
+                foreach (var command in extensionCommands)
+                {
+                    commandSources.Add(command.QualifiedName, manifest.Id);
+                }
+
+                foreach (var executor in extensionExecutors)
+                {
+                    executors.Add(executor.Key, executor.Value);
+                }
+
+                foreach (var executor in extensionAsyncExecutors)
+                {
+                    asyncExecutors.Add(executor.Key, executor.Value);
+                }
+
+                foreach (var executor in extensionFunctionExecutors)
+                {
+                    functionExecutors.Add(executor.Key, executor.Value);
+                }
+
+                secretEnvironmentHandoffs.AddRange(extensionSecretHandoffs);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
             {
-                if (!extensionFunctions.Any(function =>
-                    string.Equals(function.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase)
-                    && function.Kind is null))
-                {
-                    throw new InvalidDataException(
-                        $"Extension '{manifest.Id}' function executor '{functionName}' has no matching function definition in its manifest.");
-                }
+                var failureMessage = GetFailureMessage(exception);
+                extensionLoadErrors[manifest.Id] = failureMessage;
+                failures.Add(new ExtensionLoadFailure(manifest.Id, failureMessage));
             }
 
-            functions.AddRange(extensionFunctions);
         }
+
+        extensionInfo = extensionInfo
+            .Select(extension => extensionLoadErrors.TryGetValue(extension.Id, out var error)
+                ? extension with { LoadError = error }
+                : extension)
+            .ToArray();
 
         return new LoadedExtensions(new CommandSchema(lists, commands)
         {
@@ -241,8 +332,24 @@ public sealed class ExtensionLoader
         {
             CommandSources = commandSources,
             AsyncExecutors = asyncExecutors,
-            SecretEnvironmentHandoffs = secretEnvironmentHandoffs
+            SecretEnvironmentHandoffs = secretEnvironmentHandoffs,
+            Failures = failures
         };
+    }
+
+    private static string GetFailureMessage(Exception exception)
+        => exception is FileNotFoundException { FileName: not null } fileNotFound
+            ? $"{fileNotFound.Message} ({fileNotFound.FileName})"
+            : exception.Message;
+
+    private static void EnsureNoDuplicates(IEnumerable<string> candidates, IEnumerable<string> existing, string itemType)
+    {
+        var existingNames = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var duplicate = candidates.FirstOrDefault(name => !existingNames.Add(name));
+        if (duplicate is not null)
+        {
+            throw new InvalidDataException($"Duplicate {itemType} '{duplicate}' is already registered.");
+        }
     }
 
     private static string[] GetDefaultExtensionRoots()

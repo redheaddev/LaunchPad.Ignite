@@ -250,7 +250,12 @@ public partial class MainViewModel : ViewModelBase
             packageManager: extensionPackageManager,
             commandPackIds: commandPackIds,
             commandPackLoader: new CommandPackLoader(_extensionStateStore),
-            confirmPackReplacement: ConfirmCommandPackReplacement);
+            confirmPackReplacement: ConfirmCommandPackReplacement,
+            existingCommandNames: packId => _catalog.Commands
+                .Where(command => !_commandPackSources.TryGetValue(command.QualifiedName, out var sourcePackId)
+                    || !string.Equals(sourcePackId, packId, StringComparison.OrdinalIgnoreCase))
+                .Select(command => command.QualifiedName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase));
 
         foreach (var (kind, executor) in extensions.Executors)
         {

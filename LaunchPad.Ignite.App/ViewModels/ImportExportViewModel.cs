@@ -26,6 +26,8 @@ public sealed class ImportExportViewModel : ViewModelBase
     private string _importStatus = string.Empty;
     private string _movePreview = "Select commands to move.";
     private string _moveStatus = string.Empty;
+    private string _newPackId = "new-pack";
+    private string _newPackNamespace = "new";
     private string _exportPackId = "exported-pack";
     private string _exportNamespace = "exported";
     private string _exportPreview = "Select commands to preview the pack export.";
@@ -45,6 +47,28 @@ public sealed class ImportExportViewModel : ViewModelBase
         set
         {
             if (SetProperty(ref _selectedDestination, value))
+            {
+                RefreshMovePreview();
+            }
+        }
+    }
+    public string NewPackId
+    {
+        get => _newPackId;
+        set
+        {
+            if (SetProperty(ref _newPackId, value))
+            {
+                RefreshMovePreview();
+            }
+        }
+    }
+    public string NewPackNamespace
+    {
+        get => _newPackNamespace;
+        set
+        {
+            if (SetProperty(ref _newPackNamespace, value))
             {
                 RefreshMovePreview();
             }
@@ -162,6 +186,7 @@ public sealed class ImportExportViewModel : ViewModelBase
         MoveCommand = new RelayCommand(MoveSelectedCommands);
         Destinations = new[] { new CommandDestinationViewModel(CommandOwnershipManager.UserOwnerId, "User commands", null) }
             .Concat(ownershipManager.EnabledPacks.Select(pack => new CommandDestinationViewModel(pack.Id, $"Pack: {pack.Id}", pack.Id)))
+            .Append(new CommandDestinationViewModel("new-pack", "Create new pack…", null, true))
             .ToArray();
         _selectedDestination = Destinations[0];
         RefreshInventory();
@@ -265,7 +290,11 @@ public sealed class ImportExportViewModel : ViewModelBase
             source?.RefreshSelectionState();
             OnSelectionChanged();
         })).ToArray();
-        source = new CommandSourceViewModel(ownerId, name, commands);
+        source = new CommandSourceViewModel(
+            ownerId,
+            name,
+            commands,
+            isExpanded: false);
         return source;
     }
 
@@ -293,13 +322,25 @@ public sealed class ImportExportViewModel : ViewModelBase
             return;
         }
 
-        var preview = _ownershipManager.PreviewMove(keys, SelectedDestination.PackId);
-        CanMove = preview.CanCommit;
-        MovePreview = preview.Conflicts.Count > 0
-            ? $"Conflicts prevent this move:{Environment.NewLine}{string.Join(Environment.NewLine, preview.Conflicts)}"
-            : preview.CommandsToMove.Count == 0
-                ? "The selected commands already belong to this destination."
-                : $"Move {preview.CommandsToMove.Count} command(s) to {SelectedDestination.Name}?";
+        try
+        {
+            var preview = SelectedDestination.IsNewPack
+                ? _ownershipManager.PreviewMoveToNewPack(keys, NewPackId, NewPackNamespace)
+                : _ownershipManager.PreviewMove(keys, SelectedDestination.PackId);
+            CanMove = preview.CanCommit;
+            MovePreview = preview.Conflicts.Count > 0
+                ? $"Conflicts prevent this move:{Environment.NewLine}{string.Join(Environment.NewLine, preview.Conflicts)}"
+                : preview.CommandsToMove.Count == 0
+                    ? "The selected commands already belong to this destination."
+                    : SelectedDestination.IsNewPack
+                        ? $"Create pack '{NewPackId}' and move {preview.CommandsToMove.Count} command(s) to it?"
+                        : $"Move {preview.CommandsToMove.Count} command(s) to {SelectedDestination.Name}?";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or ArgumentException)
+        {
+            CanMove = false;
+            MovePreview = exception.Message;
+        }
         OnPropertyChanged(nameof(CanMove));
     }
 
@@ -391,7 +432,10 @@ public sealed class ImportExportViewModel : ViewModelBase
 
     public void MoveSelectedCommands()
     {
-        var result = _ownershipManager.MoveCommands(GetSelectedCommandKeys(), SelectedDestination.PackId);
+        var keys = GetSelectedCommandKeys();
+        var result = SelectedDestination.IsNewPack
+            ? _ownershipManager.MoveCommandsToNewPack(keys, NewPackId, NewPackNamespace)
+            : _ownershipManager.MoveCommands(keys, SelectedDestination.PackId);
         MoveStatus = result.Message;
         if (result.Succeeded)
         {
@@ -404,22 +448,41 @@ public sealed class ImportExportViewModel : ViewModelBase
 
 public sealed class CommandSourceViewModel : ViewModelBase
 {
+    private bool _isExpanded;
+
     public string OwnerId { get; }
     public string Name { get; }
     public IReadOnlyList<CommandSelectionViewModel> Commands { get; }
+    public int CommandCount => Commands.Count;
+    public int SelectedCommandCount => Commands.Count(command => command.IsSelected);
+    public string SelectionCountText => $"{SelectedCommandCount}/{CommandCount}";
     public IRelayCommand ToggleAllCommand { get; }
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
     public string ToggleAllText => Commands.Any(command => !command.IsSelected) ? "Select all" : "Clear selection";
 
-    public CommandSourceViewModel(string ownerId, string name, IReadOnlyList<CommandSelectionViewModel> commands)
+    public CommandSourceViewModel(
+        string ownerId,
+        string name,
+        IReadOnlyList<CommandSelectionViewModel> commands,
+        bool isExpanded = false)
     {
         OwnerId = ownerId;
         Name = name;
         Commands = commands;
+        _isExpanded = isExpanded;
         ToggleAllCommand = new RelayCommand(ToggleAll);
     }
 
     public void RefreshSelectionState()
-        => OnPropertyChanged(nameof(ToggleAllText));
+    {
+        OnPropertyChanged(nameof(ToggleAllText));
+        OnPropertyChanged(nameof(SelectedCommandCount));
+        OnPropertyChanged(nameof(SelectionCountText));
+    }
 
     private void ToggleAll()
     {
@@ -460,4 +523,4 @@ public sealed class CommandSelectionViewModel : ViewModelBase
     }
 }
 
-public sealed record CommandDestinationViewModel(string OwnerId, string Name, string? PackId);
+public sealed record CommandDestinationViewModel(string OwnerId, string Name, string? PackId, bool IsNewPack = false);

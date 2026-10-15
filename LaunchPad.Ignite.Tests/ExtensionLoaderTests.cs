@@ -123,6 +123,76 @@ public class ExtensionLoaderTests
     }
 
     [Fact]
+    public void SkipsExtensionWithMissingAssemblyAndLoadsOtherExtensions()
+    {
+        using var directory = new TemporaryDirectory();
+        var brokenDirectory = Path.Combine(directory.Path, "broken");
+        var validDirectory = Path.Combine(directory.Path, "valid");
+        Directory.CreateDirectory(brokenDirectory);
+        Directory.CreateDirectory(validDirectory);
+        File.WriteAllText(Path.Combine(brokenDirectory, "extension.json"), """
+            {
+              "id": "broken",
+              "name": "Broken extension",
+              "namespace": "broken",
+              "assembly": "missing.dll",
+              "schema": {
+                "lists": [],
+                "commands": [],
+                "functions": []
+              }
+            }
+            """);
+        File.WriteAllText(Path.Combine(validDirectory, "extension.json"), """
+            {
+              "id": "valid",
+              "name": "Valid extension",
+              "namespace": "valid",
+              "schema": {
+                "lists": [],
+                "commands": [{
+                  "name": "hello",
+                  "kind": "url",
+                  "description": "Valid command",
+                  "actions": [{ "name": "default", "usage": "valid:hello", "targetTemplate": "https://example.test", "arguments": [] }]
+                }]
+              }
+            }
+            """);
+
+        var loaded = new ExtensionLoader([directory.Path]).Load();
+
+        Assert.True(loaded.Schema.Commands.Any(command => command.QualifiedName == "valid:hello"));
+        Assert.DoesNotContain(loaded.Schema.Commands, command => command.Namespace == "broken");
+        Assert.Contains("missing.dll", Assert.Single(loaded.Failures).Message);
+        Assert.Contains("missing.dll", Assert.Single(loaded.Extensions.Where(extension => extension.Id == "broken")).LoadError);
+    }
+
+    [Fact]
+    public void SkipsMalformedManifestAndLoadsValidExtensions()
+    {
+        using var directory = new TemporaryDirectory();
+        var malformedDirectory = Path.Combine(directory.Path, "malformed");
+        var validDirectory = Path.Combine(directory.Path, "valid");
+        Directory.CreateDirectory(malformedDirectory);
+        Directory.CreateDirectory(validDirectory);
+        File.WriteAllText(Path.Combine(malformedDirectory, "extension.json"), "{");
+        File.WriteAllText(Path.Combine(validDirectory, "extension.json"), """
+            {
+              "id": "valid",
+              "name": "Valid extension",
+              "namespace": "valid",
+              "schema": { "lists": [], "commands": [], "functions": [] }
+            }
+            """);
+
+        var loaded = new ExtensionLoader([directory.Path]).Load();
+
+        Assert.Equal("valid", Assert.Single(loaded.Extensions).Id);
+        Assert.Single(loaded.Failures);
+    }
+
+    [Fact]
     public void PreservesExplicitCommandNamespacesAndUsesManifestNamespaceAsFallback()
     {
         using var directory = new TemporaryDirectory();
@@ -262,7 +332,8 @@ public class ExtensionLoaderTests
             }
             """);
 
-        Assert.Throws<InvalidDataException>(() => new ExtensionLoader([directory.Path]).Load());
+        var loaded = new ExtensionLoader([directory.Path]).Load();
+        Assert.Contains("required parameters", Assert.Single(loaded.Failures).Message);
     }
 
     [Fact]
@@ -288,7 +359,8 @@ public class ExtensionLoaderTests
             }
             """);
 
-        Assert.Throws<InvalidDataException>(() => new ExtensionLoader([directory.Path]).Load());
+        var loaded = new ExtensionLoader([directory.Path]).Load();
+        Assert.Contains("unsupported kind", Assert.Single(loaded.Failures).Message);
     }
 
     private sealed class TemporaryDirectory : IDisposable
