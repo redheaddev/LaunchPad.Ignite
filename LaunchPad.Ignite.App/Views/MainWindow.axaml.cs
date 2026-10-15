@@ -782,7 +782,7 @@ public partial class MainWindow : Window
     {
         if (!_secretDialogIsOpen)
         {
-            Hide();
+            HideMainWindow();
         }
     }
 
@@ -825,7 +825,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape)
         {
             await viewModel.HandleInputKeyAsync(CommandInputKey.Escape);
-            Hide();
+            HideMainWindow();
             e.Handled = true;
             return;
         }
@@ -1130,11 +1130,21 @@ public partial class MainWindow : Window
     {
         if (IsVisible)
         {
-            Hide();
+            HideMainWindow();
             return;
         }
 
         ShowAndActivate();
+    }
+
+    private void HideMainWindow()
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.ResetHistoryNavigation();
+        }
+
+        Hide();
     }
 
     public void ShowAndActivate()
@@ -1146,6 +1156,11 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.ResetHistoryNavigation();
+        }
+
         _globalHook.KeyPressed -= GlobalHook_KeyPressed;
         _globalHook.KeyReleased -= GlobalHook_KeyReleased;
         ColorThemeService.ThemeChanged -= UpdateUsageText;

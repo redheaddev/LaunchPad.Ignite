@@ -574,6 +574,11 @@ public partial class MainViewModel : ViewModelBase
 
     public bool CycleHistory(bool older)
     {
+        var historySuggestions = GetHistorySuggestions(CommandText);
+        var currentSelection = _highlightedCompletionIndex >= 0
+            && _highlightedCompletionIndex < historySuggestions.Count
+                ? historySuggestions[_highlightedCompletionIndex]
+                : null;
         var prefix = TryGetHistoryFilter(CommandText, out var historySearchText)
             ? historySearchText
             : CommandText;
@@ -582,7 +587,8 @@ public partial class MainViewModel : ViewModelBase
             CommandText,
             prefix,
             older,
-            out _))
+            out _,
+            currentSelection))
         {
             return false;
         }
@@ -610,6 +616,14 @@ public partial class MainViewModel : ViewModelBase
         _highlightedCompletionIndex = 0;
         ApplyCompletionState(_completionSession.State);
         return true;
+    }
+
+    public void ResetHistoryNavigation()
+    {
+        _historySuggestionCycler.Reset();
+        _isHistoryPathStepping = false;
+        _highlightedCompletionIndex = 0;
+        ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
     }
 
     public bool OpenDirectPathInTerminal(string path)
@@ -646,6 +660,11 @@ public partial class MainViewModel : ViewModelBase
         bool newWindow = false,
         CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
+        if (key == CommandInputKey.Clear)
+        {
+            ResetHistoryNavigation();
+        }
+
         if (key == CommandInputKey.Enter)
         {
             if (_definitionManagementCommandModel.Handles(CommandText))
@@ -1647,7 +1666,7 @@ public sealed record CompletionOptionViewModel(
         {
             _commandLogger.RecordCommand(submittedText, succeeded, _catalog, runTime);
             _historyCommands = _commandLogger.ReadHistoryEntries();
-            ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+            ResetHistoryNavigation();
         }
     }
 

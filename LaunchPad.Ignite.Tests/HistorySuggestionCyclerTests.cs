@@ -26,6 +26,40 @@ public sealed class HistorySuggestionCyclerTests
     }
 
     [Fact]
+    public void FirstUpAdvancesPastTheCurrentHistorySelection()
+    {
+        var cycler = new HistorySuggestionCycler();
+        var history = CreateHistory();
+
+        Assert.True(cycler.TryCycle(
+            history,
+            "r",
+            "r",
+            older: true,
+            out var selected,
+            currentSelection: history[0]));
+
+        Assert.Equal("restore older", selected.CommandText);
+    }
+
+    [Fact]
+    public void FirstDownAdvancesFromTheCurrentSelectionTowardRecent()
+    {
+        var cycler = new HistorySuggestionCycler();
+        var history = CreateHistory();
+
+        Assert.True(cycler.TryCycle(
+            history,
+            "r",
+            "r",
+            older: false,
+            out var selected,
+            currentSelection: history[0]));
+
+        Assert.Equal("remove oldest", selected.CommandText);
+    }
+
+    [Fact]
     public void RetainingSelectionFiltersMatchesWithoutLosingSelectedEntry()
     {
         var cycler = new HistorySuggestionCycler();
@@ -118,6 +152,27 @@ public sealed class HistorySuggestionCyclerTests
         Assert.False(cycler.TryGetSuggestions("r", out _));
         Assert.True(cycler.TryGetSuggestions("s", out var suggestions));
         Assert.Single(suggestions);
+    }
+
+    [Fact]
+    public void ResetStartsNextUpCycleAtNewestEntry()
+    {
+        var cycler = new HistorySuggestionCycler();
+        var history = CreateHistory();
+
+        Assert.True(cycler.TryCycle(history, "r", "r", older: true, out _));
+        Assert.True(cycler.TryCycle(history, "r", "r", older: true, out _));
+
+        CommandHistoryEntry[] updatedHistory =
+        [
+            new CommandHistoryEntry("run latest", DateTimeOffset.UtcNow),
+            .. history
+        ];
+        cycler.Reset();
+
+        Assert.Equal(-1, cycler.SelectedIndex);
+        Assert.True(cycler.TryCycle(updatedHistory, "r", "r", older: true, out var newest));
+        Assert.Equal("run latest", newest.CommandText);
     }
 
     [Fact]

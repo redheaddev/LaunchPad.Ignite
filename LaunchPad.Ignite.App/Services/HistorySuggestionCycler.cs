@@ -30,7 +30,8 @@ public sealed class HistorySuggestionCycler
         string inputText,
         string prefix,
         bool older,
-        out CommandHistoryEntry selectedEntry)
+        out CommandHistoryEntry selectedEntry,
+        CommandHistoryEntry? currentSelection = null)
     {
         if (!_isCycling
             || !string.Equals(_inputText, inputText, StringComparison.Ordinal)
@@ -46,7 +47,24 @@ public sealed class HistorySuggestionCycler
 
             _inputText = inputText;
             _prefix = prefix;
-            _selectedIndex = older ? 0 : _entries.Count - 1;
+            var currentIndex = -1;
+            if (currentSelection is not null)
+            {
+                for (var index = 0; index < _entries.Count; index++)
+                {
+                    if (_entries[index] == currentSelection)
+                    {
+                        currentIndex = index;
+                        break;
+                    }
+                }
+            }
+
+            _selectedIndex = currentIndex >= 0
+                ? older
+                    ? (currentIndex + 1) % _entries.Count
+                    : (currentIndex - 1 + _entries.Count) % _entries.Count
+                : older ? 0 : _entries.Count - 1;
             _isCycling = true;
         }
         else
