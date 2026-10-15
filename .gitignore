@@ -30,3 +30,4 @@
 # Generated logs and temporary files
 *.log
 *.tmp
+/Addons/saif-init
