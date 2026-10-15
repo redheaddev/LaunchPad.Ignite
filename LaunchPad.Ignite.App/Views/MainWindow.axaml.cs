@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _shiftPressed;
     private bool _metaPressed;
     private bool _activationKeyPressed;
+    private bool _activationPending;
     private bool _secretDialogIsOpen;
     private bool _commandBoxHasFocus;
     private int? _pathSelectionAnchor;
@@ -760,6 +761,11 @@ public partial class MainWindow : Window
             case KeyCode.VcLeftAlt:
             case KeyCode.VcRightAlt:
                 _altPressed = false;
+                if (_activationPending)
+                {
+                    _activationPending = false;
+                    Dispatcher.UIThread.Post(ToggleVisibility);
+                }
                 break;
             case KeyCode.VcLeftControl:
             case KeyCode.VcRightControl:
