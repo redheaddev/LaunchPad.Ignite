@@ -165,7 +165,7 @@ public class SecretCommandModelTests
     }
 
     [Fact]
-    public async Task MasterPasswordSetupUsesSingleEntryAndUnlocksImmediately()
+    public async Task MasterPasswordSetupUsesSingleEntryAndLeavesSecretAccessLocked()
     {
         var gate = new FakeSecretAccessGate();
         var dialog = new FakeDialogService("master-password");
@@ -175,7 +175,7 @@ public class SecretCommandModelTests
 
         Assert.True(result.Succeeded);
         Assert.True(gate.HasMasterPassword);
-        Assert.True(gate.IsUnlocked);
+        Assert.False(gate.IsUnlocked);
         Assert.Equal(["Set master password"], dialog.Titles);
         Assert.Equal([false], dialog.ConfirmationRequests);
     }

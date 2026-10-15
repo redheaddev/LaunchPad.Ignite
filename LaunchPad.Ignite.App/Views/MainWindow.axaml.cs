@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = $"LaunchPad.Ignite {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}";
         _commandBox = this.FindControl<TextBox>("CommandBox")
             ?? throw new InvalidOperationException("Command input control was not found.");;
         _commandInputBorder = this.FindControl<Border>("CommandInputBorder")

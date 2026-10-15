@@ -1113,6 +1113,16 @@ public partial class MainViewModel : ViewModelBase
         var filterInput = CommandMetadataFilter.ParseInput(value);
         if (filterInput.IsFilterInput)
         {
+            if (!_commandMetadataFilterInput.IsFilterInput
+                || _commandMetadataFilterInput.IsEditingFieldName != filterInput.IsEditingFieldName
+                || !string.Equals(
+                    _commandMetadataFilterInput.EditingField,
+                    filterInput.EditingField,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _highlightedCompletionIndex = 0;
+            }
+
             _commandMetadataFilterPrefix = filterInput.FilterPrefix;
             _isManagementCompletionActive = false;
             if (filterInput.IsComplete && filterInput.Filter is not null)

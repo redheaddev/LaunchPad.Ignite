@@ -145,6 +145,20 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public void FilterValueSuggestionsStartAtFirstItemAfterFieldSuggestions()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = ">";
+        viewModel.HandleInputKeyAsync(CommandInputKey.Down).GetAwaiter().GetResult();
+
+        viewModel.CommandInputText = ">kind:";
+
+        Assert.NotEmpty(viewModel.CompletionItems);
+        Assert.True(viewModel.CompletionItems[0].IsHighlighted);
+        Assert.Single(viewModel.CompletionItems.Where(item => item.IsHighlighted));
+    }
+
+    [Fact]
     public void RightAcceptsMetadataFilterValueGhostText()
     {
         var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();

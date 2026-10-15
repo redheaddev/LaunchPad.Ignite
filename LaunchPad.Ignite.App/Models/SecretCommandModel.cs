@@ -159,7 +159,8 @@ public sealed class SecretCommandModel
             return new CommandExecutionResult(false, "Unable to set the master password.");
         }
 
-        return new CommandExecutionResult(true, "Master password set. Secret access is unlocked for 60 seconds.");
+        _accessGate.Lock();
+        return new CommandExecutionResult(true, "Master password set. Secret access is locked.");
     }
 
     private async Task<CommandExecutionResult> UnlockAsync()
