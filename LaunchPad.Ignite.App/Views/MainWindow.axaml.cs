@@ -811,11 +811,11 @@ public partial class MainWindow : Window
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (IsVisible && !_secretDialogIsOpen)
+            if (IsVisible && IsActive && !_secretDialogIsOpen)
             {
                 _commandBox.Focus();
             }
-        }, DispatcherPriority.Background);
+        }, DispatcherPriority.Input);
     }
 
     internal async Task<string?> ShowSecretEntryDialogAsync(SecretEntryWindow dialog)
