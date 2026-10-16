@@ -46,9 +46,25 @@ public sealed class DefinitionManagementTests
         Assert.Equal("architecture", list.Request?.Default);
     }
 
+    [Fact]
+    public void ParserReadsShortcutCommandAndCanonicalizesKeyboardChord()
+    {
+        var result = new DefinitionManagementParser().Parse(
+            "launchpad command add shortcut wx --target \"weather forecast\" --key ALT+CTRL+W");
+
+        Assert.Equal(DefinitionManagementStatus.Valid, result.Status);
+        Assert.Equal("shortcut", result.Request?.Kind);
+        Assert.Equal("weather forecast", result.Request?.Target);
+        Assert.Equal("ctrl+alt+w", result.Request?.KeyboardShortcut);
+        Assert.True(result.Request?.HasKeyboardShortcut);
+    }
+
     [Theory]
     [InlineData("launchpad command add url foo --target https://example.test --arg x")]
     [InlineData("launchpad command add shell foo --target app.exe --target-arg")]
+    [InlineData("launchpad command add shortcut wx --target weather --key ctrl+alt+bad")]
+    [InlineData("launchpad command edit wx --key ctrl+alt+w --clear-key")]
+    [InlineData("launchpad command add shortcut wx --target weather --arg city:required")]
     [InlineData("launchpad list add enum foo --values a,b")]
     [InlineData("launchpad list edit foo")]
     public void ParserRejectsMalformedManagementCommands(string input)
@@ -59,9 +75,10 @@ public sealed class DefinitionManagementTests
     [Theory]
     [InlineData("launchpad ", "launchpad command", "launchpad <command|list>")]
     [InlineData("launchpad command ", "launchpad command add", "launchpad command <add|edit|remove|show|list>")]
-    [InlineData("launchpad command add ", "launchpad command add url", "launchpad command add <url|shell>")]
+    [InlineData("launchpad command add ", "launchpad command add url", "launchpad command add <url|shell|shortcut>")]
     [InlineData("launchpad command a", "launchpad command add ", "launchpad command <add|edit|remove|show|list>")]
-    [InlineData("launchpad command add u", "launchpad command add url ", "launchpad command add <url|shell>")]
+    [InlineData("launchpad command add u", "launchpad command add url ", "launchpad command add <url|shell|shortcut>")]
+    [InlineData("launchpad command add shortcut wx ", "launchpad command add shortcut wx --key", "--key")]
     [InlineData("launchpad comman", "launchpad command ", "launchpad <command|list>")]
     [InlineData("launchpad list add enum weather:cities ", "launchpad list add enum weather:cities --values", "--values")]
     public void ParserProvidesContextualHelpAndCompletionSuggestions(
@@ -143,6 +160,63 @@ public sealed class DefinitionManagementTests
         var command = Assert.Single(loader.GetUserCommands());
         Assert.Equal("https://example.test/items/<id>", command.Actions[0].TargetTemplate);
         Assert.Equal(2, refreshCount);
+    }
+
+    [Fact]
+    public void ModelAddsEditsClearsAndRemovesUserShortcut()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        loader.Load();
+        var refreshCount = 0;
+        var model = new DefinitionManagementCommandModel(loader, () => refreshCount++);
+
+        var added = model.Execute("launchpad command add shortcut wx --target \"weather forecast\" --key ALT+CTRL+W");
+        Assert.True(added.Succeeded, added.Message);
+        var command = Assert.Single(loader.GetUserCommands());
+        Assert.Equal("shortcut", command.ExecutionHandler);
+        Assert.Equal("weather forecast", command.Actions[0].TargetTemplate);
+        Assert.Equal("ctrl+alt+w", command.KeyboardShortcut);
+        Assert.True(command.ExecuteOnKeyboardShortcut);
+
+        var edited = model.Execute("launchpad command edit wx --target \"weather current\" --key alt+shift+w");
+        Assert.True(edited.Succeeded, edited.Message);
+        command = Assert.Single(loader.GetUserCommands());
+        Assert.Equal("weather current", command.Actions[0].TargetTemplate);
+        Assert.Equal("alt+shift+w", command.KeyboardShortcut);
+        Assert.True(command.ExecuteOnKeyboardShortcut);
+
+        var cleared = model.Execute("launchpad command edit wx --clear-key");
+        Assert.True(cleared.Succeeded, cleared.Message);
+        command = Assert.Single(loader.GetUserCommands());
+        Assert.Null(command.KeyboardShortcut);
+        Assert.False(command.ExecuteOnKeyboardShortcut);
+        Assert.Equal("weather current", command.Actions[0].TargetTemplate);
+
+        var removed = model.Execute("launchpad command remove wx");
+        Assert.True(removed.Succeeded, removed.Message);
+        Assert.Empty(loader.GetUserCommands());
+        Assert.Equal(4, refreshCount);
+    }
+
+    [Fact]
+    public void ModelRejectsShortcutKeyCollisionWithApplicationCommand()
+    {
+        using var directory = new TemporaryDirectory();
+        var appCommand = new CommandDefinition("existing", "url", "", [
+            new CommandActionDefinition("default", "", "", "https://example.test", [])
+        ], KeyboardShortcut: "ctrl+alt+w");
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], [appCommand]), userPath);
+        loader.Load();
+        var model = new DefinitionManagementCommandModel(loader, () => { });
+
+        var result = model.Execute("launchpad command add shortcut wx --target \"weather forecast\" --key ctrl+alt+w");
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("assigned more than once", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(loader.GetUserCommands());
     }
 
     [Fact]

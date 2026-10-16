@@ -98,7 +98,10 @@ public sealed class DefinitionManagementCommandModel
                 var kind = GetKindForHandler(handler);
                 var command = new CommandDefinition(name, kind, request.Description ?? string.Empty,
                     [BuildAction(request.Kind!, request.Name, request.Target!, request.Arguments ?? [], request.TargetArguments ?? [])],
-                    commandNamespace) { Handler = handler };
+                    commandNamespace,
+                    KeyboardShortcut: request.KeyboardShortcut,
+                    ExecuteOnKeyboardShortcut: request.HasKeyboardShortcut,
+                    Handler: handler);
                 _schemaLoader.AddUserCommand(command);
                 _schemaUpdated();
                 return Success($"Added user command '{command.QualifiedName}'.");
@@ -114,6 +117,12 @@ public sealed class DefinitionManagementCommandModel
     {
         var command = _schemaLoader.FindUserCommand(request.Name)
             ?? throw new InvalidOperationException($"Command '{request.Name}' was not found in the user schema.");
+        if ((request.HasKeyboardShortcut || request.ClearKeyboardShortcut)
+            && !string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Keyboard key options are supported only for shortcut commands.");
+        }
+
         var currentAction = command.Actions.FirstOrDefault(action => string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException("Only commands with a default action can be edited by this command.");
         var updatedArguments = request.HasArguments ? request.Arguments! : currentAction.Arguments;
@@ -130,6 +139,12 @@ public sealed class DefinitionManagementCommandModel
         var updated = command with
         {
             Description = request.HasDescription ? request.Description! : command.Description,
+            KeyboardShortcut = request.ClearKeyboardShortcut
+                ? null
+                : request.HasKeyboardShortcut ? request.KeyboardShortcut : command.KeyboardShortcut,
+            ExecuteOnKeyboardShortcut = request.ClearKeyboardShortcut
+                ? false
+                : request.HasKeyboardShortcut || command.ExecuteOnKeyboardShortcut,
             Actions = command.Actions.Select(action => action.Name == currentAction.Name ? updatedAction : action).ToArray()
         };
         _schemaLoader.UpdateUserCommand(updated);

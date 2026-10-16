@@ -29,7 +29,10 @@ public sealed record DefinitionManagementRequest(
     bool HasArguments = false,
     bool HasTargetArguments = false,
     bool HasValues = false,
-    bool HasDefault = false);
+    bool HasDefault = false,
+    string? KeyboardShortcut = null,
+    bool HasKeyboardShortcut = false,
+    bool ClearKeyboardShortcut = false);
 
 public sealed record DefinitionManagementParseResult(
     DefinitionManagementStatus Status,
@@ -91,20 +94,28 @@ public sealed class DefinitionManagementParser
             if (tokens.Length <= 3)
             {
                 return new DefinitionManagementHelp(
-                    "Usage: launchpad command add <url|shell> <name> ...",
+                    "Usage: launchpad command add <url|shell|shortcut> <name> ...",
                     "Example: launchpad command add url weather --target \"https://example.test/{city}\"",
                     suggestions);
             }
 
-            if (tokens.Length == 4 && !(kind is "url" or "shell" or "enum"))
+            if (tokens.Length == 4 && !(kind is "url" or "shell" or "shortcut" or "enum"))
             {
                 return new DefinitionManagementHelp(
                     entity == "command"
-                        ? "Usage: launchpad command add <url|shell> <name> ..."
+                        ? "Usage: launchpad command add <url|shell|shortcut> <name> ..."
                         : "Usage: launchpad list add enum <name> --values <value1,value2,...> --default <value>",
                     entity == "command"
                         ? "Example: launchpad command add url weather --target \"https://example.test/{city}\""
                         : "Example: launchpad list add enum weather:cities --values \"forecast,current\" --default forecast",
+                    suggestions);
+            }
+
+            if (kind == "shortcut")
+            {
+                return new DefinitionManagementHelp(
+                    "Usage: launchpad command add shortcut <name> --target <command-text> [--key <chord>] [--description <text>]",
+                    "Example: launchpad command add shortcut wx --target \"weather forecast\" --key ctrl+alt+w",
                     suggestions);
             }
 
@@ -119,8 +130,8 @@ public sealed class DefinitionManagementParser
         if (operation == "edit" && entity == "command")
         {
             return new DefinitionManagementHelp(
-                "Usage: launchpad command edit <name> [--target <target>] [--arg <spec>] [--target-arg <template>] [--description <text>]",
-                "Example: launchpad command edit weather --description \"Local weather\"",
+                "Usage: launchpad command edit <name> [--target <target>] [--arg <spec>] [--target-arg <template>] [--description <text>] [--key <chord>|--clear-key]",
+                "Example: launchpad command edit wx --key ctrl+alt+w",
                 suggestions);
         }
 
@@ -174,7 +185,7 @@ public sealed class DefinitionManagementParser
         else if (tokens.Count == 3 && hasTrailingSpace && operation == "add")
         {
             candidates.AddRange(entity == "command"
-                ? new[] { "launchpad command add url ", "launchpad command add shell " }
+                ? new[] { "launchpad command add url ", "launchpad command add shell ", "launchpad command add shortcut " }
                 : new[] { "launchpad list add enum " });
         }
         else if (tokens.Count == 3 && !hasTrailingSpace)
@@ -186,13 +197,13 @@ public sealed class DefinitionManagementParser
                 || "add".StartsWith(operation, StringComparison.OrdinalIgnoreCase))
             {
                 candidates.AddRange(entity == "command"
-                    ? new[] { "launchpad command add url ", "launchpad command add shell " }
+                    ? new[] { "launchpad command add url ", "launchpad command add shell ", "launchpad command add shortcut " }
                     : new[] { "launchpad list add enum " });
             }
         }
         else if (tokens.Count == 4 && !hasTrailingSpace && entity == "command" && operation == "add")
         {
-            candidates.AddRange(new[] { "url", "shell" }
+            candidates.AddRange(new[] { "url", "shell", "shortcut" }
                 .Select(kind => $"launchpad command add {kind} "));
         }
         else if (hasTrailingSpace && tokens.Count >= 4)
@@ -204,9 +215,15 @@ public sealed class DefinitionManagementParser
                 candidates.AddRange(new[] { "--target", "--arg", "--description", "--target-arg" }
                     .Select(option => $"{trimmedInput} {option} "));
             }
+            else if (entity == "command" && operation == "add"
+                && tokens.Count == 5 && tokens[3] == "shortcut")
+            {
+                candidates.AddRange(new[] { "--target", "--key", "--description" }
+                    .Select(option => $"{trimmedInput} {option} "));
+            }
             else if (entity == "command" && operation == "edit" && tokens.Count >= 4)
             {
-                candidates.AddRange(new[] { "--target", "--arg", "--description", "--target-arg" }
+                candidates.AddRange(new[] { "--target", "--arg", "--description", "--target-arg", "--key", "--clear-key" }
                     .Select(option => $"{trimmedInput} {option} "));
             }
             else if (entity == "list" && operation == "add" && tokens.Count >= 5)
@@ -274,12 +291,12 @@ public sealed class DefinitionManagementParser
         string? kind = null;
         if (operation == "add" && entity == "command")
         {
-            if (index >= tokens.Length || (tokens[index] != "url" && tokens[index] != "shell"))
+            if (index >= tokens.Length || !IsCommandKind(tokens[index]))
             {
-                return Invalid("Command add requires a supported kind: url or shell.");
+                return Invalid("Command add requires a supported kind: url, shell, or shortcut.");
             }
 
-            kind = tokens[index++];
+            kind = tokens[index++].ToLowerInvariant();
         }
         else if (operation == "add" && entity == "list")
         {
@@ -320,6 +337,9 @@ public sealed class DefinitionManagementParser
         var hasTargetArguments = false;
         var hasValues = false;
         var hasDefault = false;
+        string? keyboardShortcut = null;
+        var hasKeyboardShortcut = false;
+        var clearKeyboardShortcut = false;
 
         if (operation == "list" && entity == "command" && index < tokens.Length)
         {
@@ -351,6 +371,18 @@ public sealed class DefinitionManagementParser
                         if (!TryReadValue(tokens, ref index, out var targetArgument)) return Missing(option);
                         targetArguments.Add(targetArgument!);
                         hasTargetArguments = true;
+                        break;
+                    case "--key":
+                        if (!TryReadValue(tokens, ref index, out var shortcutValue)) return Missing(option);
+                        if (!KeyboardShortcutChord.TryParse(shortcutValue, out var chord))
+                        {
+                            return Invalid($"Invalid keyboard shortcut '{shortcutValue}'. Use a modifier and key, such as ctrl+alt+w.");
+                        }
+                        keyboardShortcut = chord.ToString();
+                        hasKeyboardShortcut = true;
+                        break;
+                    case "--clear-key":
+                        clearKeyboardShortcut = true;
                         break;
                     default:
                         return Invalid($"Unknown command option '{option}'.");
@@ -392,9 +424,17 @@ public sealed class DefinitionManagementParser
         {
             return Invalid("List add requires --values.");
         }
-        if (operation == "edit" && !(hasTarget || hasDescription || hasArguments || hasTargetArguments || hasValues || hasDefault || values.Count > 0))
+        if (operation == "edit" && !(hasTarget || hasDescription || hasArguments || hasTargetArguments || hasValues || hasDefault || values.Count > 0 || hasKeyboardShortcut || clearKeyboardShortcut))
         {
             return Invalid("Edit requires at least one property option.");
+        }
+        if (hasKeyboardShortcut && clearKeyboardShortcut)
+        {
+            return Invalid("Use either --key or --clear-key, not both.");
+        }
+        if (clearKeyboardShortcut && operation != "edit")
+        {
+            return Invalid("--clear-key is supported only when editing a command.");
         }
         if (entity == "list" && operation == "add" && !hasDefault)
         {
@@ -403,6 +443,16 @@ public sealed class DefinitionManagementParser
         if (entity == "command" && operation == "add" && hasTargetArguments && !string.Equals(kind, "shell", StringComparison.OrdinalIgnoreCase))
         {
             return Invalid("--target-arg is supported only for shell commands.");
+        }
+        if (entity == "command" && operation == "add" && string.Equals(kind, "shortcut", StringComparison.OrdinalIgnoreCase)
+            && (hasArguments || hasTargetArguments))
+        {
+            return Invalid("Shortcut commands do not accept --arg or --target-arg.");
+        }
+        if (entity == "command" && operation == "add" && hasKeyboardShortcut
+            && !string.Equals(kind, "shortcut", StringComparison.OrdinalIgnoreCase))
+        {
+            return Invalid("--key is supported only when adding shortcut commands.");
         }
         if (entity == "list" && hasValues && values.Any(value => value.StartsWith("\u001f", StringComparison.Ordinal)))
         {
@@ -413,8 +463,14 @@ public sealed class DefinitionManagementParser
             DefinitionManagementStatus.Valid,
             new DefinitionManagementRequest(entity, operation, name, kind, target, description, arguments,
                 targetArguments, values, defaultValue, hasTarget, hasDescription, hasArguments,
-                hasTargetArguments, hasValues, hasDefault));
+                hasTargetArguments, hasValues, hasDefault, keyboardShortcut, hasKeyboardShortcut,
+                clearKeyboardShortcut));
     }
+
+    private static bool IsCommandKind(string value)
+        => value.Equals("url", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("shell", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("shortcut", StringComparison.OrdinalIgnoreCase);
 
     private static bool TryParseArgument(string spec, out CommandArgumentDefinition? argument, out string? error)
     {

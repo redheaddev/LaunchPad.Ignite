@@ -28,7 +28,9 @@ Lists currently support only `type: "enum"`; each list needs a name and non-empt
 
 Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty value and may be unqualified or use a namespace; refer to them as `$variable` or `$namespace:variable`. Use `variable set <name> <value>` to create or update a persistent user variable and `variable remove <name>` to remove one.
 
-The built-in `shortcut` kind defines an alias and optional keyboard chord. It must have one `default` action with no arguments or execution; its `targetTemplate` is the command text to expand to.
+The built-in `shortcut` kind defines an alias and optional keyboard chord. It must have one `default` action with no arguments or execution; its `targetTemplate` is the command text to expand to. Use `launchpad command add shortcut <name> --target "<command text>" [--key <chord>] [--description <text>]` to create a user shortcut, for example `launchpad command add shortcut wx --target "weather forecast" --key ctrl+alt+w`. Shortcut key chords use a modifier and key separated by `+`; supported modifiers are `ctrl`, `alt`, `shift`, and `meta`, and keys may be letters, digits, or `num+<digit>`.
+
+Use `launchpad command edit <name> [--target <command text>] [--key <chord>|--clear-key] [--description <text>]` to edit a user shortcut. `--key` assigns a chord that immediately executes the shortcut target; `--clear-key` removes only the chord. The two key options cannot be combined and are supported only for shortcut commands. Use `launchpad command remove <name>` to remove the whole user command or shortcut alias. Shortcut names may be namespaced as `namespace:name`.
 
 Arguments use the `arguments` property (not `args`). Supported argument properties are `name`, `optional`, `ref`, `inputType`, `listMode`, and `allowCustomValues`. Supported `inputType` is `csv`. `listMode` is `normal` or `minimal` and applies to checklist-style `list:` references.
 
