@@ -57,12 +57,15 @@ public static class CommandSourceLabels
 public sealed record LoadedCommandPackInfo(string Id, bool Enabled)
 {
     public IReadOnlyList<string> Commands { get; init; } = [];
+    public string? Group { get; init; }
 }
 
 public sealed record CommandPackImportResult(string Id, IReadOnlyList<string> SkippedCommands);
 
 public sealed class CommandPackLoader
 {
+    private sealed record CommandPackManifestLocation(string Path, string? Group);
+
     private static readonly Regex IdPattern = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
     private static readonly Regex NamespacePattern = new("^[a-z][a-z0-9-]*$", RegexOptions.Compiled);
     private static readonly HashSet<string> SupportedCommandKinds = new(StringComparer.OrdinalIgnoreCase)
@@ -118,7 +121,8 @@ public sealed class CommandPackLoader
     public string GetInstalledPackPath(string id)
     {
         ValidateId(id, "pack ID");
-        return Path.Combine(_profilePackDirectory, $"{id}.json");
+        return FindPackPath(_profilePackDirectory, id)
+            ?? Path.Combine(_profilePackDirectory, $"{id}.json");
     }
 
     public CommandPackManifest ReadInstalledManifest(string id)
@@ -323,12 +327,14 @@ public sealed class CommandPackLoader
         var disabledCommandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var packedCommandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (id, manifestPath) in manifestPaths.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (var (id, manifestLocation) in manifestPaths.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
+            var manifestPath = manifestLocation.Path;
             var manifest = ReadManifest(manifestPath);
             ValidateManifest(manifest, id, manifestPath);
             packs.Add(new LoadedCommandPackInfo(id, !disabledIds.Contains(id))
             {
+                Group = manifestLocation.Group,
                 Commands = manifest.Schema.Commands
                     .Select(command => (command with { Namespace = command.Namespace ?? manifest.Namespace }).QualifiedName)
                     .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
@@ -390,9 +396,9 @@ public sealed class CommandPackLoader
         }, commandSources, packs.OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase).ToArray(), disabledCommandNames, packedCommandNames);
     }
 
-    private Dictionary<string, string> DiscoverManifestPaths()
+    private Dictionary<string, CommandPackManifestLocation> DiscoverManifestPaths()
     {
-        var manifestPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var manifestPaths = new Dictionary<string, CommandPackManifestLocation>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in _roots)
         {
             if (!Directory.Exists(root))
@@ -400,16 +406,49 @@ public sealed class CommandPackLoader
                 continue;
             }
 
-            foreach (var path in Directory.EnumerateFiles(root, "*.json", SearchOption.TopDirectoryOnly)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            var rootIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var location in EnumeratePackManifestLocations(root))
             {
-                var id = Path.GetFileNameWithoutExtension(path);
-                ValidateId(id, path);
-                manifestPaths[id] = path;
+                var id = Path.GetFileNameWithoutExtension(location.Path);
+                ValidateId(id, location.Path);
+                if (!rootIds.Add(id))
+                {
+                    throw new InvalidDataException($"Command pack ID '{id}' is defined more than once under pack root '{root}'.");
+                }
+
+                manifestPaths[id] = location;
             }
         }
 
         return manifestPaths;
+    }
+
+    private static IEnumerable<CommandPackManifestLocation> EnumeratePackManifestLocations(string root)
+    {
+        foreach (var path in Directory.EnumerateFiles(root, "*.json", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return new CommandPackManifestLocation(path, null);
+        }
+
+        foreach (var groupDirectory in Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var nestedManifest = Directory.EnumerateDirectories(groupDirectory, "*", SearchOption.TopDirectoryOnly)
+                .SelectMany(path => Directory.EnumerateFiles(path, "*.json", SearchOption.AllDirectories))
+                .FirstOrDefault();
+            if (nestedManifest is not null)
+            {
+                throw new InvalidDataException($"Command pack manifest '{nestedManifest}' is nested too deeply; packs may be placed only at the root or one directory level below it.");
+            }
+
+            var group = Path.GetFileName(groupDirectory);
+            foreach (var path in Directory.EnumerateFiles(groupDirectory, "*.json", SearchOption.TopDirectoryOnly)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                yield return new CommandPackManifestLocation(path, group);
+            }
+        }
     }
 
     private static CommandPackManifest ReadManifest(string path, bool requireMatchingFileId = true)
@@ -488,12 +527,14 @@ public sealed class CommandPackLoader
     {
         var id = ValidateManifestFile(sourcePath);
         Directory.CreateDirectory(profilePackDirectory);
-        var destination = Path.Combine(profilePackDirectory, $"{id}.json");
+        var destination = FindPackPath(profilePackDirectory, id)
+            ?? Path.Combine(profilePackDirectory, $"{id}.json");
         if (File.Exists(destination) && !replaceExisting)
         {
             throw new IOException($"Command pack '{id}' is already installed.");
         }
 
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var temporaryPath = destination + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -509,6 +550,26 @@ public sealed class CommandPackLoader
         }
 
         return id;
+    }
+
+    private static string? FindPackPath(string root, string id)
+    {
+        if (!Directory.Exists(root))
+        {
+            return null;
+        }
+
+        var matches = EnumeratePackManifestLocations(root)
+            .Select(location => location.Path)
+            .Where(path => string.Equals(Path.GetFileNameWithoutExtension(path), id, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (matches.Length > 1)
+        {
+            throw new InvalidDataException($"Command pack ID '{id}' is defined more than once under pack root '{root}'.");
+        }
+
+        return matches.FirstOrDefault();
     }
 
     private static void ValidateManifest(CommandPackManifest manifest, string fileId, string path)

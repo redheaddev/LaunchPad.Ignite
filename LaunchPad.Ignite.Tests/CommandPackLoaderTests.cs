@@ -73,7 +73,7 @@ public class CommandPackLoaderTests
         using var bundledDirectory = new TemporaryDirectory();
         using var userDirectory = new TemporaryDirectory();
         WritePack(bundledDirectory.Path, "sample", "sample", "sample", "same", "Bundled");
-        WritePack(userDirectory.Path, "sample", "sample", "sample", "same", "User");
+        WritePack(Path.Combine(userDirectory.Path, "group"), "sample", "sample", "sample", "same", "User");
         WritePack(userDirectory.Path, "extra", "extra", "extra", "only-user", "Additional");
 
         var schema = new CommandPackLoader([bundledDirectory.Path, userDirectory.Path]).Load();
@@ -81,6 +81,49 @@ public class CommandPackLoaderTests
         Assert.Equal(2, schema.Commands.Count);
         Assert.Equal("User", Assert.Single(schema.Commands, command => command.Name == "same").Description);
         Assert.Contains(schema.Commands, command => command.QualifiedName == "extra:only-user");
+    }
+
+    [Fact]
+    public void LoadsAndManagesPackFromNestedDirectoryByItsId()
+    {
+        using var directory = new TemporaryDirectory();
+        var packRoot = directory.Path;
+        WritePack(Path.Combine(packRoot, "env"), "tools", "tools", "tools", "status", "Before");
+        var loader = new CommandPackLoader([packRoot]);
+
+        var original = Assert.Single(loader.Load().Commands);
+        Assert.Equal(Path.Combine(packRoot, "env", "tools.json"), loader.GetInstalledPackPath("tools"));
+        Assert.Equal("tools", loader.ReadInstalledManifest("tools").Id);
+        Assert.Equal("env", Assert.Single(loader.LoadWithSources().Packs).Group);
+
+        loader.UpdatePackCommand("tools", original.QualifiedName, original with { Description = "After" });
+
+        Assert.Equal("After", Assert.Single(loader.ReadInstalledManifest("tools").Schema.Commands).Description);
+        loader.DeleteInstalledPack("tools");
+        Assert.Empty(loader.Load().Commands);
+    }
+
+    [Fact]
+    public void RejectsDuplicatePackIdsInDifferentSubdirectoriesOfOneRoot()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(Path.Combine(directory.Path, "first"), "tools", "tools", "tools", "first", "First");
+        WritePack(Path.Combine(directory.Path, "second"), "tools", "tools", "tools", "second", "Second");
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("defined more than once", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void RejectsPackManifestsNestedBeyondOneGroupDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(Path.Combine(directory.Path, "env", "production"), "tools", "tools", "tools", "status", "Status");
+
+        var exception = Assert.Throws<InvalidDataException>(() => new CommandPackLoader([directory.Path]).Load());
+
+        Assert.Contains("only at the root or one directory level", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -244,6 +287,21 @@ public class CommandPackLoaderTests
         Assert.Throws<IOException>(() => CommandPackLoader.InstallPack(sourcePath, installDirectory, replaceExisting: false));
 
         Assert.Equal(existingContents, File.ReadAllText(Path.Combine(installDirectory, "tools.json")));
+    }
+
+    [Fact]
+    public void ReplacesNestedPackInItsExistingDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourcePath = Path.Combine(directory.Path, "replacement.json");
+        var installDirectory = Path.Combine(directory.Path, "profile", "packs");
+        WritePack(Path.Combine(installDirectory, "env"), "tools", "tools", "tools", "old", "Old");
+        WritePack(directory.Path, "replacement", "tools", "tools", "new", "New");
+
+        CommandPackLoader.InstallPack(sourcePath, installDirectory, replaceExisting: true);
+
+        Assert.False(File.Exists(Path.Combine(installDirectory, "tools.json")));
+        Assert.Equal("New", Assert.Single(new CommandPackLoader([installDirectory]).Load().Commands).Description);
     }
 
     [Fact]

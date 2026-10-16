@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
 using System.IO;
 using System.Net.Http;
@@ -23,6 +24,8 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly Action<ColorTheme> _themeChanged;
     private readonly IReadOnlyList<ExtensionSecretPermissionViewModel> _extensionSecretPermissions;
     private readonly IReadOnlyList<CommandPackSettingsViewModel> _commandPacks;
+    private readonly IReadOnlyList<CommandPackSettingsViewModel> _ungroupedCommandPacks;
+    private readonly IReadOnlyList<CommandPackGroupSettingsViewModel> _commandPackGroups;
     private readonly IReadOnlyList<CommandLaunchPreferenceViewModel> _commandLaunchPreferences;
     private readonly IReadOnlyList<CommandDetailsViewModel> _commandDetails;
     private readonly IReadOnlyList<EnumListEditorViewModel> _enumListEditors;
@@ -46,6 +49,8 @@ public partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<SettingEditorViewModel> Settings { get; private set; } = [];
     public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
     public IReadOnlyList<CommandPackSettingsViewModel> CommandPacks => _commandPacks;
+    public IReadOnlyList<CommandPackSettingsViewModel> UngroupedCommandPacks => _ungroupedCommandPacks;
+    public IReadOnlyList<CommandPackGroupSettingsViewModel> CommandPackGroups => _commandPackGroups;
     public IReadOnlyList<CommandLaunchPreferenceViewModel> CommandLaunchPreferences => _commandLaunchPreferences;
     public IReadOnlyList<MediaShortcutEditorViewModel> MediaShortcutEditors => _mediaShortcutEditors;
     public IReadOnlyList<CommandDetailsViewModel> CommandDetails => _commandDetails;
@@ -217,13 +222,28 @@ public partial class SettingsViewModel : ViewModelBase
         _applicationSettings = applicationSettings;
         _extensionStateStore = extensionStateStore;
         _themeChanged = themeChanged;
-        _commandPacks = (commandPacks ?? [])
+        var packInfos = (commandPacks ?? [])
             .OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        _commandPacks = packInfos
             .Select(pack => new CommandPackSettingsViewModel(
                 pack.Id,
                 pack.Commands,
                 pack.Enabled,
-                SetComponentEnabled))
+                SetComponentEnabled,
+                pack.Group))
+            .ToArray();
+        _ungroupedCommandPacks = _commandPacks
+            .Where(pack => string.IsNullOrEmpty(pack.Group))
+            .ToArray();
+        _commandPackGroups = _commandPacks
+            .Where(pack => !string.IsNullOrEmpty(pack.Group))
+            .GroupBy(pack => pack.Group!, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new CommandPackGroupSettingsViewModel(
+                group.Key,
+                group.OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase).ToArray(),
+                SetComponentGroupEnabled))
             .ToArray();
         var commandList = commands ?? [];
         var launchPreferences = commandList
@@ -914,6 +934,12 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsChanged();
     }
 
+    private void SetComponentGroupEnabled(IReadOnlyList<string> ids, bool enabled)
+    {
+        _extensionStateStore.SetEnabled(ids, enabled);
+        _settingsChanged();
+    }
+
     private void ResetListDefaultEditors(CommandListDefinition defaultList)
     {
         foreach (var editor in _listDefaultEditorsByNamespace.Values.SelectMany(editors => editors)
@@ -943,6 +969,7 @@ public sealed class CommandPackSettingsViewModel : ViewModelBase
     private bool _isExpanded;
 
     public string Id { get; }
+    public string? Group { get; }
     public IReadOnlyList<string> Commands { get; }
     public string Details => Commands.Count == 1 ? "1 command" : $"{Commands.Count} commands";
     public bool IsExpanded
@@ -962,12 +989,81 @@ public sealed class CommandPackSettingsViewModel : ViewModelBase
         }
     }
 
-    public CommandPackSettingsViewModel(string id, IReadOnlyList<string> commands, bool isEnabled, Action<string, bool> setEnabled)
+    public CommandPackSettingsViewModel(
+        string id,
+        IReadOnlyList<string> commands,
+        bool isEnabled,
+        Action<string, bool> setEnabled,
+        string? group = null)
     {
         Id = id;
         Commands = commands;
         _isEnabled = isEnabled;
         _setEnabled = setEnabled;
+        Group = group;
+    }
+
+    internal void SetEnabledFromGroup(bool enabled)
+        => SetProperty(ref _isEnabled, enabled, nameof(IsEnabled));
+}
+
+public sealed class CommandPackGroupSettingsViewModel : ViewModelBase
+{
+    private readonly IReadOnlyList<CommandPackSettingsViewModel> _packs;
+    private readonly Action<IReadOnlyList<string>, bool> _setEnabled;
+
+    public string Name { get; }
+    public IReadOnlyList<CommandPackSettingsViewModel> Packs => _packs;
+    public string Details => _packs.Count == 1 ? "1 pack" : $"{_packs.Count} packs";
+    public bool? IsEnabled
+    {
+        get => _packs.All(pack => pack.IsEnabled)
+            ? true
+            : _packs.All(pack => !pack.IsEnabled) ? false : null;
+        set
+        {
+            if (value.HasValue)
+            {
+                SetEnabled(value.Value);
+            }
+        }
+    }
+
+    public CommandPackGroupSettingsViewModel(
+        string name,
+        IReadOnlyList<CommandPackSettingsViewModel> packs,
+        Action<IReadOnlyList<string>, bool> setEnabled)
+    {
+        Name = name;
+        _packs = packs;
+        _setEnabled = setEnabled;
+        foreach (var pack in _packs)
+        {
+            pack.PropertyChanged += Pack_PropertyChanged;
+        }
+    }
+
+    public void SetEnabled(bool enabled)
+    {
+        if (IsEnabled == enabled)
+        {
+            return;
+        }
+
+        foreach (var pack in _packs)
+        {
+            pack.SetEnabledFromGroup(enabled);
+        }
+        _setEnabled(_packs.Select(pack => pack.Id).ToArray(), enabled);
+        OnPropertyChanged(nameof(IsEnabled));
+    }
+
+    private void Pack_PropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName == nameof(CommandPackSettingsViewModel.IsEnabled))
+        {
+            OnPropertyChanged(nameof(IsEnabled));
+        }
     }
 }
 

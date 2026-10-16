@@ -311,6 +311,58 @@ public sealed class SettingsAndListDefaultsTests
     }
 
     [Fact]
+    public void CommandPackGroupSettings_BulkToggleMembersAndReflectIndividualChanges()
+    {
+        using var directory = new TemporaryDirectory();
+        var stateStore = new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json"));
+        stateStore.SetEnabled("prod", enabled: false);
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], []),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            []);
+        var runtimeReloadCount = 0;
+        var viewModel = new SettingsViewModel(
+            [],
+            extensions,
+            new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json")),
+            stateStore,
+            () => runtimeReloadCount++,
+            _ => { },
+            commandPacks:
+            [
+                new LoadedCommandPackInfo("np11", true) { Group = "env", Commands = ["np11:status"] },
+                new LoadedCommandPackInfo("prod", false) { Group = "env", Commands = ["prod:status"] },
+                new LoadedCommandPackInfo("saif", true) { Commands = ["saif:status"] }
+            ]);
+
+        var group = Assert.Single(viewModel.CommandPackGroups);
+        Assert.Equal("env", group.Name);
+        Assert.Null(group.IsEnabled);
+        Assert.Equal(["saif"], viewModel.UngroupedCommandPacks.Select(pack => pack.Id));
+
+        group.IsEnabled = true;
+
+        Assert.True(group.IsEnabled);
+        Assert.True(stateStore.IsEnabled("np11"));
+        Assert.True(stateStore.IsEnabled("prod"));
+        Assert.All(group.Packs, pack => Assert.True(pack.IsEnabled));
+        Assert.Equal(1, runtimeReloadCount);
+
+        group.Packs[0].IsEnabled = false;
+
+        Assert.Null(group.IsEnabled);
+        Assert.False(stateStore.IsEnabled(group.Packs[0].Id));
+        Assert.Equal(2, runtimeReloadCount);
+
+        group.IsEnabled = false;
+
+        Assert.All(group.Packs, pack => Assert.False(pack.IsEnabled));
+        Assert.All(group.Packs, pack => Assert.False(stateStore.IsEnabled(pack.Id)));
+        Assert.Equal(3, runtimeReloadCount);
+    }
+
+    [Fact]
     public void ExtensionLoader_AssignsNamespaceToExtensionListDefinitions()
     {
         using var directory = new TemporaryDirectory();

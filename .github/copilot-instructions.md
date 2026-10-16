@@ -11,6 +11,7 @@
 - When updating parser rules, update `LaunchPad.Ignite.App/rules-parser.txt` rather than `.github/copilot-instructions.md`; the former is the intended parser rules file.
 - When implementing alphabetical sorting requested for displayed lists, apply it consistently to every user-visible list in the app, rather than only reordering one source file's definitions.
 - Use `ListSelectionMode.Single` and `ListSelectionMode.Multiple` rather than `Minimal` and `Normal`; enum names should describe selection cardinality.
+- When packaging a new install, bump the application version before building the installer; use the next patch version unless specified otherwise.
 
 ## Security Guidelines
 - Enforce extension secret access using explicit per-secret, per-extension user grants in settings, with a generic mechanism and default-deny behavior; never grant extension access unless the user explicitly permits it.

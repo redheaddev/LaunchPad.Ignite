@@ -111,12 +111,56 @@
 				<TextBlock Text="Select an extension from the navigation list to manage its settings, secrets, and enabled status." TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
 			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsPacksSelected}">
-				<ItemsControl ItemsSource="{Binding CommandPacks}">
-					<ItemsControl.ItemTemplate>
-						<DataTemplate x:DataType="vm:CommandPackSettingsViewModel">
-							<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
-								<Grid ColumnDefinitions="*,Auto">
-									<Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+				<StackPanel Spacing="8">
+					<ItemsControl ItemsSource="{Binding CommandPackGroups}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate x:DataType="vm:CommandPackGroupSettingsViewModel">
+								<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+									<StackPanel Spacing="8">
+										<Grid ColumnDefinitions="*,Auto">
+											<StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+												<TextBlock Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" FontWeight="SemiBold" />
+												<TextBlock Text="{Binding Details}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" VerticalAlignment="Center" />
+											</StackPanel>
+											<CheckBox Grid.Column="1" Content="Group enabled" IsThreeState="True" IsChecked="{Binding IsEnabled, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" Margin="12,0,0,0" />
+										</Grid>
+										<ItemsControl ItemsSource="{Binding Packs}">
+											<ItemsControl.ItemTemplate>
+												<DataTemplate x:DataType="vm:CommandPackSettingsViewModel">
+													<Border BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,6">
+														<Grid ColumnDefinitions="*,Auto">
+															<Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+																<Expander.Header>
+																	<StackPanel Orientation="Horizontal" Spacing="10">
+																		<TextBlock Text="{Binding Id}" Foreground="{DynamicResource ThemeText}" FontWeight="SemiBold" />
+																		<TextBlock Text="{Binding Details}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" VerticalAlignment="Center" />
+																	</StackPanel>
+																</Expander.Header>
+																<ItemsControl ItemsSource="{Binding Commands}" Margin="8,8,0,0">
+																	<ItemsControl.ItemTemplate>
+																		<DataTemplate>
+																			<TextBlock Text="{Binding}" Foreground="{DynamicResource ThemeText}" Margin="0,2" />
+																		</DataTemplate>
+																	</ItemsControl.ItemTemplate>
+																</ItemsControl>
+															</Expander>
+														<CheckBox Grid.Column="1" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" Margin="12,0,0,0" />
+													</Grid>
+													</Border>
+												</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
+								</StackPanel>
+							</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+					<ItemsControl ItemsSource="{Binding UngroupedCommandPacks}">
+						<ItemsControl.ItemTemplate>
+							<DataTemplate x:DataType="vm:CommandPackSettingsViewModel">
+								<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+									<Grid ColumnDefinitions="*,Auto">
+										<Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
 										<Expander.Header>
 											<StackPanel Orientation="Horizontal" Spacing="10">
 												<TextBlock Text="{Binding Id}" Foreground="{DynamicResource ThemeText}" FontWeight="SemiBold" />
@@ -132,11 +176,12 @@
 										</ItemsControl>
 									</Expander>
 									<CheckBox Grid.Column="1" Content="Enabled" IsChecked="{Binding IsEnabled, Mode=TwoWay}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" Margin="12,0,0,0" />
-								</Grid>
-							</Border>
-						</DataTemplate>
-					</ItemsControl.ItemTemplate>
-				</ItemsControl>
+									</Grid>
+								</Border>
+							</DataTemplate>
+						</ItemsControl.ItemTemplate>
+					</ItemsControl>
+				</StackPanel>
 			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsExtensionSelected}">
 				<StackPanel Spacing="12">
