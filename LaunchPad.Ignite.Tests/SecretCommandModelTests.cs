@@ -322,6 +322,50 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task MacroSecretAccessScopeKeepsAuthorizationAcrossCommandsAndRelocksAfterFailure()
+    {
+        var gate = new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: false);
+        var model = CreateModel(
+            store: new FakeSecretStore(("token", "sensitive-value")),
+            gate: gate,
+            dialog: new FakeDialogService("master-password"),
+            extensionGrants: ["token"]);
+
+        var result = await model.ExecuteWithSecretAccessScopeAsync(async () =>
+        {
+            var firstResolution = await model.ResolveExtensionSecretsAsync("vscode", ["token"]);
+            Assert.True(firstResolution.Succeeded);
+            Assert.True(gate.IsUnlocked);
+
+            await model.ExecuteWithSecretRelockAsync(async () =>
+            {
+                var secondResolution = await model.ResolveExtensionSecretsAsync("vscode", ["token"]);
+                Assert.True(secondResolution.Succeeded);
+                Assert.True(gate.IsUnlocked);
+                return new CommandExecutionResult(false, "macro line failed");
+            });
+
+            return new CommandExecutionResult(false, "macro stopped");
+        }, relockWhenFinished: true);
+
+        Assert.False(result.Succeeded);
+        Assert.False(gate.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task MacroSecretAccessScopeDoesNotRelockWhenNotDetected()
+    {
+        var gate = new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: true);
+        var model = CreateModel(gate: gate);
+
+        await model.ExecuteWithSecretAccessScopeAsync(
+            () => Task.FromResult(new CommandExecutionResult(true, "completed")),
+            relockWhenFinished: false);
+
+        Assert.True(gate.IsUnlocked);
+    }
+
+    [Fact]
     public async Task ExtensionSecretResolverRejectsSecretsNotGrantedBeforeUnlockOrRead()
     {
         var store = new FakeSecretStore(("token", "sensitive-value"));

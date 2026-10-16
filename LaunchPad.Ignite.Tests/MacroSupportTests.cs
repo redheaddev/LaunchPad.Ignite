@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Completion;
@@ -154,6 +155,23 @@ public sealed class MacroSupportTests
         Assert.True(session.TryGetUsageText("%ops:deploy project=sample", out var usage));
         Assert.Equal("%ops:deploy <project> <pipelineId>", usage);
         Assert.False(session.TryGetUsageText("%ops:unknown", out _));
+    }
+
+    [Fact]
+    public void SecretAccessDetectorFindsSecretArgumentsAndIgnoresOtherCommands()
+    {
+        var urlCommand = new CommandDefinition(
+            "url",
+            "url",
+            "Open a URL",
+            [new CommandActionDefinition("default", "Open a URL", "url <target>", "url", [])]);
+        var catalog = new CommandCatalog(
+            new CommandSchema([], [SecretCommandDefinition.Definition, urlCommand]),
+            ["secret", "url"]);
+        var detector = new MacroSecretAccessDetector(catalog);
+
+        Assert.True(detector.UsesSecrets("secret show token"));
+        Assert.False(detector.UsesSecrets("url https://example.test"));
     }
 
     [Fact]

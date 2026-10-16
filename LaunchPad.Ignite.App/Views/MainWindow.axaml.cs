@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly ItemsControl _completionList;
     private readonly TextBlock _commandTextOverlay;
     private readonly TextBlock _usageTextBlock;
+    private readonly DispatcherTimer _positionSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private ScrollViewer? _commandScrollViewer;
     private MainViewModel? _shortcutViewModel;
     private Task? _hotKeyTask;
@@ -52,6 +53,7 @@ public partial class MainWindow : Window
     private int _pathSelectionStart = -1;
     private int _pathSelectionEnd = -1;
     private int? _pendingCaretIndex;
+    private LauncherWindowMode? _appliedWindowMode;
 
     public MainWindow(bool startMinimized = false)
     {
@@ -75,24 +77,37 @@ public partial class MainWindow : Window
             if (_shortcutViewModel is not null)
             {
                 _shortcutViewModel.CommandEditorRequested -= OpenCommandEditor;
+                _shortcutViewModel.NavigationRequested -= MainWindow_NavigationRequested;
             }
 
             _shortcutViewModel = DataContext as MainViewModel;
             if (_shortcutViewModel is not null)
             {
                 _shortcutViewModel.CommandEditorRequested += OpenCommandEditor;
+                _shortcutViewModel.NavigationRequested += MainWindow_NavigationRequested;
             }
 
             if (DataContext is INotifyPropertyChanged viewModel)
             {
                 viewModel.PropertyChanged += (_, args) =>
                 {
+                    if (args.PropertyName == nameof(MainViewModel.IsMiniMode)
+                        && DataContext is MainViewModel currentViewModel)
+                    {
+                        ApplyWindowMode(currentViewModel);
+                    }
+
                     if (args.PropertyName is nameof(MainViewModel.UsageText) or nameof(MainViewModel.UsageCommandText))
                     {
                         UpdateUsageText();
                     }
 
                 };
+            }
+
+            if (_shortcutViewModel is not null)
+            {
+                ApplyWindowMode(_shortcutViewModel);
             }
 
             UpdateUsageText();
@@ -103,6 +118,13 @@ public partial class MainWindow : Window
         Deactivated += MainWindow_Deactivated;
         Activated += MainWindow_Activated;
         AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
+        AddHandler(PointerPressedEvent, MainWindow_PointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
+        PositionChanged += (_, _) => ScheduleWindowPositionSave();
+        _positionSaveTimer.Tick += (_, _) =>
+        {
+            _positionSaveTimer.Stop();
+            SaveCurrentWindowPosition();
+        };
         Opened += MainWindow_Opened;
         Closed += MainWindow_Closed;
     }
@@ -259,12 +281,99 @@ public partial class MainWindow : Window
         }
     }
 
-    private void HeaderBar_PointerPressed(object? sender, PointerPressedEventArgs e)
+    private void MainWindow_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            || e.Source is not Visual source
+            || source is TextBox
+            || source.GetVisualAncestors().Any(ancestor => ancestor is TextBox or Button))
         {
-            BeginMoveDrag(e);
+            return;
         }
+
+        BeginMoveDrag(e);
+    }
+
+    private void ApplyWindowMode(MainViewModel viewModel)
+    {
+        var mode = viewModel.CurrentWindowMode;
+        if (_appliedWindowMode is { } previousMode && previousMode != mode)
+        {
+            _positionSaveTimer.Stop();
+            SaveWindowPosition(viewModel, previousMode);
+        }
+
+        _appliedWindowMode = mode;
+        Width = mode == LauncherWindowMode.Mini ? 640 : 760;
+        MinWidth = mode == LauncherWindowMode.Mini ? 460 : 640;
+        Height = mode == LauncherWindowMode.Mini ? 92 : 360;
+        MinHeight = mode == LauncherWindowMode.Mini ? 84 : 300;
+
+        if (_appliedWindowMode == mode && viewModel.TryGetWindowPosition(mode, out var position)
+            && IsLoaded)
+        {
+            Position = ClampToVisibleScreen(new PixelPoint(position.X, position.Y));
+        }
+    }
+
+    private void RestoreWindowPosition(MainViewModel viewModel)
+    {
+        if (viewModel.TryGetWindowPosition(viewModel.CurrentWindowMode, out var position))
+        {
+            Position = ClampToVisibleScreen(new PixelPoint(position.X, position.Y));
+        }
+    }
+
+    private PixelPoint ClampToVisibleScreen(PixelPoint position)
+    {
+        var screens = Screens.All;
+        if (screens.Count == 0)
+        {
+            return position;
+        }
+
+        var screen = screens.FirstOrDefault(candidate =>
+        {
+            var area = candidate.WorkingArea;
+            return position.X >= area.X && position.X < area.Right
+                && position.Y >= area.Y && position.Y < area.Bottom;
+        }) ?? Screens.Primary ?? screens[0];
+        var workingArea = screen.WorkingArea;
+        var windowWidth = (int)Math.Ceiling(Width * screen.Scaling);
+        var windowHeight = (int)Math.Ceiling(Height * screen.Scaling);
+        var maxX = Math.Max(workingArea.X, workingArea.Right - Math.Min(windowWidth, workingArea.Width));
+        var maxY = Math.Max(workingArea.Y, workingArea.Bottom - Math.Min(windowHeight, workingArea.Height));
+        return new PixelPoint(
+            Math.Clamp(position.X, workingArea.X, maxX),
+            Math.Clamp(position.Y, workingArea.Y, maxY));
+    }
+
+    private void ScheduleWindowPositionSave()
+    {
+        if (_appliedWindowMode is null)
+        {
+            return;
+        }
+
+        _positionSaveTimer.Stop();
+        _positionSaveTimer.Start();
+    }
+
+    private void SaveCurrentWindowPosition()
+    {
+        if (_appliedWindowMode is { } mode && DataContext is MainViewModel viewModel)
+        {
+            SaveWindowPosition(viewModel, mode);
+        }
+    }
+
+    private void SaveWindowPosition(MainViewModel viewModel, LauncherWindowMode mode)
+        => viewModel.SaveWindowPosition(mode, new LauncherWindowPosition(Position.X, Position.Y));
+
+    private void FlushWindowPosition()
+    {
+        _positionSaveTimer.Stop();
+        SaveCurrentWindowPosition();
     }
 
     internal async Task<bool> ConfirmCommandPackReplacementAsync(string id)
@@ -646,7 +755,22 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void MainWindow_NavigationRequested(LauncherNavigationTarget target)
+        => await OpenNavigationAsync(target);
+
+    private Task OpenNavigationAsync(LauncherNavigationTarget target)
+        => target switch
+        {
+            LauncherNavigationTarget.Settings => OpenSettingsAsync(),
+            LauncherNavigationTarget.ImportExport => OpenImportExportAsync(),
+            LauncherNavigationTarget.Help => OpenHelpAsync(),
+            _ => Task.CompletedTask
+        };
+
     private async void ImportExportButton_Click(object? sender, RoutedEventArgs e)
+        => await OpenImportExportAsync();
+
+    private async Task OpenImportExportAsync()
     {
         if (DataContext is not MainViewModel viewModel)
         {
@@ -668,6 +792,9 @@ public partial class MainWindow : Window
     }
 
     private async void SettingsButton_Click(object? sender, RoutedEventArgs e)
+        => await OpenSettingsAsync();
+
+    private async Task OpenSettingsAsync()
     {
         if (DataContext is not MainViewModel viewModel)
         {
@@ -683,6 +810,30 @@ public partial class MainWindow : Window
         {
             _secretDialogIsOpen = false;
             RefreshWindowsActivationHotkey();
+        }
+    }
+
+    private async void HelpButton_Click(object? sender, RoutedEventArgs e)
+        => await OpenHelpAsync();
+
+    private async void SecretLockButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            await viewModel.ToggleSecretAccessAsync();
+        }
+    }
+
+    private async Task OpenHelpAsync()
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            await new HelpWindow().ShowDialog(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
         }
     }
 
@@ -702,6 +853,11 @@ public partial class MainWindow : Window
 
     private void MainWindow_Opened(object? sender, EventArgs e)
     {
+        if (DataContext is MainViewModel viewModel)
+        {
+            RestoreWindowPosition(viewModel);
+        }
+
         if (_startMinimized)
         {
             Hide();
@@ -877,7 +1033,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Deactivated(object? sender, EventArgs e)
     {
-        if (!_secretDialogIsOpen)
+        if (!_secretDialogIsOpen
+            && DataContext is not MainViewModel { KeepWindowOpen: true })
         {
             HideMainWindow();
         }
@@ -976,6 +1133,20 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainViewModel viewModel)
         {
+            return;
+        }
+
+        if (LauncherNavigationShortcutParser.TryParse(e.Key, e.KeyModifiers, out var target))
+        {
+            viewModel.RequestNavigation(target);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.M && e.KeyModifiers == KeyModifiers.Control)
+        {
+            viewModel.ToggleWindowMode();
+            e.Handled = true;
             return;
         }
 
@@ -1316,6 +1487,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        FlushWindowPosition();
+
         if (DataContext is MainViewModel viewModel)
         {
             viewModel.ResetHistoryNavigation();

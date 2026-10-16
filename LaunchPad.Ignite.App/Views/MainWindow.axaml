@@ -26,6 +26,34 @@
             <Setter Property="MinWidth" Value="30" />
             <Setter Property="MinHeight" Value="30" />
         </Style>
+        <Style Selector="Border.main-panel">
+            <Setter Property="Padding" Value="22" />
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+        <Style Selector="Border.mini-panel">
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="CornerRadius" Value="12" />
+        </Style>
+        <Style Selector="Border.command-input">
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="CornerRadius" Value="10" />
+        </Style>
+        <Style Selector="Border.command-input.mini">
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="Button.mini-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource ThemeSecondaryText}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinWidth" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
         <Style Selector="Border.completion-item.highlighted">
             <Setter Property="Background" Value="{DynamicResource ThemeHighlight}" />
         </Style>
@@ -50,16 +78,15 @@
     <Border Background="{DynamicResource ThemePanelBackground}"
             BorderBrush="{DynamicResource ThemeBorder}"
             BorderThickness="1"
-            CornerRadius="18"
-            Padding="22">
+            Classes.main-panel="{Binding IsMainMode}"
+            Classes.mini-panel="{Binding IsMiniMode}">
         <Grid RowDefinitions="Auto,Auto,*,Auto">
-            <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid Grid.Row="0" Margin="0,0,0,12" IsVisible="{Binding IsMainMode}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8"
-                            PointerPressed="HeaderBar_PointerPressed">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
                     <Image Source="/Assets/rocket.png" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center" />
                     <TextBlock Text="LaunchPad" FontSize="15" FontWeight="SemiBold"
                                Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
@@ -74,7 +101,7 @@
                                Foreground="{Binding SecretLockBrush}"
                                ToolTip.Tip="{Binding SecretLockTooltip}"
                                FontSize="16" VerticalAlignment="Center" Margin="4,0,8,0" />
-                    <Button Classes="header-action" Content="?" ToolTip.Tip="Help" />
+                    <Button Classes="header-action" Content="?" ToolTip.Tip="Help" Click="HelpButton_Click" />
                     <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export"
                             Click="ImportExportButton_Click" />
                     <Button Classes="header-action" Content="⚙" ToolTip.Tip="Settings"
@@ -82,10 +109,25 @@
                 </StackPanel>
             </Grid>
 
-            <Border x:Name="CommandInputBorder" Grid.Row="1" Classes="command-input" Background="{DynamicResource ThemeInputBackground}" BorderBrush="{DynamicResource ThemeBorder}"
-                    BorderThickness="1" CornerRadius="10" Padding="12,8">
-                <Grid ClipToBounds="True" ColumnDefinitions="12,*">
-                    <TextBox x:Name="CommandBox" Grid.ColumnSpan="2" Text="{Binding CommandInputText}"
+            <Border x:Name="CommandInputBorder" Grid.Row="1" Classes="command-input" Classes.mini="{Binding IsMiniMode}" Background="{DynamicResource ThemeInputBackground}" BorderBrush="{DynamicResource ThemeBorder}"
+                    BorderThickness="1">
+                <Grid ClipToBounds="True" ColumnDefinitions="Auto,*" ColumnSpacing="4">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
+                                Spacing="2" IsVisible="{Binding IsMiniMode}">
+                        <Image Source="/Assets/rocket.png" Width="18" Height="18" Stretch="Uniform"
+                               VerticalAlignment="Center" Margin="2" />
+                        <Button Classes="mini-action" Content="{Binding SecretLockIcon}"
+                                Foreground="{Binding SecretLockBrush}"
+                                ToolTip.Tip="{Binding SecretLockTooltip}"
+                                Click="SecretLockButton_Click" />
+                        <Button Classes="mini-action" Content="?" ToolTip.Tip="Help"
+                                Click="HelpButton_Click" />
+                        <Button Classes="mini-action" Content="⇅" ToolTip.Tip="Import / Export"
+                                Click="ImportExportButton_Click" />
+                        <Button Classes="mini-action" Content="⚙" ToolTip.Tip="Settings"
+                                Click="SettingsButton_Click" />
+                    </StackPanel>
+                    <TextBox x:Name="CommandBox" Grid.Column="1" Text="{Binding CommandInputText}"
                              FontFamily="Cascadia Mono, Consolas"
                               FontSize="22" Foreground="{DynamicResource ThemeText}"
                              Background="{DynamicResource ThemeInputBackground}" BorderThickness="0" Padding="12,0,0,0"
@@ -98,10 +140,11 @@
                              VerticalContentAlignment="Center"
                              CaretBrush="{DynamicResource ThemeAccent}" />
                     <TextBlock Grid.Column="1" Text="Enter a command" IsVisible="{Binding ShowCommandPlaceholder}"
-                               IsHitTestVisible="False" VerticalAlignment="Center"
+                                IsHitTestVisible="False" VerticalAlignment="Center" Margin="12,0,0,0"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
                                 Foreground="{DynamicResource ThemeMutedText}" />
                     <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
+                                Margin="12,0,0,0"
                                FontFamily="Cascadia Mono, Consolas" FontSize="22"
                                TextWrapping="NoWrap" ClipToBounds="True">
                         <TextBlock.Inlines><Run Text="{Binding CommandInputText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="{DynamicResource ThemeMutedText}"/></TextBlock.Inlines>
@@ -109,7 +152,7 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="2" Margin="3,12,3,0">
+            <Grid Grid.Row="2" Margin="3,12,3,0" IsVisible="{Binding IsMainMode}">
                 <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <TextBlock x:Name="UsageTextBlock"
                                  Foreground="{DynamicResource ThemeSecondaryText}" FontFamily="Cascadia Mono, Consolas"
@@ -169,12 +212,21 @@
                 </Grid>
             </Grid>
 
-            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0">
+            <TextBlock Grid.Row="2" Text="{Binding MiniUsageStatusText}"
+                       IsVisible="{Binding IsMiniMode}" Margin="4,4,4,0"
+                       Foreground="{DynamicResource ThemeSecondaryText}"
+                       FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0"
+                        IsVisible="{Binding IsMainMode}">
                 <TextBlock Text="Enter/Ctrl+Shift/Alt -> launch/elevated/other user" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Shift+Enter -> url: launch in new window" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Tab/Right-Arrow -> accept" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Esc -> close" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
             </StackPanel>
+
         </Grid>
     </Border>
 </Window>

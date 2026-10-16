@@ -1,0 +1,53 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		x:Class="LaunchPad.Ignite.App.Views.HelpWindow"
+		Title="LaunchPad Help"
+		Icon="/Assets/rocket.ico"
+		Width="520" SizeToContent="Height" MinWidth="440"
+		WindowStartupLocation="CenterOwner" CanResize="False"
+		ShowInTaskbar="False" Background="Transparent">
+	<Border Background="{DynamicResource ThemePanelBackground}"
+			BorderBrush="{DynamicResource ThemeBorder}"
+			BorderThickness="1" CornerRadius="18" Padding="24">
+		<StackPanel Spacing="16">
+			<StackPanel Orientation="Horizontal" Spacing="10">
+				<Image Source="/Assets/rocket.png" Width="24" Height="24" Stretch="Uniform" />
+				<StackPanel Spacing="2" VerticalAlignment="Center">
+					<TextBlock Text="LaunchPad Help" FontSize="22" FontWeight="SemiBold"
+							   Foreground="{DynamicResource ThemeText}" />
+					<TextBlock Text="Commands and keyboard shortcuts"
+							   Foreground="{DynamicResource ThemeSecondaryText}" />
+				</StackPanel>
+			</StackPanel>
+
+			<TextBlock Text="Quick commands" FontSize="15" FontWeight="SemiBold"
+					   Foreground="{DynamicResource ThemeAccent}" />
+			<Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="9">
+				<TextBlock Text="settings" FontFamily="Cascadia Mono, Consolas"
+						   Foreground="{DynamicResource ThemeText}" />
+				<TextBlock Grid.Column="1" Text="Open application settings (Ctrl+.)"
+						   Foreground="{DynamicResource ThemeSecondaryText}" />
+				<TextBlock Grid.Row="1" Text="import-export" FontFamily="Cascadia Mono, Consolas"
+						   Foreground="{DynamicResource ThemeText}" />
+				<TextBlock Grid.Row="1" Grid.Column="1" Text="Open profile import/export (Ctrl+I)"
+						   Foreground="{DynamicResource ThemeSecondaryText}" />
+				<TextBlock Grid.Row="2" Text="help" FontFamily="Cascadia Mono, Consolas"
+						   Foreground="{DynamicResource ThemeText}" />
+				<TextBlock Grid.Row="2" Grid.Column="1" Text="Open this help screen (Ctrl+H)"
+						   Foreground="{DynamicResource ThemeSecondaryText}" />
+				<TextBlock Grid.Row="3" Text="mode toggle" FontFamily="Cascadia Mono, Consolas"
+						   Foreground="{DynamicResource ThemeText}" />
+				<TextBlock Grid.Row="3" Grid.Column="1" Text="Switch between main and mini mode (Ctrl+M)"
+						   Foreground="{DynamicResource ThemeSecondaryText}" />
+			</Grid>
+
+			<TextBlock Text="Launcher keys" FontSize="15" FontWeight="SemiBold"
+					   Foreground="{DynamicResource ThemeAccent}" />
+			<TextBlock Text="Enter runs a command. Tab or Right Arrow accepts a suggestion. Esc closes the launcher."
+					   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+
+			<Button Content="Close" HorizontalAlignment="Right" MinWidth="84"
+					Click="CloseButton_Click" />
+		</StackPanel>
+	</Border>
+</Window>

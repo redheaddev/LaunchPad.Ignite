@@ -27,6 +27,11 @@ Command definitions are held in a schema with `lists`, `variables`, and `command
 Lists currently support only `type: "enum"`; each list needs a name and non-empty, case-insensitively unique values. Reference it with `ref: "enum:listName"`.
 
 Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty value and may be unqualified or use a namespace; refer to them as `$variable` or `$namespace:variable`. Use `variable set <name> <value>` to create or update a persistent user variable and `variable remove <name>` to remove one.
+Use `settings` to open Settings, `import-export` to open profile import/export, and `help` to open the help screen. `Ctrl+.` opens Settings, `Ctrl+I` opens Import/Export, and `Ctrl+H` opens Help.
+
+Use `mode toggle` to switch between the main and mini launcher windows, `mode main` to show the full results list, and `mode mini` to show the compact launcher. `Ctrl+M` toggles between the two modes. Mini mode shows the LaunchPad rocket mark and lock/settings controls; its lock button uses the same master-password flow as `secret lock` and `secret unlock`. The mini status shows the current completion and its position while typing, then shows command usage when an exact command is followed by whitespace.
+
+The `app:keepWindowOpen` general setting controls whether the launcher stays visible when it loses focus during command execution. It defaults to `Off`, which preserves the normal hide-on-deactivation behavior.
 
 The built-in `shortcut` kind defines an alias and optional keyboard chord. It must have one `default` action with no arguments or execution; its `targetTemplate` is the command text to expand to. Use `launchpad command add shortcut <name> --target "<command text>" [--key <chord>] [--description <text>]` to create a user shortcut, for example `launchpad command add shortcut wx --target "weather forecast" --key ctrl+alt+w`. Shortcut key chords use a modifier and key separated by `+`; supported modifiers are `ctrl`, `alt`, `shift`, and `meta`, and keys may be letters, digits, or `num+<digit>`.
 

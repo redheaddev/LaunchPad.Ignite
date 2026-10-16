@@ -49,6 +49,11 @@ public sealed class SecretCommandModel
         Func<Task<CommandExecutionResult>> execute)
     {
         var previousScope = _commandSecretAccessScope.Value;
+        if (previousScope is not null)
+        {
+            return await execute();
+        }
+
         var scope = new CommandSecretAccessScope(_accessGate.IsUnlocked);
         _commandSecretAccessScope.Value = scope;
         try
@@ -58,6 +63,30 @@ public sealed class SecretCommandModel
         finally
         {
             if (!scope.WasUnlocked && scope.UnlockedByCommand && _accessGate.IsUnlocked)
+            {
+                _accessGate.Lock();
+            }
+
+            _commandSecretAccessScope.Value = previousScope;
+        }
+    }
+
+    public async Task<T> ExecuteWithSecretAccessScopeAsync<T>(
+        Func<Task<T>> execute,
+        bool relockWhenFinished)
+    {
+        var previousScope = _commandSecretAccessScope.Value;
+        var scope = previousScope ?? new CommandSecretAccessScope(_accessGate.IsUnlocked);
+        _commandSecretAccessScope.Value = scope;
+        try
+        {
+            return await execute();
+        }
+        finally
+        {
+            if (previousScope is null
+                && relockWhenFinished
+                && _accessGate.HasMasterPassword)
             {
                 _accessGate.Lock();
             }

@@ -8,6 +8,15 @@
       "defaultValue": "Off",
       "type": "select",
       "options": ["Off", "On"]
+    },
+    {
+      "name": "keepWindowOpen",
+      "namespace": "app",
+      "label": "Keep window open",
+      "description": "This will prevent the window from closing on execution.",
+      "defaultValue": "Off",
+      "type": "select",
+      "options": ["Off", "On"]
     }
   ]
 }

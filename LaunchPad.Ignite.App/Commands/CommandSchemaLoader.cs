@@ -479,7 +479,7 @@ public sealed class CommandSchemaLoader
 
     private static IReadOnlyList<string> SupportedKinds(CommandSchema schema)
         => schema.Commands.Select(command => command.ExecutionHandler)
-            .Concat(["url", "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet", "extension", "edit", "shortcut", "definitionManagement"])
+            .Concat(["url", "shell", "variable", "secret", "secretList", "theme", "exit", "profileBackup", "profileRestore", "snippet", "extension", "edit", "shortcut", "definitionManagement", "mode"])
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

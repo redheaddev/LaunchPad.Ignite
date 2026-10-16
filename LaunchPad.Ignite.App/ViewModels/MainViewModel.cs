@@ -26,6 +26,7 @@ namespace LaunchPad.Ignite.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     public event Action<string?>? CommandEditorRequested;
+    public event Action<LauncherNavigationTarget>? NavigationRequested;
     public string AppVersion => typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     private CommandCompletionSession _completionSession = null!;
     private CommandCatalog _catalog = null!;
@@ -47,6 +48,7 @@ public partial class MainViewModel : ViewModelBase
     private MacroInvocationParser _macroInvocationParser = null!;
     private MacroExecutionEngine _macroExecutionEngine = null!;
     private MacroCompletionSession _macroCompletionSession = null!;
+    private MacroSecretAccessDetector _macroSecretAccessDetector = null!;
     private IReadOnlyList<CommandVariableDefinition> _macroVariables = [];
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
@@ -70,6 +72,7 @@ public partial class MainViewModel : ViewModelBase
     private IReadOnlyList<CommandListDefinition> _commandListDefaults = [];
     private readonly ISecretStore _secretStore;
     private readonly ProfileSettingsStore _profileSettingsStore;
+    private readonly LauncherWindowStateStore _launcherWindowStateStore;
     private readonly IReadOnlyList<CommandSettingDefinition> _applicationSettings;
     private readonly IProcessStarter _processStarter;
     private readonly ISecretTerminalLauncher _terminalLauncher;
@@ -83,6 +86,7 @@ public partial class MainViewModel : ViewModelBase
     private int _directPathHighlightedIndex;
     private bool _directPathReplacesWholeInput;
     private bool _syncingInput;
+    private bool _isMiniMode;
 
     public string GlobalActivationHotkeyValue => _profileSettingsStore.GetValue(
         "app:globalActivationHotkey",
@@ -93,6 +97,27 @@ public partial class MainViewModel : ViewModelBase
         "On",
         StringComparison.OrdinalIgnoreCase);
 
+    public bool KeepWindowOpen => string.Equals(
+        _profileSettingsStore.GetValue("app:keepWindowOpen", "Off"),
+        "On",
+        StringComparison.OrdinalIgnoreCase);
+
+    public bool IsMiniMode
+    {
+        get => _isMiniMode;
+        private set
+        {
+            if (SetProperty(ref _isMiniMode, value))
+            {
+                OnPropertyChanged(nameof(IsMainMode));
+            }
+        }
+    }
+
+    public bool IsMainMode => !IsMiniMode;
+
+    public LauncherWindowMode CurrentWindowMode => _launcherWindowStateStore.Mode;
+
     public MainViewModel()
     {
         _commandLogger = new ProfileCommandLogger();
@@ -101,6 +126,8 @@ public partial class MainViewModel : ViewModelBase
         _extensionStateStore = new ExtensionStateStore();
         _secretStore = PlatformSecretStore.Create();
         _profileSettingsStore = new ProfileSettingsStore();
+        _launcherWindowStateStore = new LauncherWindowStateStore(_profileSettingsStore);
+        _isMiniMode = _launcherWindowStateStore.Mode == LauncherWindowMode.Mini;
         ColorThemeService.MigrateLegacyThemes(_profileSettingsStore);
         ColorThemeService.Apply(ColorThemeService.Resolve(
             _profileSettingsStore.GetValue("app:colorTheme", ColorTheme.Default.Id),
@@ -117,6 +144,50 @@ public partial class MainViewModel : ViewModelBase
         _secretAccessStateTimer.Start();
         RefreshSecretAccessState();
     }
+
+    public void ToggleWindowMode()
+    {
+        if (LauncherModeCommandParser.TryParse("toggle", CurrentWindowMode, out var targetMode))
+        {
+            SetWindowMode(targetMode);
+        }
+    }
+
+    public void SetWindowMode(LauncherWindowMode mode)
+    {
+        _launcherWindowStateStore.SetMode(mode);
+        IsMiniMode = mode == LauncherWindowMode.Mini;
+    }
+
+    public void RequestNavigation(LauncherNavigationTarget target)
+        => NavigationRequested?.Invoke(target);
+
+    public async Task ToggleSecretAccessAsync()
+    {
+        RefreshSecretAccessState();
+        if (!_secretAccessGate.HasMasterPassword)
+        {
+            SetStatusMessage("Set a master password before locking secret access.");
+            return;
+        }
+
+        var actionName = SecretAccessLocked ? "unlock" : "lock";
+        var action = SecretCommandDefinition.Definition.Actions
+            .First(candidate => string.Equals(candidate.Name, actionName, StringComparison.OrdinalIgnoreCase));
+        var parsedCommand = new ParsedCommand(
+            SecretCommandDefinition.Definition,
+            action,
+            new Dictionary<string, string>());
+        var result = await _secretCommandModel.ExecuteAsync(parsedCommand);
+        SetStatusMessage(result.Message);
+        RefreshSecretAccessState();
+    }
+
+    public bool TryGetWindowPosition(LauncherWindowMode mode, out LauncherWindowPosition position)
+        => _launcherWindowStateStore.TryGetPosition(mode, out position);
+
+    public void SaveWindowPosition(LauncherWindowMode mode, LauncherWindowPosition position)
+        => _launcherWindowStateStore.SetPosition(mode, position);
 
     private void InitializeCommandRuntime()
     {
@@ -144,7 +215,13 @@ public partial class MainViewModel : ViewModelBase
         var commandListDefaults = commandPacks.Schema.Lists;
         var commandPackIds = commandPacks.Packs.Select(pack => pack.Id).ToArray();
         var componentIds = extensionIds.Concat(commandPackIds).ToArray();
-        var appSchema = commandPacks.Schema;
+        var appSchema = commandPacks.Schema with
+        {
+            Commands = commandPacks.Schema.Commands
+                .Append(LauncherModeCommandModel.Definition)
+                .Concat(NavigationCommandModel.Definitions)
+                .ToArray()
+        };
         var commandSources = extensions.CommandSources;
         var commandPackSources = commandPacks.CommandSources;
         _commandSchemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
@@ -202,7 +279,7 @@ public partial class MainViewModel : ViewModelBase
         {
             Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement", "mode", "navigation" };
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
@@ -226,6 +303,7 @@ public partial class MainViewModel : ViewModelBase
             _macroStore,
             new MacroArgumentBinder(valueProvider));
         _macroExecutionEngine = new MacroExecutionEngine();
+        _macroSecretAccessDetector = new MacroSecretAccessDetector(catalog);
         _macroCompletionSession = new MacroCompletionSession(
             _macroStore.GetAll(),
             valueProvider,
@@ -270,6 +348,8 @@ public partial class MainViewModel : ViewModelBase
         var commandExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["edit"] = new EditCommandModel(name => CommandEditorRequested?.Invoke(name)),
+            ["mode"] = new LauncherModeCommandModel(() => CurrentWindowMode, SetWindowMode),
+            ["navigation"] = new NavigationCommandModel(target => NavigationRequested?.Invoke(target)),
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
             ["secretList"] = new SecretListCommandModel(_secretStore),
@@ -525,6 +605,7 @@ public partial class MainViewModel : ViewModelBase
     private string _commandText = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
     private string _commandInputText = string.Empty;
 
     [ObservableProperty]
@@ -533,9 +614,11 @@ public partial class MainViewModel : ViewModelBase
     private string _commandExpansionPreview = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
     private IReadOnlyList<CompletionOptionViewModel> _completionItems = Array.Empty<CompletionOptionViewModel>();
 
     [NotifyPropertyChangedFor(nameof(HasUsageText))]
+    [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
     [ObservableProperty]
     private string _usageText = string.Empty;
 
@@ -547,6 +630,7 @@ public partial class MainViewModel : ViewModelBase
     private string _targetPreview = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
     private string _statusMessage = "Start typing to see commands";
 
     private bool _isValueOutput;
@@ -592,6 +676,43 @@ public partial class MainViewModel : ViewModelBase
     public bool HasCompletionOptions => CompletionItems.Count > 0;
 
     public bool HasUsageText => !string.IsNullOrEmpty(UsageText);
+
+    public string MiniUsageStatusText
+    {
+        get
+        {
+            var highlightedIndex = -1;
+            for (var index = 0; index < CompletionItems.Count; index++)
+            {
+                if (CompletionItems[index].IsHighlighted)
+                {
+                    highlightedIndex = index;
+                    break;
+                }
+            }
+
+            return MiniUsageStatusBuilder.Build(
+                CommandInputText,
+                UsageText,
+                CompletionItems.Select(item => item.DisplayText).ToArray(),
+                highlightedIndex,
+                HasSelectedCommandWithTrailingSpace);
+        }
+    }
+
+    private bool HasSelectedCommandWithTrailingSpace
+    {
+        get
+        {
+            if (!_tokenizer.EndsWithWhitespace(CommandText))
+            {
+                return false;
+            }
+
+            var tokens = _tokenizer.Tokenize(CommandText);
+            return tokens.Count == 1 && _catalog.TryGetCommand(tokens[0].Value, out _);
+        }
+    }
 
     public bool HasTargetPreview => !string.IsNullOrWhiteSpace(TargetPreview);
 
@@ -2149,12 +2270,15 @@ public sealed record CompletionOptionViewModel(
             return false;
         }
 
-        var result = await _macroExecutionEngine.ExecuteAsync(
-            parsed.Macro,
-            parsed.Arguments,
-            newWindow,
-            launchMode,
-            ExecuteMacroCommandAsync);
+        var usesSecrets = _macroSecretAccessDetector.UsesSecrets(parsed.Macro.Script);
+        var result = await _secretCommandModel.ExecuteWithSecretAccessScopeAsync(
+            () => _macroExecutionEngine.ExecuteAsync(
+                parsed.Macro,
+                parsed.Arguments,
+                newWindow,
+                launchMode,
+                ExecuteMacroCommandAsync),
+            relockWhenFinished: usesSecrets);
         SetStatusMessage(result.Message);
         CommandText = result.Succeeded ? string.Empty : invocationText;
         return result.Succeeded;
