@@ -1027,7 +1027,7 @@ public partial class MainWindow : Window
         if (_activationPending && !_altPressed && !_controlPressed && !_shiftPressed && !_metaPressed)
         {
             _activationPending = false;
-            Dispatcher.UIThread.Post(ToggleVisibility);
+            Dispatcher.UIThread.Post(ActivateFromHotkey);
         }
     }
 
@@ -1065,7 +1065,7 @@ public partial class MainWindow : Window
             {
                 if (!_secretDialogIsOpen)
                 {
-                    ToggleVisibility();
+                    ActivateFromHotkey();
                 }
             }),
             out var error);
@@ -1153,7 +1153,10 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape)
         {
             await viewModel.HandleInputKeyAsync(CommandInputKey.Escape);
-            HideMainWindow();
+            if (!viewModel.KeepWindowOpen)
+            {
+                HideMainWindow();
+            }
             e.Handled = true;
             return;
         }
@@ -1466,6 +1469,17 @@ public partial class MainWindow : Window
         }
 
         ShowAndActivate();
+    }
+
+    private void ActivateFromHotkey()
+    {
+        if (DataContext is MainViewModel { KeepWindowOpen: true })
+        {
+            ShowAndActivate();
+            return;
+        }
+
+        ToggleVisibility();
     }
 
     private void HideMainWindow()
