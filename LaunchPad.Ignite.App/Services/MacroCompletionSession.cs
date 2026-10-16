@@ -4,6 +4,7 @@ using System.Linq;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Lists;
+using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.Services;
@@ -12,6 +13,8 @@ public sealed class MacroCompletionSession
 {
     private readonly CommandCompletionSession _session;
     private readonly HashSet<string> _macroNames;
+    private readonly Dictionary<string, string> _macroUsages;
+    private readonly CommandLineTokenizer _tokenizer = new();
     private string _inputText = string.Empty;
 
     public MacroCompletionSession(
@@ -24,6 +27,10 @@ public sealed class MacroCompletionSession
         _macroNames = macroList
             .Select(macro => macro.Metadata.QualifiedName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _macroUsages = macroList.ToDictionary(
+            macro => macro.Metadata.QualifiedName,
+            BuildUsage,
+            StringComparer.OrdinalIgnoreCase);
         var commands = macroList.Select(CreateCompletionCommand).ToArray();
         var catalog = new CommandCatalog(
             new CommandSchema([], commands),
@@ -33,6 +40,20 @@ public sealed class MacroCompletionSession
     }
 
     public CommandCompletionState State { get; private set; }
+
+    public bool TryGetUsageText(string inputText, out string usage)
+    {
+        var tokens = _tokenizer.Tokenize(inputText);
+        if (tokens.Count > 0
+            && tokens[0].Value.StartsWith('%')
+            && _macroUsages.TryGetValue(tokens[0].Value[1..], out usage!))
+        {
+            return true;
+        }
+
+        usage = string.Empty;
+        return false;
+    }
 
     public CommandCompletionState UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
     {
@@ -88,7 +109,7 @@ public sealed class MacroCompletionSession
             },
             InputType: argument.Type == MacroArgumentType.ValueList ? "csv" : null,
             ListMode: argument.ListMode));
-        var usage = $"%{macro.Metadata.QualifiedName}";
+        var usage = BuildUsage(macro);
         return new CommandDefinition(
             macro.Metadata.Name,
             "macro",
@@ -96,4 +117,8 @@ public sealed class MacroCompletionSession
             [new CommandActionDefinition("default", "Run macro", usage, "macro", arguments.ToArray())],
             macro.Metadata.Namespace);
     }
+
+    private static string BuildUsage(MacroDefinition macro)
+        => string.Join(' ', new[] { $"%{macro.Metadata.QualifiedName}" }
+            .Concat(macro.Metadata.Arguments.Select(argument => $"<{argument.Name}>")));
 }

@@ -2082,6 +2082,11 @@ public sealed record CompletionOptionViewModel(
 
     private (string Text, string CommandText) GetUsageText(string inputText)
     {
+        if (_macroCompletionSession.TryGetUsageText(inputText, out var macroUsage))
+        {
+            return ($"Usage: {macroUsage}", macroUsage);
+        }
+
         var tokens = _tokenizer.Tokenize(inputText);
         if (tokens.Count == 0 || !_catalog.TryGetCommand(tokens[0].Value, out var command))
         {

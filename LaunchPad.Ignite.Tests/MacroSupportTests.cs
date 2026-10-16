@@ -138,6 +138,25 @@ public sealed class MacroSupportTests
     }
 
     [Fact]
+    public void UsageIncludesPercentPrefixedMacroNameAndRequiredArguments()
+    {
+        var macro = CreateMacro("deploy", "ops",
+        [
+            new MacroArgumentDefinition("project", MacroArgumentType.Variable),
+            new MacroArgumentDefinition("pipelineId", MacroArgumentType.Value)
+        ], "url https://example.test");
+        var session = new MacroCompletionSession(
+            [macro],
+            new DictionaryArgumentValueProvider(new Dictionary<string, IReadOnlyList<string>>()),
+            [],
+            []);
+
+        Assert.True(session.TryGetUsageText("%ops:deploy project=sample", out var usage));
+        Assert.Equal("%ops:deploy <project> <pipelineId>", usage);
+        Assert.False(session.TryGetUsageText("%ops:unknown", out _));
+    }
+
+    [Fact]
     public void CompletionLoadsNamespacedMacrosFromNestedStoreDirectories()
     {
         using var directory = new TemporaryDirectory();
