@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
 	[ValidatePattern('^\d+\.\d+\.\d+$')]
-	[string]$Version = "1.0.16",
+	[string]$Version = "1.0.19",
 
 	[string]$Configuration = "Release",
 
@@ -72,7 +72,9 @@ foreach ($rid in $runtimeIdentifiers) {
 		--output $publishDir `
 		"-p:Version=$Version" `
 		"-p:FileVersion=$assemblyVersion" `
-		"-p:AssemblyVersion=$assemblyVersion"
+		"-p:AssemblyVersion=$assemblyVersion" `
+		"-p:InformationalVersion=$Version" `
+		"-p:IncludeSourceRevisionInInformationalVersion=false"
 	if ($LASTEXITCODE -ne 0) {
 		throw "dotnet publish failed for '$rid'."
 	}
@@ -88,5 +90,13 @@ foreach ($rid in $runtimeIdentifiers) {
 		throw "Inno Setup compilation failed for '$rid'."
 	}
 
-	Write-Host "Installer created: $(Join-Path $outputDir ($outputName + '.exe'))" -ForegroundColor Green
+	$installerPath = Join-Path $outputDir ($outputName + ".exe")
+	Write-Host "Installer created: $installerPath" -ForegroundColor Green
+	if ($rid -eq "win-x64") {
+	$tempDir = "C:\temp\LaunchPad.Ignite"
+		New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+		$tempInstallerPath = Join-Path $tempDir ($outputName + ".exe")
+		Copy-Item -LiteralPath $installerPath -Destination $tempInstallerPath -Force
+		Write-Host "x64 installer copied: $tempInstallerPath" -ForegroundColor Green
+	}
 }

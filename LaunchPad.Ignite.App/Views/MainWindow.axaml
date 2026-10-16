@@ -65,6 +65,9 @@
                                Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
                     <TextBlock Text="command launcher" FontSize="15"
                                Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding AppVersion}" FontSize="11"
+                               Foreground="{DynamicResource ThemeMutedText}" VerticalAlignment="Center"
+                               Margin="4,0,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding SecretLockIcon}"

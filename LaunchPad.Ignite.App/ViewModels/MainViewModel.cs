@@ -26,6 +26,7 @@ namespace LaunchPad.Ignite.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     public event Action<string?>? CommandEditorRequested;
+    public string AppVersion => typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     private CommandCompletionSession _completionSession = null!;
     private CommandCatalog _catalog = null!;
     private CommandLineParser _parser = null!;

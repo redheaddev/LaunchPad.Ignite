@@ -12,6 +12,7 @@
 - When implementing alphabetical sorting requested for displayed lists, apply it consistently to every user-visible list in the app, rather than only reordering one source file's definitions.
 - Use `ListSelectionMode.Single` and `ListSelectionMode.Multiple` rather than `Minimal` and `Normal`; enum names should describe selection cardinality.
 - When packaging a new install, bump the application version before building the installer; use the next patch version unless specified otherwise.
+- After each installer build, copy the win-x64 installer to `C:\temp\LaunchPad.Ignite` using its versioned filename, in addition to keeping the artifact in `Installer\artifacts`; continue producing both architectures with a single version bump.
 
 ## Security Guidelines
 - Enforce extension secret access using explicit per-secret, per-extension user grants in settings, with a generic mechanism and default-deny behavior; never grant extension access unless the user explicitly permits it.
