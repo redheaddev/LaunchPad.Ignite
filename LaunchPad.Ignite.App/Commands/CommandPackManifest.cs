@@ -5,4 +5,5 @@ namespace LaunchPad.Ignite.App.Commands;
 public sealed record CommandPackManifest(
     string Id,
     string? Namespace,
-    CommandSchema Schema);
+    CommandSchema Schema,
+    string? Version = null);

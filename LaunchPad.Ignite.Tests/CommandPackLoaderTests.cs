@@ -75,7 +75,17 @@ public class CommandPackLoaderTests
     public void PreviewPackReturnsValidatedCommandNamesAndExistingOwners()
     {
         using var directory = new TemporaryDirectory();
-        WritePack(directory.Path, "tools", "tools", "tools", "status", "Status");
+        WriteManifest(directory.Path, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "version": "2.4.1",
+              "schema": {
+                "lists": [],
+                "commands": [{ "name": "status", "namespace": "tools", "kind": "url", "description": "Status", "actions": [{ "name": "default", "usage": "tools:status", "targetTemplate": "https://example.test", "arguments": [] }] }]
+              }
+            }
+            """);
 
         var preview = CommandPackLoader.PreviewPack(
             Path.Combine(directory.Path, "tools.json"),
@@ -83,6 +93,9 @@ public class CommandPackLoaderTests
 
         Assert.Equal("tools", preview.Id);
         Assert.Equal("tools", preview.Namespace);
+        Assert.Equal("2.4.1", preview.Version);
+        Assert.Equal(0, preview.ImportCommandCount);
+        Assert.Equal(1, preview.TotalCommandCount);
         var command = Assert.Single(preview.Commands);
         Assert.Equal("tools:status", command.Command.QualifiedName);
         Assert.Equal("Pack: existing-tools", command.ExistingOwner);

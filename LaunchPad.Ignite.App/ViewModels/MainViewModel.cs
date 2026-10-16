@@ -795,6 +795,20 @@ public partial class MainViewModel : ViewModelBase
             return await ExecuteCommandAsync(newWindow, launchMode);
         }
 
+        var historySuggestions = GetHistorySuggestions(CommandText);
+        var selectedHistoryCompletion = key is CommandInputKey.Right or CommandInputKey.Tab
+            && CompletionItems.Any(item =>
+                item.IsHighlighted
+                && item.DisplayText.StartsWith("[history] ", StringComparison.Ordinal));
+        if (key == CommandInputKey.Right
+            && selectedHistoryCompletion
+            && historySuggestions.Count > 0)
+        {
+            var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, historySuggestions.Count - 1);
+            AcceptHistorySuggestionToken(historySuggestions[selectedIndex]);
+            return false;
+        }
+
         if (_definitionManagementCommandModel.Handles(CommandText)
             && (!_isManagementCompletionActive
                 || !string.Equals(_managementCompletionInput, CommandText, StringComparison.Ordinal)))
@@ -802,7 +816,9 @@ public partial class MainViewModel : ViewModelBase
             ApplyManagementCompletion(CommandText);
         }
 
-        if (_isManagementCompletionActive && HandleManagementCompletionKey(key))
+        if (_isManagementCompletionActive
+            && !selectedHistoryCompletion
+            && HandleManagementCompletionKey(key))
         {
             return false;
         }
@@ -815,7 +831,6 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
-        var historySuggestions = GetHistorySuggestions(CommandText);
         var hasRetainedHistoryContext = _historySuggestionCycler.TryGetSuggestions(CommandText, out _);
         var hasSelectedHistoryPath = key == CommandInputKey.Right
             && _highlightedCompletionIndex >= 0
@@ -832,6 +847,15 @@ public partial class MainViewModel : ViewModelBase
                 || (!hasSelectedHistoryPath
                     && (!hasRetainedHistoryContext || !_isHistoryPathStepping))))
         {
+            if (key == CommandInputKey.Tab
+                && hasRetainedHistoryContext
+                && historySuggestions.Count > 0)
+            {
+                var selectedHistoryIndex = Math.Clamp(_highlightedCompletionIndex, 0, historySuggestions.Count - 1);
+                CommandText = historySuggestions[selectedHistoryIndex].CommandText;
+                return false;
+            }
+
             if (hasRetainedHistoryContext)
             {
                 _isHistoryPathStepping = false;
@@ -841,7 +865,7 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
-        if (SnippetCompletion.TryGetFilterPrefix(CommandText, out _))
+        if (!selectedHistoryCompletion && SnippetCompletion.TryGetFilterPrefix(CommandText, out _))
         {
             var snippetSuggestions = GetSnippetSuggestions(CommandText);
             if (snippetSuggestions.Count > 0
@@ -870,17 +894,13 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var shortcutList = GetShortcutSuggestions(CommandText);
-        if (shortcutList.Count > 0
+        if (!selectedHistoryCompletion
+            && shortcutList.Count > 0
             && key is CommandInputKey.Tab or CommandInputKey.Up or CommandInputKey.Down
                 or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
                 or CommandInputKey.Right)
         {
-            if (key == CommandInputKey.Right)
-            {
-                var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, shortcutList.Count - 1);
-                AcceptNextSuggestionToken(CommandText, shortcutList[selectedIndex].Key);
-            }
-            else if (key == CommandInputKey.Tab)
+            if (key is CommandInputKey.Right or CommandInputKey.Tab)
             {
                 var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, shortcutList.Count - 1);
                 CommandText = shortcutList[selectedIndex].Key;
@@ -932,56 +952,7 @@ public partial class MainViewModel : ViewModelBase
             if (key == CommandInputKey.Right && _highlightedCompletionIndex < historyCount)
             {
                 var selectedIndex = Math.Clamp(_highlightedCompletionIndex, 0, historyCount - 1);
-                var selectedHistoryEntry = historySuggestions[selectedIndex];
-                var isHistoryFilter = TryGetHistoryFilter(CommandText, out var historySearchText);
-                var completionInput = isHistoryFilter
-                    ? historySearchText
-                    : CommandText;
-                AcceptNextSuggestionToken(
-                    completionInput,
-                    selectedHistoryEntry.CommandText,
-                    skipLeadingWhitespace: true);
-                var selectedHistoryPathCompleted = _directFilePathHandler.TryGetCompletionPath(
-                        selectedHistoryEntry.CommandText,
-                        out var selectedHistoryPath)
-                    && _directFilePathHandler.TryGetCompletionPath(CommandText, out var completedHistoryPath)
-                    && string.Equals(selectedHistoryPath, completedHistoryPath, StringComparison.OrdinalIgnoreCase);
-                if (!selectedHistoryPathCompleted
-                    && _completionSession.State.CanComplete
-                    && _completionSession.State.Items.Count == 0
-                    && !_tokenizer.EndsWithWhitespace(CommandText))
-                {
-                    CommandText += ' ';
-                    if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
-                        && desktop.MainWindow is MainWindow mainWindow)
-                    {
-                        mainWindow.SetPendingCaretIndex(CommandText.Length);
-                    }
-                }
-
-                if (selectedHistoryPathCompleted)
-                {
-                    _historySuggestionCycler.Reset();
-                    _isHistoryPathStepping = false;
-                    _highlightedCompletionIndex = 0;
-                    ApplyCompletionState(_completionSession.State);
-                }
-                else
-                {
-                    var updatedPrefix = TryGetHistoryFilter(CommandText, out var updatedHistorySearchText)
-                        ? updatedHistorySearchText
-                        : CommandText;
-                    if (_historySuggestionCycler.TryRetainSelection(
-                        _historyCommands,
-                        CommandText,
-                        updatedPrefix,
-                        selectedHistoryEntry))
-                    {
-                        _isHistoryPathStepping = true;
-                        _highlightedCompletionIndex = 0;
-                        ApplyCompletionState(_completionSession.State);
-                    }
-                }
+                AcceptHistorySuggestionToken(historySuggestions[selectedIndex]);
             }
             else if (key == CommandInputKey.Tab)
             {
@@ -1043,10 +1014,12 @@ public partial class MainViewModel : ViewModelBase
     private void AcceptNextSuggestionToken(
         string input,
         string suggestion,
-        bool skipLeadingWhitespace = false)
+        bool skipLeadingWhitespace = false,
+        bool acceptDirectPathSegments = true)
     {
         var inputPath = input.Trim('"');
-        if (_directFilePathHandler.TryGetCompletionPath(suggestion, out var suggestionPath)
+        if (acceptDirectPathSegments
+            && _directFilePathHandler.TryGetCompletionPath(suggestion, out var suggestionPath)
             && DirectFilePathCompletion.TryAcceptNextPathSegment(inputPath, suggestionPath, out var nextPath))
         {
             var completedPath = _directFilePathHandler.GetSuggestionText(nextPath);
@@ -1107,6 +1080,58 @@ public partial class MainViewModel : ViewModelBase
             && desktop.MainWindow is MainWindow mainWindow)
         {
             mainWindow.SetPendingCaretIndex(updatedText.Length);
+        }
+    }
+
+    private void AcceptHistorySuggestionToken(CommandHistoryEntry selectedHistoryEntry)
+    {
+        var completionInput = TryGetHistoryFilter(CommandText, out var historySearchText)
+            ? historySearchText
+            : CommandText;
+        AcceptNextSuggestionToken(
+            completionInput,
+            selectedHistoryEntry.CommandText,
+            skipLeadingWhitespace: true,
+            acceptDirectPathSegments: false);
+        var selectedHistoryPathCompleted = _directFilePathHandler.TryGetCompletionPath(
+                selectedHistoryEntry.CommandText,
+                out var selectedHistoryPath)
+            && _directFilePathHandler.TryGetCompletionPath(CommandText, out var completedHistoryPath)
+            && string.Equals(selectedHistoryPath, completedHistoryPath, StringComparison.OrdinalIgnoreCase);
+        if (!selectedHistoryPathCompleted
+            && _completionSession.State.CanComplete
+            && _completionSession.State.Items.Count == 0
+            && !_tokenizer.EndsWithWhitespace(CommandText))
+        {
+            CommandText += ' ';
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+                && desktop.MainWindow is MainWindow mainWindow)
+            {
+                mainWindow.SetPendingCaretIndex(CommandText.Length);
+            }
+        }
+
+        if (selectedHistoryPathCompleted)
+        {
+            _historySuggestionCycler.Reset();
+            _isHistoryPathStepping = false;
+            _highlightedCompletionIndex = 0;
+            ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+            return;
+        }
+
+        var updatedPrefix = TryGetHistoryFilter(CommandText, out var updatedHistorySearchText)
+            ? updatedHistorySearchText
+            : CommandText;
+        if (_historySuggestionCycler.TryRetainSelection(
+            _historyCommands,
+            CommandText,
+            updatedPrefix,
+            selectedHistoryEntry))
+        {
+            _isHistoryPathStepping = true;
+            _highlightedCompletionIndex = 0;
+            ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
         }
     }
 
@@ -1835,7 +1860,7 @@ public partial class MainViewModel : ViewModelBase
             var ageLabel = age.Length == 0 ? string.Empty : $" [{age}]";
             pathItems.Insert(0, new CompletionOptionViewModel(
                 $"[history] {entry.CommandText}",
-                _isHistoryPathStepping,
+                _isHistoryPathStepping || _highlightedCompletionIndex == 0,
                 false,
                 ageLabel));
         }

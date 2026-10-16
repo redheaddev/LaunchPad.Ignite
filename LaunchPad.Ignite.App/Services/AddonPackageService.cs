@@ -34,7 +34,10 @@ public sealed record AddonPreviewItem(
     string Name,
     bool AlreadyExists,
     string? ExistingOwner = null,
-    IReadOnlyList<AddonPreviewItem>? Commands = null);
+    IReadOnlyList<AddonPreviewItem>? Commands = null,
+    string? Version = null,
+    int? ImportCommandCount = null,
+    int? TotalCommandCount = null);
 
 public enum ImportConflictPolicy
 {
@@ -303,6 +306,7 @@ public sealed class AddonPackageService
         }
 
         var extensionIds = new List<string>();
+        var extensionManifests = new Dictionary<string, ExtensionManifest>(StringComparer.OrdinalIgnoreCase);
         foreach (var extensionPath in manifest.Extensions ?? [])
         {
             var entryPath = NormalizePackagePath(extensionPath);
@@ -315,11 +319,19 @@ public sealed class AddonPackageService
             try
             {
                 string extensionId;
+                ExtensionManifest extensionManifest;
                 if (entryPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
                     && entries.TryGetValue(entryPath, out var extensionEntry))
                 {
                     File.WriteAllBytes(temporaryPath, ReadBytes(extensionEntry));
                     extensionId = _extensionPackageManager.ValidatePackage(temporaryPath);
+                    using (var extensionArchive = ZipFile.OpenRead(temporaryPath))
+                    {
+                        var packageManifestEntry = extensionArchive.GetEntry("extension.json")
+                            ?? throw new InvalidDataException($"Extension package '{extensionId}' is missing its manifest.");
+                        extensionManifest = JsonSerializer.Deserialize<ExtensionManifest>(ReadText(packageManifestEntry), JsonOptions)
+                            ?? throw new InvalidDataException($"Extension manifest for '{extensionId}' is invalid.");
+                    }
                     if (!string.Equals(Path.GetFileNameWithoutExtension(entryPath), extensionId, StringComparison.OrdinalIgnoreCase))
                     {
                         throw new InvalidDataException($"Extension entry '{entryPath}' must match its manifest ID '{extensionId}'.");
@@ -340,6 +352,8 @@ public sealed class AddonPackageService
                     var extensionEntries = entries.Where(pair => pair.Key.StartsWith(extensionPrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
                     CreateExtensionArchive(extensionEntries, extensionPrefix, temporaryPath);
                     extensionId = _extensionPackageManager.ValidatePackage(temporaryPath);
+                    extensionManifest = JsonSerializer.Deserialize<ExtensionManifest>(ReadText(entries[entryPath]), JsonOptions)
+                        ?? throw new InvalidDataException($"Extension manifest for '{extensionId}' is invalid.");
                     if (!string.Equals(segments[1], extensionId, StringComparison.OrdinalIgnoreCase))
                     {
                         throw new InvalidDataException($"Extension directory '{segments[1]}' must match its manifest ID '{extensionId}'.");
@@ -352,6 +366,7 @@ public sealed class AddonPackageService
                 }
 
                 extensionIds.Add(extensionId);
+                extensionManifests.Add(extensionId, extensionManifest);
             }
             finally
             {
@@ -392,11 +407,25 @@ public sealed class AddonPackageService
                     .Select(command =>
                     {
                         var owner = _getCommandOwner?.Invoke(command.QualifiedName);
-                        return new AddonPreviewItem("Command", command.QualifiedName, owner is not null, owner);
+                        return new AddonPreviewItem(
+                            "Command",
+                            command.QualifiedName,
+                            owner is not null,
+                            owner,
+                            ImportCommandCount: owner is null ? 1 : 0,
+                            TotalCommandCount: 1);
                     })
                     .ToArray();
                 var installed = File.Exists(_packLoader.GetInstalledPackPath(packId));
-                packItems.Add(new AddonPreviewItem("Command pack", packId, installed, installed ? "Installed command pack" : null, commands));
+                packItems.Add(new AddonPreviewItem(
+                    "Command pack",
+                    packId,
+                    installed,
+                    installed ? "Installed command pack" : null,
+                    commands,
+                    incomingPack.Version,
+                    installed ? 0 : commands.Count(command => !command.AlreadyExists),
+                    commands.Length));
             }
             finally
             {
@@ -412,8 +441,29 @@ public sealed class AddonPackageService
                 _snippetStore.Find(name) is null ? null : "Installed snippet"))
             .ToArray();
         var extensionItems = extensionIds
-            .Select(id => new AddonPreviewItem("Extension", id, _extensionPackageManager.IsUserExtensionInstalled(id),
-                _extensionPackageManager.IsUserExtensionInstalled(id) ? "Installed extension" : null))
+            .Select(id =>
+            {
+                var extension = extensionManifests[id];
+                var installed = _extensionPackageManager.IsUserExtensionInstalled(id);
+                var commands = extension.Schema.Commands
+                    .Select(command => command with { Namespace = command.Namespace ?? extension.Namespace })
+                    .Select(command =>
+                    {
+                        var owner = _getCommandOwner?.Invoke(command.QualifiedName);
+                        return new AddonPreviewItem("Command", command.QualifiedName, owner is not null, owner,
+                            ImportCommandCount: owner is null ? 1 : 0, TotalCommandCount: 1);
+                    })
+                    .ToArray();
+                return new AddonPreviewItem(
+                    "Extension",
+                    id,
+                    installed,
+                    installed ? "Installed extension" : null,
+                    commands,
+                    Version: extension.Version,
+                    ImportCommandCount: installed ? 0 : commands.Count(command => !command.AlreadyExists),
+                    TotalCommandCount: commands.Length);
+            })
             .ToArray();
 
         var conflicts = packIds.Where(id => File.Exists(_packLoader.GetInstalledPackPath(id)))

@@ -27,6 +27,8 @@ public sealed class ImportExportViewModel : ViewModelBase
     private string _importStatus = string.Empty;
     private string _packPreviewId = string.Empty;
     private string _packPreviewNamespace = string.Empty;
+    private string _packPreviewVersion = string.Empty;
+    private string _packPreviewCommandCountText = string.Empty;
     private string _packPreviewMessage = "Choose a command-pack JSON file to preview its contents.";
     private bool _hasPackPreview;
     private int _importConflictPolicyIndex;
@@ -107,13 +109,21 @@ public sealed class ImportExportViewModel : ViewModelBase
     }
     public string PackPreviewId { get => _packPreviewId; private set => SetProperty(ref _packPreviewId, value); }
     public string PackPreviewNamespace { get => _packPreviewNamespace; private set => SetProperty(ref _packPreviewNamespace, value); }
+    public string PackPreviewVersion { get => _packPreviewVersion; private set => SetProperty(ref _packPreviewVersion, value); }
+    public string PackPreviewCommandCountText { get => _packPreviewCommandCountText; private set => SetProperty(ref _packPreviewCommandCountText, value); }
     public string PackPreviewMessage { get => _packPreviewMessage; private set => SetProperty(ref _packPreviewMessage, value); }
     public bool HasPackPreview { get => _hasPackPreview; private set => SetProperty(ref _hasPackPreview, value); }
     public ObservableCollection<AddonPreviewItemViewModel> PackPreviewCommands { get; } = [];
     public int ImportConflictPolicyIndex
     {
         get => _importConflictPolicyIndex;
-        set => SetProperty(ref _importConflictPolicyIndex, value);
+        set
+        {
+            if (SetProperty(ref _importConflictPolicyIndex, value))
+            {
+                RefreshPackCommandCounts();
+            }
+        }
     }
     public string MovePreview
     {
@@ -199,7 +209,13 @@ public sealed class ImportExportViewModel : ViewModelBase
     public int AddonConflictPolicyIndex
     {
         get => _addonConflictPolicyIndex;
-        set => SetProperty(ref _addonConflictPolicyIndex, value);
+        set
+        {
+            if (SetProperty(ref _addonConflictPolicyIndex, value))
+            {
+                RefreshAddonCommandCounts();
+            }
+        }
     }
     public IRelayCommand MoveCommand { get; }
     public ObservableCollection<AddonPackGroupViewModel> AddonPackGroups { get; } = [];
@@ -312,7 +328,7 @@ public sealed class ImportExportViewModel : ViewModelBase
                 AddonPreviewVersion = _addonImportPreview.Manifest.Version;
                 foreach (var item in _addonImportPreview.Items)
                 {
-                    var viewModel = new AddonPreviewItemViewModel(item);
+                    var viewModel = new AddonPreviewItemViewModel(item, AddonConflictPolicyIndex == 1);
                     switch (item.Category)
                     {
                         case "Command pack":
@@ -344,6 +360,7 @@ public sealed class ImportExportViewModel : ViewModelBase
         HasPackPreview = false;
         PackPreviewId = string.Empty;
         PackPreviewNamespace = string.Empty;
+        PackPreviewVersion = string.Empty;
         PackPreviewCommands.Clear();
 
         if (string.IsNullOrWhiteSpace(ImportPath))
@@ -357,22 +374,56 @@ public sealed class ImportExportViewModel : ViewModelBase
             var preview = _previewPack(ImportPath.Trim());
             PackPreviewId = preview.Id;
             PackPreviewNamespace = string.IsNullOrWhiteSpace(preview.Namespace) ? "Global" : preview.Namespace;
+            PackPreviewVersion = string.IsNullOrWhiteSpace(preview.Version) ? "Not specified" : preview.Version;
 
             foreach (var previewCommand in preview.Commands)
             {
-                PackPreviewCommands.Add(new AddonPreviewItemViewModel(new AddonPreviewItem(
+                var commandItem = new AddonPreviewItemViewModel(new AddonPreviewItem(
                     "Command",
                     previewCommand.Command.QualifiedName,
                     previewCommand.ExistingOwner is not null,
-                    previewCommand.ExistingOwner)));
+                    previewCommand.ExistingOwner,
+                    Version: null,
+                    ImportCommandCount: previewCommand.ExistingOwner is null ? 1 : 0,
+                    TotalCommandCount: 1));
+                commandItem.SetImportPolicy(ImportConflictPolicyIndex == 1, replaceOwner: $"Pack: {preview.Id}");
+                PackPreviewCommands.Add(commandItem);
             }
 
             HasPackPreview = true;
             PackPreviewMessage = string.Empty;
+            RefreshPackCommandCounts();
         }
         catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException or JsonException)
         {
             PackPreviewMessage = $"Could not read command pack: {exception.Message}";
+        }
+    }
+
+    private void RefreshPackCommandCounts()
+    {
+        if (!HasPackPreview)
+        {
+            PackPreviewCommandCountText = string.Empty;
+            return;
+        }
+
+        var overwriteSamePack = ImportConflictPolicyIndex == 1;
+        foreach (var command in PackPreviewCommands)
+        {
+            command.SetImportPolicy(overwriteSamePack, replaceOwner: $"Pack: {PackPreviewId}");
+        }
+
+        var importCount = PackPreviewCommands.Sum(command => command.ImportCommandCount ?? 0);
+        PackPreviewCommandCountText = $"{importCount} / {PackPreviewCommands.Count} commands to import";
+    }
+
+    private void RefreshAddonCommandCounts()
+    {
+        var overwriteExisting = AddonConflictPolicyIndex == 1;
+        foreach (var item in AddonPreviewPacks.Concat(AddonPreviewExtensions))
+        {
+            item.SetImportPolicy(overwriteExisting);
         }
     }
 
@@ -690,6 +741,8 @@ public sealed class AddonPackGroupViewModel : ViewModelBase
 
 public sealed class AddonPreviewItemViewModel : ViewModelBase
 {
+    private int? _importCommandCount;
+    private bool _overwriteExisting;
     public string Category { get; }
     public string Name { get; }
     public bool AlreadyExists { get; }
@@ -698,16 +751,82 @@ public sealed class AddonPreviewItemViewModel : ViewModelBase
         ? $"Already exists{(string.IsNullOrWhiteSpace(ExistingOwner) ? string.Empty : $" · {ExistingOwner}")}"
         : "New";
     public string? ExistingOwner { get; }
+    public string Version { get; }
+    public int? ImportCommandCount { get => _importCommandCount; private set => SetProperty(ref _importCommandCount, value); }
+    public int? TotalCommandCount { get; }
+    public string VersionText => string.IsNullOrWhiteSpace(Version) ? "Version not specified" : $"Version {Version}";
+    public string CommandCountText => ImportCommandCount is null || TotalCommandCount is null
+        ? string.Empty
+        : $"{ImportCommandCount} / {TotalCommandCount} commands to import";
+    public bool HasVersion => !string.IsNullOrWhiteSpace(Version);
+    public bool HasCommandCountText => !string.IsNullOrWhiteSpace(CommandCountText);
     public IReadOnlyList<AddonPreviewItemViewModel> Commands { get; }
     public bool HasCommands => Commands.Count > 0;
 
-    public AddonPreviewItemViewModel(AddonPreviewItem item)
+    public AddonPreviewItemViewModel(AddonPreviewItem item, bool overwriteExisting = false)
     {
         Category = item.Category;
         Name = item.Name;
         AlreadyExists = item.AlreadyExists;
         ExistingOwner = item.ExistingOwner;
-        Commands = (item.Commands ?? []).Select(command => new AddonPreviewItemViewModel(command)).ToArray();
+        Version = item.Version ?? string.Empty;
+        _importCommandCount = item.ImportCommandCount;
+        TotalCommandCount = item.TotalCommandCount;
+        Commands = (item.Commands ?? []).Select(command => new AddonPreviewItemViewModel(command, overwriteExisting)).ToArray();
+        _overwriteExisting = overwriteExisting;
+        SetImportPolicy(overwriteExisting);
+    }
+
+    public void SetImportPolicy(bool overwriteExisting, bool overwriteComponent = false, string? replaceOwner = null)
+    {
+        _overwriteExisting = overwriteExisting;
+        if (TotalCommandCount is not null)
+        {
+            if (string.Equals(Category, "Command", StringComparison.OrdinalIgnoreCase))
+            {
+                var canOverwrite = overwriteComponent
+                    || (!string.IsNullOrWhiteSpace(replaceOwner)
+                        && string.Equals(ExistingOwner, replaceOwner, StringComparison.OrdinalIgnoreCase));
+                ImportCommandCount = AlreadyExists
+                    ? overwriteExisting && canOverwrite ? TotalCommandCount : 0
+                    : TotalCommandCount;
+            }
+            else if (AlreadyExists && !overwriteExisting)
+            {
+                ImportCommandCount = 0;
+            }
+            else if (Commands.Count > 0)
+            {
+                ImportCommandCount = AlreadyExists && !overwriteExisting
+                    ? 0
+                    : Commands.Sum(command => command.ImportCommandCount ?? 0);
+            }
+            else
+            {
+                ImportCommandCount = TotalCommandCount;
+            }
+
+            OnPropertyChanged(nameof(CommandCountText));
+            OnPropertyChanged(nameof(HasCommandCountText));
+        }
+
+        foreach (var command in Commands)
+        {
+            command.SetImportPolicy(
+                overwriteExisting,
+                replaceOwner: string.Equals(Category, "Extension", StringComparison.OrdinalIgnoreCase)
+                    ? $"Extension: {Name}"
+                    : $"Pack: {Name}");
+        }
+
+        if (TotalCommandCount is not null && Commands.Count > 0)
+        {
+            ImportCommandCount = AlreadyExists && !overwriteExisting
+                ? 0
+                : Commands.Sum(command => command.ImportCommandCount ?? 0);
+            OnPropertyChanged(nameof(CommandCountText));
+            OnPropertyChanged(nameof(HasCommandCountText));
+        }
     }
 }
 

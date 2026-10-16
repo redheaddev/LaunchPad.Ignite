@@ -49,10 +49,46 @@ public sealed class AddonPackageServiceTests
         var newCommand = Assert.Single(pack.Commands!, item => item.Name == "sample:new");
 
         Assert.True(pack.AlreadyExists);
+        Assert.Equal("1.2.3", pack.Version);
+        Assert.Equal(0, pack.ImportCommandCount);
+        Assert.Equal(2, pack.TotalCommandCount);
         Assert.True(existingCommand.AlreadyExists);
         Assert.Equal("Pack: current-pack", existingCommand.ExistingOwner);
         Assert.False(newCommand.AlreadyExists);
+        Assert.Equal(0, existingCommand.ImportCommandCount);
+        Assert.Equal(1, newCommand.ImportCommandCount);
         Assert.Contains(preview.Items, item => item.Category == "Snippet" && item.Name == "sample" && item.AlreadyExists);
+    }
+
+    [Fact]
+    public void PreviewIncludesExtensionVersionAndCommandCounts()
+    {
+        using var directory = new TemporaryDirectory();
+        var service = CreateService(directory.Path, out _, out _, getCommandOwner: name => name == "sample-extension:owned" ? "Pack: other-pack" : null);
+        var archivePath = CreateAddon(directory.Path, "sample-pack", "sample", "sample-extension");
+
+        var preview = service.Preview(archivePath);
+
+        var extension = Assert.Single(preview.Items, item => item.Category == "Extension");
+        Assert.Equal("1.0.0", extension.Version);
+        Assert.Equal(1, extension.ImportCommandCount);
+        Assert.Equal(2, extension.TotalCommandCount);
+    }
+
+    [Fact]
+    public void PreviewExtensionExcludesCommandsOwnedByOtherPacks()
+    {
+        using var directory = new TemporaryDirectory();
+        var service = CreateService(directory.Path, out _, out _, getCommandOwner: name =>
+            name == "sample-extension:owned" ? "Pack: other-pack" : null);
+        var archivePath = CreateAddonWithCommands(directory.Path, "sample-pack", "sample", [], "sample-extension");
+
+        var preview = service.Preview(archivePath);
+
+        var extension = Assert.Single(preview.Items, item => item.Category == "Extension");
+        Assert.Equal(1, extension.ImportCommandCount);
+        Assert.Equal(2, extension.TotalCommandCount);
+        Assert.Contains(extension.Commands!, command => command.Name == "sample-extension:owned" && command.ExistingOwner == "Pack: other-pack");
     }
 
     [Fact]
@@ -286,7 +322,8 @@ public sealed class AddonPackageServiceTests
         WriteEntry(archive, $"packs/{packId}.json", JsonSerializer.Serialize(new CommandPackManifest(
             packId,
             packId,
-            new CommandSchema([], commands))));
+            new CommandSchema([], commands),
+            Version: "1.2.3")));
         WriteEntry(archive, $"snippets/{snippetName}/metadata.json", JsonSerializer.Serialize(new SnippetMetadata(
             Guid.NewGuid().ToString("N"), snippetName, "powershell", [], [])));
         WriteEntry(archive, $"snippets/{snippetName}/script.ps1", "Write-Output 'sample'");
@@ -312,7 +349,30 @@ public sealed class AddonPackageServiceTests
             version = "1.0.0",
             name = "Sample Extension",
             @namespace = extensionId,
-            schema = new { lists = Array.Empty<object>(), commands = Array.Empty<object>(), functions = Array.Empty<object>() }
+            schema = new
+            {
+                lists = Array.Empty<object>(),
+                commands = new[]
+                {
+                    new
+                    {
+                        name = "owned",
+                        @namespace = extensionId,
+                        kind = "url",
+                        description = "Owned command",
+                        actions = new[] { new { name = "default", usage = $"{extensionId}:owned", targetTemplate = "https://example.test", arguments = Array.Empty<object>() } }
+                    },
+                    new
+                    {
+                        name = "new",
+                        @namespace = extensionId,
+                        kind = "url",
+                        description = "New command",
+                        actions = new[] { new { name = "default", usage = $"{extensionId}:new", targetTemplate = "https://example.test", arguments = Array.Empty<object>() } }
+                    }
+                },
+                functions = Array.Empty<object>()
+            }
         }));
         return packagePath;
     }

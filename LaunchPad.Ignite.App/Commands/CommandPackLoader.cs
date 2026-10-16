@@ -64,7 +64,13 @@ public sealed record CommandPackImportResult(string Id, IReadOnlyList<string> Sk
 
 public sealed record CommandPackPreviewCommand(CommandDefinition Command, string? ExistingOwner);
 
-public sealed record CommandPackPreview(string Id, string? Namespace, IReadOnlyList<CommandPackPreviewCommand> Commands);
+public sealed record CommandPackPreview(
+    string Id,
+    string? Namespace,
+    string? Version,
+    int ImportCommandCount,
+    int TotalCommandCount,
+    IReadOnlyList<CommandPackPreviewCommand> Commands);
 
 public sealed class CommandPackLoader
 {
@@ -139,7 +145,13 @@ public sealed class CommandPackLoader
             .Select(command => command with { Namespace = command.Namespace ?? manifest.Namespace })
             .Select(command => new CommandPackPreviewCommand(command, getCommandOwner?.Invoke(command.QualifiedName)))
             .ToArray();
-        return new CommandPackPreview(manifest.Id, manifest.Namespace, commands);
+        return new CommandPackPreview(
+            manifest.Id,
+            manifest.Namespace,
+            manifest.Version,
+            commands.Count(command => command.ExistingOwner is null),
+            commands.Length,
+            commands);
     }
 
     public CommandPackManifest ReadInstalledManifest(string id)

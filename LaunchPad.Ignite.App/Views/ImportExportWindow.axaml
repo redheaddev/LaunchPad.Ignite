@@ -170,14 +170,19 @@
 								<TextBlock Text="PACK PREVIEW" Foreground="{DynamicResource ThemeAccent}" FontSize="11" FontWeight="Bold" />
 								<TextBlock Text="{Binding PackPreviewMessage}" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" IsVisible="{Binding !HasPackPreview}" />
 								<StackPanel Spacing="8" IsVisible="{Binding HasPackPreview}">
-									<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="4">
+									<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="4">
 										<TextBlock Text="Pack ID" Foreground="{DynamicResource ThemeSecondaryText}" />
 										<TextBlock Grid.Column="1" Text="{Binding PackPreviewId}" FontWeight="SemiBold" />
 										<TextBlock Grid.Row="1" Text="Namespace" Foreground="{DynamicResource ThemeSecondaryText}" />
 										<TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding PackPreviewNamespace}" />
+										<TextBlock Grid.Row="2" Text="Version" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding PackPreviewVersion}" />
 									</Grid>
 									<Border Height="1" Background="{DynamicResource ThemeBorder}" />
-									<TextBlock Text="Commands" FontWeight="SemiBold" />
+									<Grid ColumnDefinitions="*,Auto">
+										<TextBlock Text="Commands" FontWeight="SemiBold" />
+										<TextBlock Grid.Column="1" Text="{Binding PackPreviewCommandCountText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" />
+									</Grid>
 									<ItemsControl ItemsSource="{Binding PackPreviewCommands}">
 										<ItemsControl.ItemTemplate>
 										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
@@ -236,10 +241,14 @@
 										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
 											<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
 												<StackPanel Spacing="6">
-													<Grid ColumnDefinitions="*,Auto">
+									<Grid ColumnDefinitions="*,Auto">
 														<TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-														<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+										<StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+											<TextBlock Text="{Binding CommandCountText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasCommandCountText}" />
+											<TextBlock Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+											</StackPanel>
 													</Grid>
+									<TextBlock Text="{Binding VersionText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasVersion}" />
 													<ItemsControl ItemsSource="{Binding Commands}" IsVisible="{Binding HasCommands}">
 														<ItemsControl.ItemTemplate>
 															<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
@@ -258,20 +267,28 @@
 									<ItemsControl ItemsSource="{Binding AddonPreviewSnippets}">
 										<ItemsControl.ItemTemplate>
 										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
-											<Grid ColumnDefinitions="*,Auto" Margin="0,2">
-												<TextBlock Text="{Binding Name}" />
+										<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+											<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="4">
+												<TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
 												<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+												<TextBlock Grid.Row="1" Text="{Binding CommandCountText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasCommandCountText}" />
+												<TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding VersionText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasVersion}" />
 											</Grid>
+										</Border>
 										</DataTemplate>
 									</ItemsControl.ItemTemplate>
 									</ItemsControl>
 									<ItemsControl ItemsSource="{Binding AddonPreviewExtensions}">
 										<ItemsControl.ItemTemplate>
 										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
-											<Grid ColumnDefinitions="*,Auto" Margin="0,2">
-												<TextBlock Text="{Binding Name}" />
+										<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+											<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="4">
+												<TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
 												<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+												<TextBlock Grid.Row="1" Text="{Binding CommandCountText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasCommandCountText}" />
+												<TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding VersionText}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" IsVisible="{Binding HasVersion}" />
 											</Grid>
+										</Border>
 										</DataTemplate>
 									</ItemsControl.ItemTemplate>
 									</ItemsControl>
