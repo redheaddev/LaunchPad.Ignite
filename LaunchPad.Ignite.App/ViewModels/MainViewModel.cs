@@ -77,6 +77,10 @@ public partial class MainViewModel : ViewModelBase
     private bool _directPathReplacesWholeInput;
     private bool _syncingInput;
 
+    public string GlobalActivationHotkeyValue => _profileSettingsStore.GetValue(
+        "app:globalActivationHotkey",
+        GlobalActivationHotkey.DefaultValue);
+
     public MainViewModel()
     {
         _commandLogger = new ProfileCommandLogger();
@@ -133,6 +137,10 @@ public partial class MainViewModel : ViewModelBase
         var commandPackSources = commandPacks.CommandSources;
         _commandSchemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
         var schema = commandPacks.FilterDisabledCommands(_commandSchemaLoader.Load());
+        schema = schema with
+        {
+            Commands = MediaShortcutSettings.ApplyOverrides(schema.Commands, profileSettings)
+        };
         _definitionManagementCommandModel = new DefinitionManagementCommandModel(_commandSchemaLoader, InitializeCommandRuntime);
         _userCommandNames = _commandSchemaLoader.UserCommandNames;
         var settings = _applicationSettings.Concat(schema.Settings).ToArray();

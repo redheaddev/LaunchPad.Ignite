@@ -140,6 +140,25 @@
 			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsExtensionSelected}">
 				<StackPanel Spacing="12">
+					<Border IsVisible="{Binding IsMediaExtensionSelected}" Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
+						<StackPanel Spacing="10">
+							<TextBlock Text="Media keyboard shortcuts" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Change a chord, then save it. Leave the chord empty and save to restore the extension default." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<ItemsControl ItemsSource="{Binding MediaShortcutEditors}">
+								<ItemsControl.ItemTemplate>
+									<DataTemplate x:DataType="vm:MediaShortcutEditorViewModel">
+										<Grid ColumnDefinitions="120,*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4" Margin="0,4">
+											<TextBlock Text="{Binding Label}" VerticalAlignment="Center" Foreground="{DynamicResource ThemeText}" />
+											<TextBox Grid.Column="1" Text="{Binding Shortcut}" Watermark="alt+num+8" />
+											<Button Grid.Column="2" Content="Capture" Click="CaptureMediaShortcut_Click" Tag="{Binding}" />
+											<Button Grid.Column="3" Content="Save" Command="{Binding SaveShortcutCommand}" />
+											<TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="{Binding Status}" FontSize="11" Foreground="{DynamicResource ThemeSecondaryText}" />
+										</Grid>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</StackPanel>
+					</Border>
 					<ItemsControl ItemsSource="{Binding Settings}">
 						<ItemsControl.ItemTemplate>
 							<DataTemplate>
@@ -209,7 +228,7 @@
 										<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
 											<StackPanel Spacing="8">
 												<TextBlock Text="Command details" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
-												<Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="6">
+												<Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="6">
 													<TextBlock Text="Name" Foreground="{DynamicResource ThemeSecondaryText}" />
 													<TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
 													<TextBlock Grid.Row="1" Text="Namespace" Foreground="{DynamicResource ThemeSecondaryText}" />
@@ -222,7 +241,14 @@
 													<TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Description, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" TextWrapping="Wrap" />
 													<TextBlock Grid.Row="5" Text="Source" Foreground="{DynamicResource ThemeSecondaryText}" />
 													<TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding SourceLocation}" Foreground="{DynamicResource ThemeText}" />
+													<TextBlock Grid.Row="6" Text="Keyboard shortcut" Foreground="{DynamicResource ThemeSecondaryText}" />
+													<Grid Grid.Row="6" Grid.Column="1" ColumnDefinitions="*,Auto">
+														<TextBox Text="{Binding KeyboardShortcut, Mode=TwoWay}" Watermark="ctrl+alt+p" IsEnabled="{Binding IsEditable}" />
+														<Button Grid.Column="1" Content="Assign key" Tag="{Binding}" Click="CaptureCommandShortcut_Click" IsEnabled="{Binding IsEditable}" Margin="6,0,0,0" />
+													</Grid>
+													<CheckBox Grid.Row="7" Grid.Column="1" Content="Execute immediately on shortcut" IsChecked="{Binding ExecuteOnKeyboardShortcut, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
 												</Grid>
+												<TextBlock Text="{Binding ShortcutStatus}" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 												<Grid ColumnDefinitions="*,Auto">
 													<StackPanel Spacing="3">
 														<TextBlock Text="Actions" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
@@ -245,6 +271,13 @@
 																</Grid>
 																<TextBlock Text="Action name" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 												<TextBox Text="{Binding Name, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+												<TextBlock Text="Keyboard shortcut" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<Grid ColumnDefinitions="*,Auto">
+													<TextBox Text="{Binding KeyboardShortcut, Mode=TwoWay}" Watermark="ctrl+alt+p" IsEnabled="{Binding IsEditable}" />
+													<Button Grid.Column="1" Content="Assign key" Tag="{Binding}" Click="CaptureCommandActionShortcut_Click" IsEnabled="{Binding IsEditable}" Margin="6,0,0,0" />
+												</Grid>
+												<CheckBox Content="Execute immediately on shortcut" IsChecked="{Binding ExecuteOnKeyboardShortcut, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+												<TextBlock Text="{Binding ShortcutStatus}" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 																<TextBlock Text="Description" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 												<TextBox Text="{Binding Description, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
 																<TextBlock Text="Usage - syntax shown to users; brackets usually mark optional arguments." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
@@ -344,6 +377,18 @@
 				</StackPanel>
 			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSettingsListVisible}">
+				<StackPanel Spacing="12">
+					<Border IsVisible="{Binding IsApplicationSelected}" Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
+						<StackPanel Spacing="8">
+							<TextBlock Text="LaunchPad hotkey" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Activate LaunchPad with this key chord. At least one modifier is required." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<StackPanel Orientation="Horizontal" Spacing="10">
+								<TextBlock Text="{Binding GlobalActivationHotkeyDisplay}" Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
+								<Button Content="Change hotkey" Click="ChangeHotkey_Click" />
+							</StackPanel>
+							<TextBlock Text="{Binding GlobalActivationHotkeyStatus}" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+						</StackPanel>
+					</Border>
 				<ItemsControl ItemsSource="{Binding Settings}">
 					<ItemsControl.ItemTemplate>
 						<DataTemplate>
@@ -362,6 +407,7 @@
 						</DataTemplate>
 					</ItemsControl.ItemTemplate>
 				</ItemsControl>
+				</StackPanel>
 			</ScrollViewer>
 		</Grid>
 	</Grid>

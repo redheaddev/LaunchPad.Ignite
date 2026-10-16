@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Schema;
+using LaunchPad.Ignite.App.Services;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -123,6 +124,52 @@ public class ShortcutExpansionTests
 
         Assert.Equal("media start ", expansion);
         Assert.True(executeImmediately);
+    }
+
+    [Fact]
+    public void MediaShortcutSettings_OverrideDefaultsAndPersistPerAction()
+    {
+        var commands = new[]
+        {
+            new CommandDefinition("media", "system", "Media controls",
+            [
+                new CommandActionDefinition("start", "Start", "", "start", []) { KeyboardShortcut = "alt+num+8" },
+                new CommandActionDefinition("stop", "Stop", "", "stop", []) { KeyboardShortcut = "alt+num+2" }
+            ], Namespace: "media")
+        };
+        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [MediaShortcutSettings.GetSettingName("start")] = "ctrl+alt+p"
+        };
+
+        var overridden = MediaShortcutSettings.ApplyOverrides(commands, settings);
+        var resolver = new ShortcutResolver(overridden);
+
+        Assert.Equal("ctrl+alt+p", overridden[0].Actions[0].KeyboardShortcut);
+        Assert.Equal("alt+num+2", overridden[0].Actions[1].KeyboardShortcut);
+        Assert.True(KeyboardShortcutChord.TryParse("ctrl+alt+p", out var updatedChord));
+        Assert.True(resolver.TryExpandChord(updatedChord, out var expansion));
+        Assert.Equal("media:media start ", expansion);
+    }
+
+    [Fact]
+    public void MediaShortcutSettings_RejectsCollisionWithAnotherConfiguredMediaAction()
+    {
+        var commands = new[]
+        {
+            new CommandDefinition("media", "system", "Media controls",
+            [
+                new CommandActionDefinition("start", "Start", "", "start", []) { KeyboardShortcut = "alt+num+8" },
+                new CommandActionDefinition("stop", "Stop", "", "stop", []) { KeyboardShortcut = "alt+num+2" }
+            ], Namespace: "media")
+        };
+        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [MediaShortcutSettings.GetSettingName("start")] = "ctrl+alt+p"
+        };
+
+        Assert.False(MediaShortcutSettings.IsAvailable("ctrl+alt+p", commands, "stop", settings));
+        Assert.True(MediaShortcutSettings.IsAvailable("ctrl+alt+s", commands, "stop", settings));
     }
 
     [Fact]

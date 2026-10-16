@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _shiftPressed;
     private bool _metaPressed;
     private bool _activationKeyPressed;
+    private KeyCode _activationKey;
     private bool _activationPending;
     private bool _secretDialogIsOpen;
     private bool _commandBoxHasFocus;
@@ -53,7 +54,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Title = $"LaunchPad.Ignite {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}";
         _commandBox = this.FindControl<TextBox>("CommandBox")
-            ?? throw new InvalidOperationException("Command input control was not found.");;
+            ?? throw new InvalidOperationException("Command input control was not found.");
         _commandInputBorder = this.FindControl<Border>("CommandInputBorder")
             ?? throw new InvalidOperationException("Command input border was not found.");
         _completionList = this.FindControl<ItemsControl>("CompletionList")
@@ -684,16 +685,20 @@ public partial class MainWindow : Window
                 return;
         }
 
-        if (e.Data.KeyCode == KeyCode.VcSpace
-            && _altPressed
-            && !_controlPressed
-            && !_shiftPressed
-            && !_metaPressed
-            && !_activationKeyPressed)
+        if (_secretDialogIsOpen)
+        {
+            return;
+        }
+
+        if (!_activationKeyPressed
+            && _shortcutViewModel is { } mainViewModel
+            && GlobalActivationHotkey.TryParse(mainViewModel.GlobalActivationHotkeyValue, out var activationHotkey)
+            && activationHotkey.Matches(_controlPressed, _altPressed, _shiftPressed, _metaPressed, e.Data.KeyCode))
         {
             _activationKeyPressed = true;
+            _activationKey = e.Data.KeyCode;
+            _activationPending = true;
             e.SuppressEvent = true;
-            Dispatcher.UIThread.Post(ToggleVisibility);
             return;
         }
 
@@ -761,11 +766,6 @@ public partial class MainWindow : Window
             case KeyCode.VcLeftAlt:
             case KeyCode.VcRightAlt:
                 _altPressed = false;
-                if (_activationPending)
-                {
-                    _activationPending = false;
-                    Dispatcher.UIThread.Post(ToggleVisibility);
-                }
                 break;
             case KeyCode.VcLeftControl:
             case KeyCode.VcRightControl:
@@ -781,10 +781,16 @@ public partial class MainWindow : Window
                 break;
         }
 
-        if (e.Data.KeyCode == KeyCode.VcSpace)
+        if (e.Data.KeyCode == _activationKey)
         {
             e.SuppressEvent = _activationKeyPressed;
             _activationKeyPressed = false;
+        }
+
+        if (_activationPending && !_altPressed && !_controlPressed && !_shiftPressed && !_metaPressed)
+        {
+            _activationPending = false;
+            Dispatcher.UIThread.Post(ToggleVisibility);
         }
     }
 

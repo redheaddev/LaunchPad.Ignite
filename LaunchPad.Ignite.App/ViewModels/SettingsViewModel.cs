@@ -26,6 +26,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly IReadOnlyList<CommandLaunchPreferenceViewModel> _commandLaunchPreferences;
     private readonly IReadOnlyList<CommandDetailsViewModel> _commandDetails;
     private readonly IReadOnlyList<EnumListEditorViewModel> _enumListEditors;
+    private IReadOnlyList<MediaShortcutEditorViewModel> _mediaShortcutEditors = [];
     private readonly IReadOnlyDictionary<string, IReadOnlyList<ListDefaultEditorViewModel>> _listDefaultEditorsByNamespace;
     private readonly Dictionary<string, Dictionary<string, string>> _themeColorDrafts = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<ColorTheme> _colorThemes = [];
@@ -36,6 +37,9 @@ public partial class SettingsViewModel : ViewModelBase
     private string _selectedCommandSourceFilter = "User";
     private CommandDetailsViewModel? _selectedCommandDetails;
     private EnumListEditorViewModel? _selectedEnumListEditor;
+    private GlobalActivationHotkey _activationHotkey;
+    private bool _isCapturingGlobalActivationHotkey;
+    private string _globalActivationHotkeyStatus = string.Empty;
 
     private SettingsNavigationItem? _selectedNavigationItem;
     public IReadOnlyList<SettingsNavigationItem> NavigationItems { get; }
@@ -43,6 +47,7 @@ public partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
     public IReadOnlyList<CommandPackSettingsViewModel> CommandPacks => _commandPacks;
     public IReadOnlyList<CommandLaunchPreferenceViewModel> CommandLaunchPreferences => _commandLaunchPreferences;
+    public IReadOnlyList<MediaShortcutEditorViewModel> MediaShortcutEditors => _mediaShortcutEditors;
     public IReadOnlyList<CommandDetailsViewModel> CommandDetails => _commandDetails;
     public IReadOnlyList<CommandDetailsViewModel> FilteredCommandDetails => _commandDetails
         .Where(command => _selectedCommandSourceFilter switch
@@ -120,6 +125,25 @@ public partial class SettingsViewModel : ViewModelBase
     public bool IsThemeSelected => SelectedNavigationItem?.Category == "theme";
     public bool IsCommandsSelected => SelectedNavigationItem?.Category == "commands";
     public bool IsListsSelected => SelectedNavigationItem?.Category == "lists";
+    public bool IsApplicationSelected => SelectedNavigationItem?.Category == "application";
+    public bool IsMediaExtensionSelected => SelectedNavigationItem is { Category: "extension" } selected
+        && string.Equals(selected.Namespace, MediaShortcutSettings.Namespace, StringComparison.OrdinalIgnoreCase);
+    public GlobalActivationHotkey ActivationHotkey
+    {
+        get => _activationHotkey;
+        private set => SetProperty(ref _activationHotkey, value);
+    }
+    public string GlobalActivationHotkeyDisplay => ActivationHotkey.DisplayName;
+    public bool IsCapturingGlobalActivationHotkey
+    {
+        get => _isCapturingGlobalActivationHotkey;
+        private set => SetProperty(ref _isCapturingGlobalActivationHotkey, value);
+    }
+    public string GlobalActivationHotkeyStatus
+    {
+        get => _globalActivationHotkeyStatus;
+        private set => SetProperty(ref _globalActivationHotkeyStatus, value);
+    }
     public bool IsSecretsSelected => false;
     public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsSecretsSelected && !IsCommandsSelected && !IsListsSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
@@ -182,6 +206,13 @@ public partial class SettingsViewModel : ViewModelBase
         IReadOnlyList<CommandListDefinition>? listDefaults = null)
     {
         _settingsStore = settingsStore;
+        ActivationHotkey = GlobalActivationHotkey.TryParse(
+            settingsStore.GetValue("app:globalActivationHotkey", GlobalActivationHotkey.DefaultValue),
+            out var activationHotkey)
+            ? activationHotkey
+            : GlobalActivationHotkey.TryParse(GlobalActivationHotkey.DefaultValue, out var defaultHotkey)
+                ? defaultHotkey
+                : throw new InvalidOperationException("The default global activation hotkey is invalid.");
         _settingsChanged = settingsChanged;
         _applicationSettings = applicationSettings;
         _extensionStateStore = extensionStateStore;
@@ -237,6 +268,20 @@ public partial class SettingsViewModel : ViewModelBase
                     ResetListDefaultEditors);
             })
             .ToArray();
+        var mediaCommandDefinitions = commandList
+            .Where(MediaShortcutSettings.IsMediaCommand)
+            .ToArray();
+        _mediaShortcutEditors = mediaCommandDefinitions
+            .SelectMany(command => command.Actions)
+            .Where(action => action.KeyboardShortcut is not null)
+            .Select(action => new MediaShortcutEditorViewModel(
+                action.Name,
+                action.Description,
+                MediaShortcutSettings.GetDefaultShortcut(action.Name),
+                commandList,
+                _settingsStore,
+                _settingsChanged))
+            .ToArray();
         _commandDetails = commandList
             .OrderBy(command => command.QualifiedName, StringComparer.OrdinalIgnoreCase)
             .Select(command =>
@@ -247,6 +292,7 @@ public partial class SettingsViewModel : ViewModelBase
                     : null;
                 return new CommandDetailsViewModel(
                     command,
+                    commandList,
                     launchPreferences.GetValueOrDefault(command.QualifiedName),
                     CommandSourceLabels.GetLabel(command, commandSources, userCommandNames, commandPackSources),
                     saveUserCommand,
@@ -304,9 +350,38 @@ public partial class SettingsViewModel : ViewModelBase
                 AvailableSettings = settingsForExtension ?? []
             });
         }
+
         NavigationItems = navigation;
         SelectedNavigationItem = navigation.FirstOrDefault(item => item.Category == "application");
         SelectedCommandDetails = FilteredCommandDetails.FirstOrDefault();
+    }
+
+    public void BeginGlobalActivationHotkeyCapture()
+    {
+        IsCapturingGlobalActivationHotkey = true;
+        GlobalActivationHotkeyStatus = "Press a key chord with at least one modifier (Ctrl, Alt, Shift, or Win). Press Esc to cancel.";
+    }
+
+    public void CancelGlobalActivationHotkeyCapture()
+    {
+        IsCapturingGlobalActivationHotkey = false;
+        GlobalActivationHotkeyStatus = "Hotkey change canceled.";
+    }
+
+    public bool TrySetGlobalActivationHotkey(bool control, bool alt, bool shift, bool meta, string keyName)
+    {
+        IsCapturingGlobalActivationHotkey = false;
+        if (!GlobalActivationHotkey.TryCreate(control, alt, shift, meta, keyName, out var hotkey))
+        {
+            GlobalActivationHotkeyStatus = "That chord is not supported. Choose a non-modifier key and at least one modifier.";
+            return false;
+        }
+
+        ActivationHotkey = hotkey;
+        _settingsStore.SetValue("app:globalActivationHotkey", hotkey.ToSettingValue());
+        OnPropertyChanged(nameof(GlobalActivationHotkeyDisplay));
+        GlobalActivationHotkeyStatus = $"Saved {hotkey.DisplayName}.";
+        return true;
     }
 
     private void RefreshColorThemes()
@@ -469,6 +544,7 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(Subheader));
         OnPropertyChanged(nameof(IsExtensionEnabled));
         OnPropertyChanged(nameof(IsExtensionSelected));
+        OnPropertyChanged(nameof(IsMediaExtensionSelected));
         OnPropertyChanged(nameof(IsExtensionsSelected));
         OnPropertyChanged(nameof(IsPacksSelected));
         OnPropertyChanged(nameof(IsThemeSelected));
@@ -482,6 +558,7 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSelectedExtensionSecretPermissions));
         OnPropertyChanged(nameof(CommandLaunchPreferences));
         OnPropertyChanged(nameof(CommandDetails));
+        OnPropertyChanged(nameof(MediaShortcutEditors));
         OnPropertyChanged(nameof(EnumListEditors));
         OnPropertyChanged(nameof(ListDefaultEditors));
         OnPropertyChanged(nameof(HasNoLists));
@@ -1038,6 +1115,7 @@ public sealed partial class EnumListEditorViewModel : ViewModelBase
 
 public sealed partial class CommandDetailsViewModel : ViewModelBase
 {
+    private readonly IReadOnlyList<CommandDefinition> _allCommands;
     private readonly CommandLaunchPreferenceViewModel? _launchPreference;
     private readonly Func<CommandDefinition, bool>? _saveUserCommand;
     private readonly Func<string?, CommandDefinition, CommandDefinition, bool>? _saveOwnedCommand;
@@ -1047,6 +1125,10 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
     private string _description;
     private string _name;
     private string _namespace;
+    private string? _keyboardShortcut;
+    private bool _executeOnKeyboardShortcut;
+    private string _shortcutStatus = string.Empty;
+    private bool _isCapturingShortcut;
     private bool _hasUnsavedChanges;
     private CommandActionEditorViewModel? _selectedAction;
 
@@ -1073,6 +1155,39 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
         }
     }
     public string QualifiedName => _command.QualifiedName;
+    public string? KeyboardShortcut
+    {
+        get => _keyboardShortcut;
+        set
+        {
+            if (IsEditable && !string.Equals(_keyboardShortcut, value, StringComparison.Ordinal))
+            {
+                UpdateCommandShortcut(value);
+            }
+        }
+    }
+    public bool ExecuteOnKeyboardShortcut
+    {
+        get => _executeOnKeyboardShortcut;
+        set
+        {
+            if (IsEditable && SetProperty(ref _executeOnKeyboardShortcut, value))
+            {
+                _command = _command with { ExecuteOnKeyboardShortcut = value };
+                HasUnsavedChanges = true;
+            }
+        }
+    }
+    public string ShortcutStatus
+    {
+        get => _shortcutStatus;
+        private set => SetProperty(ref _shortcutStatus, value);
+    }
+    public bool IsCapturingShortcut
+    {
+        get => _isCapturingShortcut;
+        private set => SetProperty(ref _isCapturingShortcut, value);
+    }
     public string Kind { get; }
     public string SourceLocation { get; }
     public string Description
@@ -1116,6 +1231,7 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
 
     public CommandDetailsViewModel(
         CommandDefinition command,
+        IReadOnlyList<CommandDefinition> allCommands,
         CommandLaunchPreferenceViewModel? launchPreference,
         string sourceLocation,
         Func<CommandDefinition, bool>? saveUserCommand,
@@ -1126,8 +1242,11 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
     {
         _command = command;
         _originalCommand = command;
+        _allCommands = allCommands;
         _name = command.Name;
         _namespace = command.Namespace ?? string.Empty;
+        _keyboardShortcut = command.KeyboardShortcut;
+        _executeOnKeyboardShortcut = command.ExecuteOnKeyboardShortcut;
         Kind = command.ExecutionHandler;
         SourceLocation = sourceLocation;
         _description = command.Description;
@@ -1142,10 +1261,115 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
                 $"{list.Type}:{list.QualifiedName}"))];
         foreach (var action in command.Actions)
         {
-            Actions.Add(new CommandActionEditorViewModel(action, UpdateAction, RemoveAction, ReferenceChoices, IsEditable));
+            Actions.Add(new CommandActionEditorViewModel(action, UpdateAction, RemoveAction, ReferenceChoices, IsEditable,
+                (definition, chord) => IsShortcutAvailable(chord, definition, includeCommand: false)));
         }
         SelectedAction = Actions.FirstOrDefault();
         _launchPreference = launchPreference;
+    }
+
+    public void BeginShortcutCapture()
+    {
+        if (IsEditable)
+        {
+            IsCapturingShortcut = true;
+            ShortcutStatus = "Press a modifier chord and key. Esc cancels.";
+        }
+    }
+
+    public void CancelShortcutCapture()
+    {
+        IsCapturingShortcut = false;
+        ShortcutStatus = "Shortcut capture canceled.";
+    }
+
+    public bool CaptureShortcut(string chord)
+    {
+        IsCapturingShortcut = false;
+        return SetShortcut(chord);
+    }
+
+    private void UpdateCommandShortcut(string? value)
+    {
+        var shortcut = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        KeyboardShortcutChord parsed = null!;
+        if (shortcut is not null && (!KeyboardShortcutChord.TryParse(shortcut, out parsed)
+            || !IsShortcutAvailable(shortcut, null, includeCommand: true, excludeCommandShortcut: _keyboardShortcut)))
+        {
+            ShortcutStatus = "Enter a valid, unused chord.";
+            return;
+        }
+
+        if (shortcut is not null)
+        {
+            shortcut = parsed.ToString();
+        }
+
+        _keyboardShortcut = shortcut;
+        _command = _command with { KeyboardShortcut = shortcut };
+        HasUnsavedChanges = true;
+        OnPropertyChanged(nameof(KeyboardShortcut));
+        ShortcutStatus = string.IsNullOrEmpty(shortcut) ? "Command shortcut cleared." : $"Shortcut: {shortcut}";
+    }
+
+    private bool SetShortcut(string chord)
+    {
+        if (!KeyboardShortcutChord.TryParse(chord, out var parsed)
+            || !IsShortcutAvailable(chord, null, includeCommand: true, excludeCommandShortcut: _keyboardShortcut))
+        {
+            ShortcutStatus = "That chord is invalid or already assigned.";
+            return false;
+        }
+
+        var normalized = parsed.ToString();
+        _keyboardShortcut = normalized;
+        _command = _command with { KeyboardShortcut = normalized };
+        HasUnsavedChanges = true;
+        OnPropertyChanged(nameof(KeyboardShortcut));
+        ShortcutStatus = $"Shortcut: {normalized}";
+        return true;
+    }
+
+    private bool IsShortcutAvailable(
+        string chord,
+        CommandActionDefinition? actionBeingEdited,
+        bool includeCommand,
+        string? excludeCommandShortcut = null)
+    {
+        if (!KeyboardShortcutChord.TryParse(chord, out var candidate))
+        {
+            return false;
+        }
+
+        foreach (var command in _allCommands)
+        {
+            var isCurrent = string.Equals(command.QualifiedName, _originalCommand.QualifiedName, StringComparison.OrdinalIgnoreCase);
+            var commandShortcut = isCurrent
+                ? includeCommand ? excludeCommandShortcut : _command.KeyboardShortcut
+                : command.KeyboardShortcut;
+            if (KeyboardShortcutChord.TryParse(commandShortcut, out var otherCommandChord)
+                && otherCommandChord == candidate)
+            {
+                return false;
+            }
+
+            foreach (var action in isCurrent ? _command.Actions : command.Actions)
+            {
+                if (isCurrent && actionBeingEdited is not null
+                    && string.Equals(action.Name, actionBeingEdited.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (KeyboardShortcutChord.TryParse(action.KeyboardShortcut, out var otherActionChord)
+                    && otherActionChord == candidate)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     public bool SaveChanges()
@@ -1201,7 +1425,8 @@ public sealed partial class CommandDetailsViewModel : ViewModelBase
         }
 
         var action = new CommandActionDefinition(name, string.Empty, $"{Name} {name}", "", []);
-        var editor = new CommandActionEditorViewModel(action, UpdateAction, RemoveAction, ReferenceChoices, IsEditable);
+        var editor = new CommandActionEditorViewModel(action, UpdateAction, RemoveAction, ReferenceChoices, IsEditable,
+            (definition, chord) => IsShortcutAvailable(chord, definition, includeCommand: false));
         Actions.Add(editor);
         SelectedAction = editor;
         SetCommandActions();
@@ -1386,7 +1611,10 @@ public sealed partial class CommandActionEditorViewModel : ViewModelBase
     private readonly Action<CommandActionEditorViewModel> _remove;
     private readonly IReadOnlyList<CommandListReferenceChoice> _referenceChoices;
     private readonly bool _isEditable;
+    private readonly Func<CommandActionDefinition, string, bool> _shortcutIsAvailable;
     private CommandActionDefinition _definition;
+    private bool _isCapturingShortcut;
+    private string _shortcutStatus = string.Empty;
 
     public CommandActionDefinition Definition => _definition;
     public ObservableCollection<CommandArgumentEditorViewModel> Arguments { get; } = [];
@@ -1402,6 +1630,36 @@ public sealed partial class CommandActionEditorViewModel : ViewModelBase
             ArgumentTemplates = value.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         });
     }
+    public string? KeyboardShortcut
+    {
+        get => _definition.KeyboardShortcut;
+        set
+        {
+            var shortcut = string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();
+            if (shortcut is not null && !_shortcutIsAvailable(_definition, shortcut))
+            {
+                ShortcutStatus = "Enter a valid, unused chord.";
+                return;
+            }
+
+            UpdateAction(_definition with { KeyboardShortcut = shortcut });
+        }
+    }
+    public bool ExecuteOnKeyboardShortcut
+    {
+        get => _definition.ExecuteOnKeyboardShortcut;
+        set => UpdateAction(_definition with { ExecuteOnKeyboardShortcut = value });
+    }
+    public bool IsCapturingShortcut
+    {
+        get => _isCapturingShortcut;
+        private set => SetProperty(ref _isCapturingShortcut, value);
+    }
+    public string ShortcutStatus
+    {
+        get => _shortcutStatus;
+        private set => SetProperty(ref _shortcutStatus, value);
+    }
     public bool IsEditable => _isEditable;
     public bool CanRemove => _isEditable;
 
@@ -1410,20 +1668,52 @@ public sealed partial class CommandActionEditorViewModel : ViewModelBase
         Action changed,
         Action<CommandActionEditorViewModel> remove,
         IReadOnlyList<CommandListReferenceChoice> referenceChoices,
-        bool isEditable)
+        bool isEditable,
+        Func<CommandActionDefinition, string, bool>? shortcutIsAvailable = null)
     {
         _definition = definition;
         _changed = changed;
         _remove = editor => remove(editor);
         _referenceChoices = referenceChoices;
         _isEditable = isEditable;
+        _shortcutIsAvailable = shortcutIsAvailable ?? ((_, _) => true);
         foreach (var argument in definition.Arguments)
         {
             var editor = CreateArgumentEditor(argument, isEditable);
             editor.SetMoveAvailability(Arguments.Count > 0, Arguments.Count < definition.Arguments.Count - 1);
             Arguments.Add(editor);
         }
+
         RefreshMoveAvailability();
+    }
+
+    public void BeginShortcutCapture()
+    {
+        if (_isEditable)
+        {
+            IsCapturingShortcut = true;
+            ShortcutStatus = "Press a modifier chord and key. Esc cancels.";
+        }
+    }
+
+    public void CancelShortcutCapture()
+    {
+        IsCapturingShortcut = false;
+        ShortcutStatus = "Shortcut capture canceled.";
+    }
+
+    public bool CaptureShortcut(string chord)
+    {
+        IsCapturingShortcut = false;
+        if (!KeyboardShortcutChord.TryParse(chord, out var parsed) || !_shortcutIsAvailable(_definition, chord))
+        {
+            ShortcutStatus = "That chord is invalid or already assigned.";
+            return false;
+        }
+
+        KeyboardShortcut = parsed.ToString();
+        ShortcutStatus = $"Shortcut: {parsed}";
+        return true;
     }
 
     public void UpdateDefinition(CommandActionDefinition definition)

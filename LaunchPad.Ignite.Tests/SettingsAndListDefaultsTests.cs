@@ -9,6 +9,57 @@ namespace LaunchPad.Ignite.Tests;
 
 public sealed class SettingsAndListDefaultsTests
 {
+    [Theory]
+    [InlineData("Alt+Space", "Alt+Space")]
+    [InlineData("Ctrl+Shift+K", "Ctrl+Shift+K")]
+    [InlineData("Win+F12", "Win+F12")]
+    public void GlobalActivationHotkey_ParsesAndFormatsChord(string value, string expectedDisplay)
+    {
+        Assert.True(GlobalActivationHotkey.TryParse(value, out var hotkey));
+
+        Assert.Equal(expectedDisplay, hotkey.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Space")]
+    [InlineData("Alt+Ctrl")]
+    [InlineData("Ctrl+NotAKey")]
+    public void GlobalActivationHotkey_RejectsChordWithoutSupportedModifiedKey(string value)
+    {
+        Assert.False(GlobalActivationHotkey.TryParse(value, out _));
+    }
+
+    [Fact]
+    public void GlobalActivationHotkey_MatchesOnlyExactModifiersAndKey()
+    {
+        Assert.True(GlobalActivationHotkey.TryParse("Ctrl+Shift+K", out var hotkey));
+
+        Assert.True(hotkey.Matches(control: true, alt: false, shift: true, meta: false, SharpHook.Data.KeyCode.VcK));
+        Assert.False(hotkey.Matches(control: true, alt: false, shift: false, meta: false, SharpHook.Data.KeyCode.VcK));
+        Assert.False(hotkey.Matches(control: true, alt: true, shift: true, meta: false, SharpHook.Data.KeyCode.VcK));
+    }
+
+    [Fact]
+    public void GlobalActivationHotkey_DefaultIsAltSpace()
+    {
+        Assert.True(GlobalActivationHotkey.TryParse(GlobalActivationHotkey.DefaultValue, out var hotkey));
+
+        Assert.Equal("Alt+Space", hotkey.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("Ctrl+VcMinus", "Ctrl+-")]
+    [InlineData("Alt+VcNumPad1", "Alt+NumPad 1")]
+    public void GlobalActivationHotkey_SettingValueRoundTrips(string value, string expectedDisplay)
+    {
+        Assert.True(GlobalActivationHotkey.TryParse(value, out var hotkey));
+
+        Assert.Equal(expectedDisplay, hotkey.DisplayName);
+        Assert.True(GlobalActivationHotkey.TryParse(hotkey.ToSettingValue(), out var reloaded));
+        Assert.Equal(hotkey, reloaded);
+    }
+
     [Fact]
     public void ProfileSettingsStore_PersistsValuesAndUsesDefinitionDefault()
     {
@@ -399,6 +450,57 @@ public sealed class SettingsAndListDefaultsTests
         Assert.Equal("User", viewModel.SelectedCommandSourceFilter);
     }
 
+    [Fact]
+    public void SettingsViewModel_PopulatesMediaShortcutEditorsWithDefaultsAndStoredOverrides()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        settings.SetValue(MediaShortcutSettings.GetSettingName("start"), "ctrl+alt+p");
+        var mediaCommand = new CommandDefinition(
+            "media",
+            "system",
+            "Media controls",
+            [
+                new CommandActionDefinition("start", "Start media playback", "media start", "start", [])
+                {
+                    KeyboardShortcut = "alt+num+8",
+                    ExecuteOnKeyboardShortcut = true
+                },
+                new CommandActionDefinition("stop", "Stop media playback", "media stop", "stop", [])
+                {
+                    KeyboardShortcut = "alt+num+2",
+                    ExecuteOnKeyboardShortcut = true
+                }
+            ],
+            Handler: "media");
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], [mediaCommand]),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            [new LoadedExtensionInfo("media", "1.0.1", true) { Namespace = "media" }]);
+        var viewModel = new SettingsViewModel(
+            [],
+            extensions,
+            settings,
+            new ExtensionStateStore(Path.Combine(directory.Path, "extension-state.json")),
+            () => { },
+            _ => { },
+            commands: [mediaCommand]);
+
+        Assert.Collection(
+            viewModel.MediaShortcutEditors,
+            start =>
+            {
+                Assert.Equal("start", start.ActionName);
+                Assert.Equal("ctrl+alt+p", start.Shortcut);
+            },
+            stop =>
+            {
+                Assert.Equal("stop", stop.ActionName);
+                Assert.Equal("alt+num+2", stop.Shortcut);
+            });
+    }
+
     [Theory]
     [InlineData(false, false, "App")]
     [InlineData(false, true, "User")]
@@ -482,6 +584,82 @@ public sealed class SettingsAndListDefaultsTests
         Assert.Equal("app definition", appDetails.Description);
         appDetails.Name = "attempted-rename";
         Assert.Equal("app-command", appDetails.Name);
+    }
+
+    [Fact]
+    public void CommandDetails_CapturesAndSavesCommandAndActionShortcuts()
+    {
+        using var directory = new TemporaryDirectory();
+        var action = new CommandActionDefinition("default", "Runs", "user-command", "cmd.exe", [])
+        {
+            KeyboardShortcut = "alt+8"
+        };
+        var command = new CommandDefinition("user-command", "shell", "User command", [action])
+        {
+            KeyboardShortcut = "ctrl+alt+p"
+        };
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], [command]),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            []);
+        CommandDefinition? saved = null;
+        var viewModel = new SettingsViewModel(
+            [], extensions, new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json")),
+            new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json")),
+            () => { }, _ => { }, commands: [command],
+            userCommandNames: new HashSet<string>([command.QualifiedName], StringComparer.OrdinalIgnoreCase),
+            saveUserCommand: updated => { saved = updated; return true; });
+
+        var details = Assert.Single(viewModel.CommandDetails);
+        var actionEditor = Assert.Single(details.Actions);
+        details.BeginShortcutCapture();
+        Assert.True(details.CaptureShortcut("shift+ctrl+k"));
+        details.ExecuteOnKeyboardShortcut = true;
+        actionEditor.BeginShortcutCapture();
+        Assert.True(actionEditor.CaptureShortcut("alt+num+2"));
+        actionEditor.ExecuteOnKeyboardShortcut = true;
+
+        Assert.True(details.SaveChanges());
+        Assert.Equal("ctrl+shift+k", saved?.KeyboardShortcut);
+        Assert.True(saved?.ExecuteOnKeyboardShortcut);
+        var savedAction = Assert.Single(saved!.Actions);
+        Assert.Equal("alt+num+2", savedAction.KeyboardShortcut);
+        Assert.True(savedAction.ExecuteOnKeyboardShortcut);
+    }
+
+    [Fact]
+    public void CommandDetails_RejectsInvalidAndDuplicateShortcutCaptures()
+    {
+        using var directory = new TemporaryDirectory();
+        var action = new CommandActionDefinition("default", "Runs", "user-command", "cmd.exe", [])
+        {
+            KeyboardShortcut = "alt+8"
+        };
+        var command = new CommandDefinition("user-command", "shell", "User command", [action])
+        {
+            KeyboardShortcut = "ctrl+alt+m"
+        };
+        var otherCommand = CreateShellCommand("other-command") with { KeyboardShortcut = "ctrl+alt+p" };
+        var extensions = new LoadedExtensions(
+            new CommandSchema([], [command, otherCommand]),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandExecutor>(),
+            new Dictionary<string, LaunchPad.Ignite.Core.Execution.ICommandFunctionExecutor>(),
+            []);
+        var viewModel = new SettingsViewModel(
+            [], extensions, new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json")),
+            new ExtensionStateStore(Path.Combine(directory.Path, "extensions.json")),
+            () => { }, _ => { }, commands: [command, otherCommand],
+            userCommandNames: new HashSet<string>([command.QualifiedName], StringComparer.OrdinalIgnoreCase),
+            saveUserCommand: _ => true);
+
+        var details = viewModel.CommandDetails.Single(details => details.QualifiedName == command.QualifiedName);
+        Assert.False(details.CaptureShortcut("ctrl+alt+p"));
+        Assert.False(details.CaptureShortcut("invalid"));
+        Assert.Equal("ctrl+alt+m", details.KeyboardShortcut);
+        var actionEditor = Assert.Single(details.Actions);
+        Assert.False(actionEditor.CaptureShortcut("ctrl+alt+m"));
+        Assert.Equal("alt+8", actionEditor.KeyboardShortcut);
     }
 
     [Fact]
