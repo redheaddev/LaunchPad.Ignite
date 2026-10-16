@@ -29,6 +29,33 @@ public sealed class AddonPackageServiceTests
     }
 
     [Fact]
+    public void PreviewListsExistingItemsAndIncomingCommandOwners()
+    {
+        using var directory = new TemporaryDirectory();
+        var service = CreateService(directory.Path, out var packLoader, out var snippetStore,
+            getCommandOwner: name => name == "sample:existing" ? "Pack: current-pack" : null);
+        packLoader.WriteInstalledManifest(CreatePack("sample-pack", "existing-pack-command"));
+        snippetStore.Save("sample", "powershell", [], [], "Write-Output 'existing'");
+        var archivePath = CreateAddonWithCommands(directory.Path, "sample-pack", "sample", [
+            new CommandDefinition("existing", "url", "Existing command", [
+                new CommandActionDefinition("default", "", "sample:existing", "https://example.test/existing", [])], "sample"),
+            new CommandDefinition("new", "url", "New command", [
+                new CommandActionDefinition("default", "", "sample:new", "https://example.test/new", [])], "sample")
+        ]);
+
+        var preview = service.Preview(archivePath);
+        var pack = Assert.Single(preview.Items, item => item.Category == "Command pack");
+        var existingCommand = Assert.Single(pack.Commands!, item => item.Name == "sample:existing");
+        var newCommand = Assert.Single(pack.Commands!, item => item.Name == "sample:new");
+
+        Assert.True(pack.AlreadyExists);
+        Assert.True(existingCommand.AlreadyExists);
+        Assert.Equal("Pack: current-pack", existingCommand.ExistingOwner);
+        Assert.False(newCommand.AlreadyExists);
+        Assert.Contains(preview.Items, item => item.Category == "Snippet" && item.Name == "sample" && item.AlreadyExists);
+    }
+
+    [Fact]
     public void PreviewValidatesExtensionPackageAndReportsExistingExtensionConflict()
     {
         using var directory = new TemporaryDirectory();
@@ -58,6 +85,63 @@ public sealed class AddonPackageServiceTests
 
         Assert.True(File.Exists(Path.Combine(extensionRoot, "sample-extension", "extension.json")));
         Assert.Equal("sample-extension", Assert.Single(new ExtensionLoader([extensionRoot]).Load().Extensions).Id);
+    }
+
+    [Fact]
+    public void CreatePackageUsesProfileRelativePathsAndCanBePreviewedAndInstalled()
+    {
+        using var directory = new TemporaryDirectory();
+        var profile = Path.Combine(directory.Path, "profile");
+        var packs = Path.Combine(profile, "packs");
+        var extensionRoot = Path.Combine(profile, "extensions");
+        var packageManager = new ExtensionPackageManager(extensionRoot, Path.Combine(directory.Path, "packages"));
+        var service = CreateService(directory.Path, out var packLoader, out var snippetStore, packageManager);
+        var extensionPackagePath = CreateExtensionPackage(directory.Path, "sample-extension");
+        packageManager.Install(extensionPackagePath);
+        Directory.CreateDirectory(Path.Combine(packs, "group"));
+        var groupedPackPath = Path.Combine(packs, "group", "sample-pack.json");
+        File.WriteAllText(groupedPackPath, JsonSerializer.Serialize(CreatePack("sample-pack", "sample")));
+        snippetStore.Save("sample", "powershell", [], [], "Write-Output 'sample'");
+        var archivePath = Path.Combine(directory.Path, "created-addon.zip");
+
+        Assert.Equal("group", Assert.Single(service.GetAvailablePacks()).Group);
+
+        service.CreatePackage(
+            archivePath,
+            "sample-addon",
+            "Sample Add-on",
+            "1.2.3",
+            ["sample-pack"],
+            ["sample"],
+            ["sample-extension"]);
+
+        using (var archive = ZipFile.OpenRead(archivePath))
+        {
+            var paths = archive.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("addon.json", paths);
+            Assert.Contains("packs/group/sample-pack.json", paths);
+            Assert.Contains("snippets/sample/metadata.json", paths);
+            Assert.Contains("snippets/sample/script.ps1", paths);
+            Assert.Contains("extensions/sample-extension/extension.json", paths);
+            Assert.DoesNotContain(paths, path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var preview = service.Preview(archivePath);
+        Assert.Equal(["sample-pack"], preview.PackIds);
+        Assert.Equal(["sample"], preview.SnippetNames);
+        Assert.Equal(["sample-extension"], preview.ExtensionIds);
+
+        var targetProfile = Path.Combine(directory.Path, "target-profile");
+        var targetManager = new ExtensionPackageManager(Path.Combine(targetProfile, "extensions"), Path.Combine(directory.Path, "target-packages"));
+        var targetService = new AddonPackageService(
+            new CommandPackLoader([Path.Combine(targetProfile, "packs")]),
+            new SnippetStore(Path.Combine(targetProfile, "snippets")),
+            targetManager);
+        targetService.Install(archivePath, targetService.Preview(archivePath), replaceExisting: false);
+
+        Assert.True(File.Exists(Path.Combine(targetProfile, "packs", "group", "sample-pack.json")));
+        Assert.True(File.Exists(Path.Combine(targetProfile, "snippets", "sample", "metadata.json")));
+        Assert.True(File.Exists(Path.Combine(targetProfile, "extensions", "sample-extension", "extension.json")));
     }
 
     [Fact]
@@ -114,6 +198,23 @@ public sealed class AddonPackageServiceTests
     }
 
     [Fact]
+    public void InstallSkipExistingSkipsConflictingPackButInstallsNonConflictingSnippet()
+    {
+        using var directory = new TemporaryDirectory();
+        var service = CreateService(directory.Path, out var packLoader, out var snippetStore);
+        packLoader.WriteInstalledManifest(CreatePack("sample-pack", "existing"));
+        var archivePath = CreateAddon(directory.Path, "sample-pack", "sample");
+        var preview = service.Preview(archivePath);
+
+        var result = service.Install(archivePath, preview, ImportConflictPolicy.SkipExisting);
+
+        Assert.Equal("existing", Assert.Single(packLoader.ReadInstalledManifest("sample-pack").Schema.Commands).Name);
+        Assert.Equal("Write-Output 'sample'", snippetStore.Find("sample")!.Script);
+        Assert.Contains("Command pack: sample-pack", result.SkippedItems);
+        Assert.Empty(result.SkippedItems.Where(item => item.StartsWith("Snippet:", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void InstallRollsBackPackAndSnippetWhenRuntimeRefreshFails()
     {
         using var directory = new TemporaryDirectory();
@@ -155,7 +256,8 @@ public sealed class AddonPackageServiceTests
         string root,
         out CommandPackLoader packLoader,
         out SnippetStore snippetStore,
-        ExtensionPackageManager? extensionPackageManager = null)
+        ExtensionPackageManager? extensionPackageManager = null,
+        Func<string, string?>? getCommandOwner = null)
     {
         var profile = Path.Combine(root, "profile");
         var packs = Path.Combine(profile, "packs");
@@ -163,17 +265,28 @@ public sealed class AddonPackageServiceTests
         var stateStore = new ExtensionStateStore(Path.Combine(profile, "state.json"));
         packLoader = new CommandPackLoader([packs], stateStore);
         snippetStore = new SnippetStore(Path.Combine(profile, "snippets"));
-        return new AddonPackageService(packLoader, snippetStore, extensionPackageManager);
+        return new AddonPackageService(packLoader, snippetStore, extensionPackageManager, getCommandOwner);
     }
 
     private static string CreateAddon(string root, string packId, string snippetName, string? extensionId = null)
+        => CreateAddonWithCommands(root, packId, snippetName, [CreatePack(packId, "new").Schema.Commands[0]], extensionId);
+
+    private static string CreateAddonWithCommands(
+        string root,
+        string packId,
+        string snippetName,
+        IReadOnlyList<CommandDefinition> commands,
+        string? extensionId = null)
     {
         var archivePath = Path.Combine(root, "sample-addon.zip");
         using var archive = new ZipArchive(File.Open(archivePath, FileMode.Create), ZipArchiveMode.Create);
         WriteEntry(archive, "addon.json", JsonSerializer.Serialize(new AddonManifest(
             "sample-addon", "Sample Add-on", "1.0.0", [$"packs/{packId}.json"], [snippetName],
             extensionId is null ? [] : [$"extensions/{extensionId}.zip"])));
-        WriteEntry(archive, $"packs/{packId}.json", JsonSerializer.Serialize(CreatePack(packId, "new")));
+        WriteEntry(archive, $"packs/{packId}.json", JsonSerializer.Serialize(new CommandPackManifest(
+            packId,
+            packId,
+            new CommandSchema([], commands))));
         WriteEntry(archive, $"snippets/{snippetName}/metadata.json", JsonSerializer.Serialize(new SnippetMetadata(
             Guid.NewGuid().ToString("N"), snippetName, "powershell", [], [])));
         WriteEntry(archive, $"snippets/{snippetName}/script.ps1", "Write-Output 'sample'");

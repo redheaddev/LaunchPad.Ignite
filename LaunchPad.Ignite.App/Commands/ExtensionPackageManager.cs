@@ -46,6 +46,39 @@ public sealed class ExtensionPackageManager
         _packageDirectory = Path.GetFullPath(packageDirectory);
     }
 
+    public string ExtensionRoot => _extensionRoot;
+
+    public IReadOnlyList<(string Id, string Directory)> GetInstalledUserExtensions()
+    {
+        if (!Directory.Exists(_extensionRoot))
+        {
+            return [];
+        }
+
+        var extensions = new List<(string Id, string Directory)>();
+        foreach (var directory in Directory.EnumerateDirectories(_extensionRoot)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                continue;
+            }
+
+            var manifestPath = Path.Combine(directory, ManifestFileName);
+            if (!File.Exists(manifestPath))
+            {
+                continue;
+            }
+
+            var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
+                ?? throw new InvalidDataException($"Extension manifest '{manifestPath}' is empty.");
+            ValidateManifestId(manifest.Id);
+            extensions.Add((manifest.Id, directory));
+        }
+
+        return extensions;
+    }
+
     public string ValidatePackage(string packagePath)
     {
         var stagingRoot = Path.Combine(Path.GetTempPath(), $"launchpad-extension-validation-{Guid.NewGuid():N}");

@@ -445,13 +445,19 @@ public sealed class SettingsAndListDefaultsTests
             commandPackSources: new Dictionary<string, string> { [packCommand.QualifiedName] = "pack-id" });
 
         Assert.Equal("User", viewModel.SelectedCommandSourceFilter);
-        Assert.Equal(2, viewModel.FilteredCommandDetails.Count);
+        Assert.Single(viewModel.FilteredCommandDetails);
         Assert.Contains(viewModel.FilteredCommandDetails, details => details.QualifiedName == "user-command");
-        Assert.Contains(viewModel.FilteredCommandDetails, details => details.QualifiedName == "pack:pack-command");
+        Assert.DoesNotContain(viewModel.FilteredCommandDetails, details => details.QualifiedName == "pack:pack-command");
         Assert.Contains(viewModel.FilteredCommandDetails, details => details == viewModel.SelectedCommandDetails);
+        Assert.Contains("Pack [pack-id]", viewModel.CommandSourceFilters);
+        Assert.Contains("Extension [ext]", viewModel.CommandSourceFilters);
+        Assert.DoesNotContain("Extension", viewModel.CommandSourceFilters);
 
-        viewModel.SelectedCommandSourceFilter = "Extension";
+        viewModel.SelectedCommandSourceFilter = "Pack [pack-id]";
+        Assert.Equal("pack:pack-command", Assert.Single(viewModel.FilteredCommandDetails).QualifiedName);
+        viewModel.SelectedCommandSourceFilter = "Extension [ext]";
         Assert.Equal("extension:extension-command", Assert.Single(viewModel.FilteredCommandDetails).QualifiedName);
+
         viewModel.SelectedCommandSourceFilter = "App";
         Assert.Equal("app-command", Assert.Single(viewModel.FilteredCommandDetails).QualifiedName);
         viewModel.SelectedCommandSourceFilter = "All";
@@ -482,7 +488,7 @@ public sealed class SettingsAndListDefaultsTests
         viewModel.OpenCommandEditor("EXTENSION:extension-command");
 
         Assert.True(viewModel.IsCommandsSelected);
-        Assert.Equal("Extension", viewModel.SelectedCommandSourceFilter);
+        Assert.Equal("Extension [ext]", viewModel.SelectedCommandSourceFilter);
         Assert.Equal("extension:extension-command", viewModel.SelectedCommandDetails?.QualifiedName);
 
         viewModel.OpenCommandEditor("app-command");

@@ -62,6 +62,10 @@ public sealed record LoadedCommandPackInfo(string Id, bool Enabled)
 
 public sealed record CommandPackImportResult(string Id, IReadOnlyList<string> SkippedCommands);
 
+public sealed record CommandPackPreviewCommand(CommandDefinition Command, string? ExistingOwner);
+
+public sealed record CommandPackPreview(string Id, string? Namespace, IReadOnlyList<CommandPackPreviewCommand> Commands);
+
 public sealed class CommandPackLoader
 {
     private sealed record CommandPackManifestLocation(string Path, string? Group);
@@ -123,6 +127,19 @@ public sealed class CommandPackLoader
         ValidateId(id, "pack ID");
         return FindPackPath(_profilePackDirectory, id)
             ?? Path.Combine(_profilePackDirectory, $"{id}.json");
+    }
+
+    public string ProfilePackDirectory => _profilePackDirectory;
+
+    public static CommandPackPreview PreviewPack(string sourcePath, Func<string, string?>? getCommandOwner = null)
+    {
+        ValidateManifestFile(sourcePath);
+        var manifest = ReadManifest(sourcePath, requireMatchingFileId: false);
+        var commands = manifest.Schema.Commands
+            .Select(command => command with { Namespace = command.Namespace ?? manifest.Namespace })
+            .Select(command => new CommandPackPreviewCommand(command, getCommandOwner?.Invoke(command.QualifiedName)))
+            .ToArray();
+        return new CommandPackPreview(manifest.Id, manifest.Namespace, commands);
     }
 
     public CommandPackManifest ReadInstalledManifest(string id)
@@ -215,22 +232,106 @@ public sealed class CommandPackLoader
     public string InstallPack(string sourcePath, bool replaceExisting)
         => InstallPack(sourcePath, _profilePackDirectory, replaceExisting);
 
+    public string InstallPackAtProfilePath(string sourcePath, string profileRelativePath, bool replaceExisting)
+    {
+        var normalizedPath = profileRelativePath.Replace('\\', '/');
+        var segments = normalizedPath.Split('/');
+        if (Path.IsPathRooted(profileRelativePath)
+            || segments.Length is < 2 or > 3
+            || !string.Equals(segments[0], "packs", StringComparison.OrdinalIgnoreCase)
+            || segments.Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".." || segment.Contains(':'))
+            || !normalizedPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Pack destination '{profileRelativePath}' is invalid.");
+        }
+
+        var id = ValidateManifestFile(sourcePath);
+        if (!string.Equals(Path.GetFileNameWithoutExtension(segments[^1]), id, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Pack destination '{profileRelativePath}' must match manifest ID '{id}'.");
+        }
+
+        var destinationPath = Path.GetFullPath(Path.Combine(
+            _profilePackDirectory,
+            Path.Combine(segments.Skip(1).ToArray())));
+        var packRoot = Path.GetFullPath(_profilePackDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!destinationPath.StartsWith(packRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"Pack destination '{profileRelativePath}' escapes the profile pack directory.");
+        }
+
+        var existingPath = GetInstalledPackPath(id);
+        if (File.Exists(existingPath) && !replaceExisting)
+        {
+            throw new IOException($"Command pack '{id}' is already installed.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        var temporaryPath = destinationPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.Copy(sourcePath, temporaryPath, overwrite: false);
+            File.Move(temporaryPath, destinationPath, overwrite: true);
+            if (!string.Equals(existingPath, destinationPath, StringComparison.OrdinalIgnoreCase) && File.Exists(existingPath))
+            {
+                File.Delete(existingPath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+
+        return id;
+    }
+
     public CommandPackImportResult ImportPack(
         string sourcePath,
         IEnumerable<string> existingCommandNames,
-        bool replaceExisting)
+        bool replaceExisting,
+        bool overwriteExistingCommands = false)
     {
         ValidateManifestFile(sourcePath);
         var manifest = ReadManifest(sourcePath, requireMatchingFileId: false);
         var existingNames = existingCommandNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var keptCommands = new List<CommandDefinition>();
+        var installedPath = GetInstalledPackPath(manifest.Id);
+        var installedManifest = File.Exists(installedPath)
+            ? ReadManifest(installedPath, requireMatchingFileId: true)
+            : null;
+        var keptCommands = installedManifest?.Schema.Commands
+            .Select(command => command with { Namespace = command.Namespace ?? installedManifest.Namespace })
+            .ToList() ?? [];
+        var keptNames = keptCommands
+            .Select(command => (command with { Namespace = command.Namespace ?? installedManifest?.Namespace }).NormalizeLegacyHandler().QualifiedName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var skippedCommands = new List<string>();
         foreach (var command in manifest.Schema.Commands)
         {
-                var namespacedCommand = (command with { Namespace = command.Namespace ?? manifest.Namespace }).NormalizeLegacyHandler();
-            if (!existingNames.Add(namespacedCommand.QualifiedName))
+            var namespacedCommand = (command with { Namespace = command.Namespace ?? manifest.Namespace }).NormalizeLegacyHandler();
+            if (existingNames.Contains(namespacedCommand.QualifiedName))
             {
                 skippedCommands.Add(namespacedCommand.QualifiedName);
+                continue;
+            }
+
+            if (!keptNames.Add(namespacedCommand.QualifiedName))
+            {
+                if (overwriteExistingCommands)
+                {
+                    var index = keptCommands.FindIndex(existing => string.Equals(
+                        existing.NormalizeLegacyHandler().QualifiedName,
+                        namespacedCommand.QualifiedName,
+                        StringComparison.OrdinalIgnoreCase));
+                    keptCommands[index] = command with { Namespace = command.Namespace ?? manifest.Namespace };
+                }
+                else
+                {
+                    skippedCommands.Add(namespacedCommand.QualifiedName);
+                }
+
                 continue;
             }
 

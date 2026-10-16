@@ -19,6 +19,22 @@ public partial class ImportExportWindow : Window
         viewModel.CloseRequested += Close;
     }
 
+    private async void CreateAddon_Click(object? sender, RoutedEventArgs e)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Create add-on package",
+            SuggestedFileName = $"LaunchPad.Ignite-{_viewModel.AddonId}-{_viewModel.AddonVersion}.zip",
+            DefaultExtension = "zip",
+            FileTypeChoices = [new FilePickerFileType("LaunchPad add-on") { Patterns = ["*.zip"] }]
+        });
+        var path = file?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _viewModel.CreateAddon(path);
+        }
+    }
+
     private void Refresh_Click(object? sender, RoutedEventArgs e)
         => _viewModel.RefreshInventory();
 

@@ -206,7 +206,6 @@ public sealed class ExtensionCommandModel : ICommandModel
             return Execute(command);
         }
 
-        string? installedId = null;
         var installedPackPath = string.Empty;
         var previousManifest = Array.Empty<byte>();
         var hadPreviousManifest = false;
@@ -216,9 +215,11 @@ public sealed class ExtensionCommandModel : ICommandModel
             var id = CommandPackLoader.ValidateManifestFile(sourcePath);
             var destination = _commandPackLoader.GetInstalledPackPath(id);
             var replaceExisting = false;
+            var hasImportPolicy = command.Arguments.TryGetValue("conflict-policy", out var conflictPolicy);
+            var overwriteExistingCommands = string.Equals(conflictPolicy, "overwrite", StringComparison.OrdinalIgnoreCase);
             if (System.IO.File.Exists(destination))
             {
-                if (_confirmPackReplacement is null || !await _confirmPackReplacement(id))
+                if (!hasImportPolicy && (_confirmPackReplacement is null || !await _confirmPackReplacement(id)))
                 {
                     return new CommandExecutionResult(false, $"Import of command pack '{id}' was cancelled.");
                 }
@@ -232,17 +233,20 @@ public sealed class ExtensionCommandModel : ICommandModel
             var importResult = _commandPackLoader.ImportPack(
                 sourcePath,
                 _existingCommandNames?.Invoke(id) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                replaceExisting);
-            installedId = importResult.Id;
+                replaceExisting,
+                overwriteExistingCommands);
             _stateChanged?.Invoke();
             var skippedMessage = importResult.SkippedCommands.Count == 0
                 ? string.Empty
-                : $" Skipped duplicate command(s): {string.Join(", ", importResult.SkippedCommands)}.";
-            return new CommandExecutionResult(true, $"Command pack '{id}' installed.{skippedMessage}");
+                : $" Skipped existing command(s): {string.Join(", ", importResult.SkippedCommands)}.";
+            var overwrittenMessage = overwriteExistingCommands && replaceExisting
+                ? " Existing commands in this pack were overwritten."
+                : string.Empty;
+            return new CommandExecutionResult(true, $"Command pack '{id}' installed.{overwrittenMessage}{skippedMessage}");
         }
         catch (Exception exception)
         {
-            if (installedId is not null)
+            if (!string.IsNullOrEmpty(installedPackPath))
             {
                 try
                 {

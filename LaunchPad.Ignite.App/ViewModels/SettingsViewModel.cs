@@ -38,6 +38,7 @@ public partial class SettingsViewModel : ViewModelBase
     private string _renameThemeName = string.Empty;
     private string _themeReferenceUrl = string.Empty;
     private string _selectedCommandSourceFilter = "User";
+    private IReadOnlyList<string> _commandSourceFilters = ["All", "User", "App"];
     private CommandDetailsViewModel? _selectedCommandDetails;
     private EnumListEditorViewModel? _selectedEnumListEditor;
     private GlobalActivationHotkey _activationHotkey;
@@ -57,13 +58,13 @@ public partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<CommandDetailsViewModel> FilteredCommandDetails => _commandDetails
         .Where(command => _selectedCommandSourceFilter switch
         {
-            "User" => command.SourceLocation == "User" || command.SourceLocation.StartsWith("Pack [", StringComparison.Ordinal),
-            "Extension" => command.SourceLocation.StartsWith("Extension [", StringComparison.Ordinal),
+            "User" => command.SourceLocation == "User",
             "App" => command.SourceLocation == "App",
-            _ => true
+            "All" => true,
+            _ => string.Equals(command.SourceLocation, _selectedCommandSourceFilter, StringComparison.Ordinal)
         })
         .ToArray();
-    public IReadOnlyList<string> CommandSourceFilters { get; } = ["All", "User", "Extension", "App"];
+    public IReadOnlyList<string> CommandSourceFilters => _commandSourceFilters;
     public string SelectedCommandSourceFilter
     {
         get => _selectedCommandSourceFilter;
@@ -100,8 +101,8 @@ public partial class SettingsViewModel : ViewModelBase
             SelectedCommandSourceFilter = command.SourceLocation switch
             {
                 "User" => "User",
-                var source when source.StartsWith("Pack [", StringComparison.Ordinal) => "User",
-                var source when source.StartsWith("Extension [", StringComparison.Ordinal) => "Extension",
+                var source when source.StartsWith("Pack [", StringComparison.Ordinal) => source,
+                var source when source.StartsWith("Extension [", StringComparison.Ordinal) => source,
                 "App" => "App",
                 _ => "All"
             };
@@ -322,6 +323,17 @@ public partial class SettingsViewModel : ViewModelBase
                     saveOwnedCommand);
             })
             .ToArray();
+        _commandSourceFilters = [
+            "All",
+            "User",
+            "App",
+            .. _commandDetails
+                .Where(command => command.SourceLocation.StartsWith("Pack [", StringComparison.Ordinal)
+                    || command.SourceLocation.StartsWith("Extension [", StringComparison.Ordinal))
+                .Select(command => command.SourceLocation)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(source => source, StringComparer.OrdinalIgnoreCase)
+        ];
         var secretNames = _settingsStore.GetValues()
             .Where(pair => pair.Key.StartsWith("secretPermissions:", StringComparison.OrdinalIgnoreCase))
             .SelectMany(pair => ParseSecretNames(pair.Value))

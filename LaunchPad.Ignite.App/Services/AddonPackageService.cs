@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LaunchPad.Ignite.App.Commands;
@@ -23,7 +24,27 @@ public sealed record AddonImportPreview(
     IReadOnlyList<string> PackIds,
     IReadOnlyList<string> SnippetNames,
     IReadOnlyList<string> ExtensionIds,
-    IReadOnlyList<string> Conflicts);
+    IReadOnlyList<string> Conflicts)
+{
+    public IReadOnlyList<AddonPreviewItem> Items { get; init; } = [];
+}
+
+public sealed record AddonPreviewItem(
+    string Category,
+    string Name,
+    bool AlreadyExists,
+    string? ExistingOwner = null,
+    IReadOnlyList<AddonPreviewItem>? Commands = null);
+
+public enum ImportConflictPolicy
+{
+    SkipExisting,
+    OverwriteExisting
+}
+
+public sealed record AddonInstallResult(IReadOnlyList<string> SkippedItems);
+
+public sealed record AddonPackInfo(string Id, string? Group);
 
 public sealed class AddonPackageService
 {
@@ -39,15 +60,164 @@ public sealed class AddonPackageService
     private readonly CommandPackLoader _packLoader;
     private readonly SnippetStore _snippetStore;
     private readonly ExtensionPackageManager _extensionPackageManager;
+    private readonly Func<string, string?>? _getCommandOwner;
+
+    public IReadOnlyList<AddonPackInfo> GetAvailablePacks()
+    {
+        var directory = _packLoader.ProfilePackDirectory;
+        if (!Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        return Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories)
+            .Select(path =>
+            {
+                CommandPackLoader.ValidateManifestFile(path);
+                var manifest = JsonSerializer.Deserialize<CommandPackManifest>(File.ReadAllText(path), JsonOptions)
+                    ?? throw new InvalidDataException($"Command pack manifest '{path}' is invalid.");
+                var relativeDirectory = Path.GetDirectoryName(Path.GetRelativePath(directory, path));
+                var group = string.IsNullOrEmpty(relativeDirectory) ? null : relativeDirectory;
+                return new AddonPackInfo(manifest.Id, group);
+            })
+            .OrderBy(pack => pack.Group, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public IReadOnlyList<SnippetDefinition> GetAvailableSnippets()
+        => _snippetStore.GetAll();
+
+    public IReadOnlyList<(string Id, string Directory)> GetAvailableExtensions()
+        => _extensionPackageManager.GetInstalledUserExtensions();
+
+    public void CreatePackage(
+        string path,
+        string id,
+        string name,
+        string version,
+        IEnumerable<string> packIds,
+        IEnumerable<string> snippetNames,
+        IEnumerable<string> extensionIds)
+    {
+        if (string.IsNullOrWhiteSpace(id)
+            || !id.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+            || string.IsNullOrWhiteSpace(name)
+            || string.IsNullOrWhiteSpace(version))
+        {
+            throw new ArgumentException("Add-on ID, name, and version are required; the ID may contain only letters, numbers, '-' and '_'.");
+        }
+
+        if (!Regex.IsMatch(version, @"^\d+\.\d+\.\d+$"))
+        {
+            throw new ArgumentException("Add-on version must use major.minor.patch format.", nameof(version));
+        }
+
+        var packsById = GetAvailablePacks().ToDictionary(pack => pack.Id, StringComparer.OrdinalIgnoreCase);
+        var snippetsByName = _snippetStore.GetAll().ToDictionary(snippet => snippet.Metadata.Name, StringComparer.OrdinalIgnoreCase);
+        var extensionsById = _extensionPackageManager.GetInstalledUserExtensions()
+            .ToDictionary(extension => extension.Id, StringComparer.OrdinalIgnoreCase);
+        var selectedPacks = packIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var selectedSnippets = snippetNames.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var selectedExtensions = extensionIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (selectedPacks.Length + selectedSnippets.Length + selectedExtensions.Length == 0)
+        {
+            throw new ArgumentException("Select at least one pack, snippet, or extension.");
+        }
+
+        var missingPacks = selectedPacks.Where(id => !packsById.ContainsKey(id)).ToArray();
+        var missingSnippets = selectedSnippets.Where(name => !snippetsByName.ContainsKey(name)).ToArray();
+        var missingExtensions = selectedExtensions.Where(id => !extensionsById.ContainsKey(id)).ToArray();
+        if (missingPacks.Length + missingSnippets.Length + missingExtensions.Length > 0)
+        {
+            throw new InvalidOperationException("One or more selected add-on components are no longer available.");
+        }
+
+        var profileDirectory = Directory.GetParent(_packLoader.ProfilePackDirectory)?.FullName
+            ?? throw new InvalidOperationException("The profile pack directory must have a parent profile directory.");
+        var packPaths = selectedPacks.Select(packId => Path.GetRelativePath(
+            profileDirectory,
+            _packLoader.GetInstalledPackPath(packId)).Replace('\\', '/')).ToArray();
+        var manifest = new AddonManifest(
+            id.Trim(),
+            name.Trim(),
+            version.Trim(),
+            packPaths,
+            selectedSnippets,
+            selectedExtensions.Select(extensionId => $"extensions/{extensionId}/extension.json").ToArray());
+        ValidateManifest(manifest);
+
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        WriteEntry(archive, ManifestFileName, JsonSerializer.Serialize(manifest, JsonOptions));
+        foreach (var packPath in packPaths)
+        {
+            var sourcePath = Path.Combine(profileDirectory, packPath.Replace('/', Path.DirectorySeparatorChar));
+            WriteEntry(archive, packPath, File.ReadAllBytes(sourcePath));
+        }
+
+        foreach (var snippetName in selectedSnippets)
+        {
+            var snippet = snippetsByName[snippetName];
+            WriteEntry(archive, $"snippets/{snippetName}/metadata.json", JsonSerializer.Serialize(snippet.Metadata, JsonOptions));
+            var scriptName = string.Equals(snippet.Metadata.Type, "powershell", StringComparison.OrdinalIgnoreCase)
+                ? "script.ps1"
+                : "script.sh";
+            WriteEntry(archive, $"snippets/{snippetName}/{scriptName}", snippet.Script);
+        }
+
+        foreach (var extensionId in selectedExtensions)
+        {
+            var sourceDirectory = extensionsById[extensionId].Directory;
+            foreach (var sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+            {
+                var relativePath = Path.GetRelativePath(sourceDirectory, sourcePath).Replace('\\', '/');
+                WriteEntry(archive, $"extensions/{extensionId}/{relativePath}", File.ReadAllBytes(sourcePath));
+            }
+    }
+    }
+
+    private static string WriteTemporaryPack(string stagingDirectory, string packId, byte[] content)
+    {
+        var path = Path.Combine(stagingDirectory, $"{packId}-previous.json");
+        File.WriteAllBytes(path, content);
+        return path;
+    }
+
+    private static void WriteEntry(ZipArchive archive, string path, string content)
+    {
+        using var writer = new StreamWriter(archive.CreateEntry(path).Open());
+        writer.Write(content);
+    }
+
+    private static void WriteEntry(ZipArchive archive, string path, byte[] content)
+    {
+        using var stream = archive.CreateEntry(path).Open();
+        stream.Write(content);
+    }
+
+    private static void CreateExtensionArchive(
+        IEnumerable<KeyValuePair<string, ZipArchiveEntry>> entries,
+        string prefix,
+        string destinationPath)
+    {
+        using var archive = ZipFile.Open(destinationPath, ZipArchiveMode.Create);
+        foreach (var item in entries)
+        {
+            var relativePath = item.Key[prefix.Length..];
+            WriteEntry(archive, relativePath, ReadBytes(item.Value));
+        }
+    }
 
     public AddonPackageService(
         CommandPackLoader packLoader,
         SnippetStore snippetStore,
-        ExtensionPackageManager? extensionPackageManager = null)
+        ExtensionPackageManager? extensionPackageManager = null,
+        Func<string, string?>? getCommandOwner = null)
     {
         _packLoader = packLoader;
         _snippetStore = snippetStore;
         _extensionPackageManager = extensionPackageManager ?? new ExtensionPackageManager();
+        _getCommandOwner = getCommandOwner;
     }
 
     public AddonImportPreview Preview(string archivePath)
@@ -136,21 +306,49 @@ public sealed class AddonPackageService
         foreach (var extensionPath in manifest.Extensions ?? [])
         {
             var entryPath = NormalizePackagePath(extensionPath);
-            if (!entryPath.StartsWith("extensions/", StringComparison.OrdinalIgnoreCase)
-                || !entryPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-                || !entries.TryGetValue(entryPath, out var extensionEntry))
+            if (!entryPath.StartsWith("extensions/", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException($"Add-on extension package '{extensionPath}' is missing or is outside the extensions directory.");
+                throw new InvalidDataException($"Add-on extension '{extensionPath}' is outside the extensions directory.");
             }
 
             var temporaryPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.zip");
             try
             {
-                File.WriteAllBytes(temporaryPath, ReadBytes(extensionEntry));
-                var extensionId = _extensionPackageManager.ValidatePackage(temporaryPath);
-                if (!string.Equals(Path.GetFileNameWithoutExtension(entryPath), extensionId, StringComparison.OrdinalIgnoreCase))
+                string extensionId;
+                if (entryPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    && entries.TryGetValue(entryPath, out var extensionEntry))
                 {
-                    throw new InvalidDataException($"Extension entry '{entryPath}' must match its manifest ID '{extensionId}'.");
+                    File.WriteAllBytes(temporaryPath, ReadBytes(extensionEntry));
+                    extensionId = _extensionPackageManager.ValidatePackage(temporaryPath);
+                    if (!string.Equals(Path.GetFileNameWithoutExtension(entryPath), extensionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException($"Extension entry '{entryPath}' must match its manifest ID '{extensionId}'.");
+                    }
+
+                    expectedFiles.Add(entryPath);
+                }
+                else
+                {
+                    var segments = entryPath.Split('/');
+                    if (segments.Length != 3 || !string.Equals(segments[2], "extension.json", StringComparison.OrdinalIgnoreCase)
+                        || !entries.ContainsKey(entryPath))
+                    {
+                        throw new InvalidDataException($"Add-on extension '{extensionPath}' must reference extensions/<id>/extension.json.");
+                    }
+
+                    var extensionPrefix = $"extensions/{segments[1]}/";
+                    var extensionEntries = entries.Where(pair => pair.Key.StartsWith(extensionPrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    CreateExtensionArchive(extensionEntries, extensionPrefix, temporaryPath);
+                    extensionId = _extensionPackageManager.ValidatePackage(temporaryPath);
+                    if (!string.Equals(segments[1], extensionId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException($"Extension directory '{segments[1]}' must match its manifest ID '{extensionId}'.");
+                    }
+
+                    foreach (var item in extensionEntries)
+                    {
+                        expectedFiles.Add(item.Key);
+                    }
                 }
 
                 extensionIds.Add(extensionId);
@@ -163,7 +361,6 @@ public sealed class AddonPackageService
                 }
             }
 
-            expectedFiles.Add(entryPath);
         }
 
         var unreferenced = entries.Keys.Where(entry => !expectedFiles.Contains(entry)).ToArray();
@@ -179,6 +376,46 @@ public sealed class AddonPackageService
             throw new InvalidDataException("Add-on manifest contains duplicate pack IDs, snippet names, or extension IDs.");
         }
 
+        var packItems = new List<AddonPreviewItem>();
+        foreach (var packPath in manifest.Packs)
+        {
+            var normalized = NormalizePackagePath(packPath);
+            var packId = Path.GetFileNameWithoutExtension(normalized);
+            var temporaryPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.json");
+            try
+            {
+                File.WriteAllBytes(temporaryPath, ReadBytes(entries[normalized]));
+                var incomingPack = JsonSerializer.Deserialize<CommandPackManifest>(File.ReadAllText(temporaryPath), JsonOptions)
+                    ?? throw new InvalidDataException($"Command pack '{packId}' is invalid.");
+                var commands = incomingPack.Schema.Commands
+                    .Select(command => command with { Namespace = command.Namespace ?? incomingPack.Namespace })
+                    .Select(command =>
+                    {
+                        var owner = _getCommandOwner?.Invoke(command.QualifiedName);
+                        return new AddonPreviewItem("Command", command.QualifiedName, owner is not null, owner);
+                    })
+                    .ToArray();
+                var installed = File.Exists(_packLoader.GetInstalledPackPath(packId));
+                packItems.Add(new AddonPreviewItem("Command pack", packId, installed, installed ? "Installed command pack" : null, commands));
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+        }
+
+        var snippetItems = snippetNames
+            .Select(name => new AddonPreviewItem("Snippet", name, _snippetStore.Find(name) is not null,
+                _snippetStore.Find(name) is null ? null : "Installed snippet"))
+            .ToArray();
+        var extensionItems = extensionIds
+            .Select(id => new AddonPreviewItem("Extension", id, _extensionPackageManager.IsUserExtensionInstalled(id),
+                _extensionPackageManager.IsUserExtensionInstalled(id) ? "Installed extension" : null))
+            .ToArray();
+
         var conflicts = packIds.Where(id => File.Exists(_packLoader.GetInstalledPackPath(id)))
             .Select(id => $"Command pack: {id}")
             .Concat(snippetNames.Where(name => _snippetStore.Find(name) is not null)
@@ -186,7 +423,10 @@ public sealed class AddonPackageService
             .Concat(extensionIds.Where(_extensionPackageManager.IsUserExtensionInstalled)
                 .Select(id => $"Extension: {id}"))
             .ToArray();
-        return new AddonImportPreview(manifest, packIds, snippetNames, extensionIds, conflicts);
+        return new AddonImportPreview(manifest, packIds, snippetNames, extensionIds, conflicts)
+        {
+            Items = packItems.Concat(snippetItems).Concat(extensionItems).ToArray()
+        };
     }
 
     public void Install(
@@ -200,10 +440,20 @@ public sealed class AddonPackageService
             throw new InvalidOperationException("Replacing existing add-on content requires confirmation.");
         }
 
-        var previousPacks = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        Install(archivePath, preview, ImportConflictPolicy.OverwriteExisting, runtimeRefresh);
+    }
+
+    public AddonInstallResult Install(
+        string archivePath,
+        AddonImportPreview preview,
+        ImportConflictPolicy conflictPolicy,
+        Action? runtimeRefresh = null)
+    {
+        var previousPacks = new Dictionary<string, (string Path, byte[] Content)>(StringComparer.OrdinalIgnoreCase);
         var previousSnippets = new Dictionary<string, SnippetDefinition?>(StringComparer.OrdinalIgnoreCase);
         var installedPackIds = new List<string>();
         var installedSnippetNames = new List<string>();
+        var skippedItems = new List<string>();
         using var archive = ZipFile.OpenRead(archivePath);
         var entries = GetFileEntries(archive);
         var currentPreview = Preview(archivePath);
@@ -228,19 +478,33 @@ public sealed class AddonPackageService
                 var normalized = NormalizePackagePath(packPath);
                 var packId = Path.GetFileNameWithoutExtension(normalized);
                 var destinationPath = _packLoader.GetInstalledPackPath(packId);
+                if (File.Exists(destinationPath) && conflictPolicy == ImportConflictPolicy.SkipExisting)
+                {
+                    skippedItems.Add($"Command pack: {packId}");
+                    continue;
+                }
+
                 if (File.Exists(destinationPath))
                 {
-                    previousPacks[packId] = File.ReadAllBytes(destinationPath);
+                    previousPacks[packId] = (Path.GetRelativePath(
+                        Directory.GetParent(_packLoader.ProfilePackDirectory)!.FullName,
+                        destinationPath).Replace('\\', '/'), File.ReadAllBytes(destinationPath));
                 }
 
                 var stagedPath = Path.Combine(stagingDirectory, $"{packId}.json");
                 File.WriteAllBytes(stagedPath, ReadBytes(entries[normalized]));
                 installedPackIds.Add(packId);
-                _packLoader.InstallPack(stagedPath, replaceExisting: File.Exists(destinationPath));
+                _packLoader.InstallPackAtProfilePath(stagedPath, normalized, replaceExisting: File.Exists(destinationPath));
             }
 
             foreach (var snippetName in preview.Manifest.Snippets)
             {
+                if (_snippetStore.Find(snippetName) is not null && conflictPolicy == ImportConflictPolicy.SkipExisting)
+                {
+                    skippedItems.Add($"Snippet: {snippetName}");
+                    continue;
+                }
+
                 var metadataPath = $"snippets/{snippetName}/metadata.json";
                 var metadata = JsonSerializer.Deserialize<SnippetMetadata>(ReadText(entries[metadataPath]), JsonOptions)
                     ?? throw new InvalidDataException($"Snippet metadata for '{snippetName}' is invalid.");
@@ -257,8 +521,36 @@ public sealed class AddonPackageService
             foreach (var extensionPath in preview.Manifest.Extensions ?? [])
             {
                 var normalized = NormalizePackagePath(extensionPath);
-                var packagePath = Path.Combine(stagingDirectory, Path.GetFileName(normalized));
-                File.WriteAllBytes(packagePath, ReadBytes(entries[normalized]));
+                var segments = normalized.Split('/');
+                var extensionId = normalized.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetFileNameWithoutExtension(normalized)
+                    : segments[1];
+                if (_extensionPackageManager.IsUserExtensionInstalled(extensionId)
+                    && conflictPolicy == ImportConflictPolicy.SkipExisting)
+                {
+                    skippedItems.Add($"Extension: {extensionId}");
+                    continue;
+                }
+
+                string packagePath;
+                if (normalized.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    packagePath = Path.Combine(stagingDirectory, Path.GetFileName(normalized));
+                    File.WriteAllBytes(packagePath, ReadBytes(entries[normalized]));
+                }
+                else
+                {
+                    if (segments.Length != 3 || !string.Equals(segments[2], "extension.json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException($"Add-on extension path '{normalized}' is invalid.");
+                    }
+
+                    var packageExtensionId = segments[1];
+                    packagePath = Path.Combine(stagingDirectory, $"{packageExtensionId}.zip");
+                    var prefix = $"extensions/{packageExtensionId}/";
+                    CreateExtensionArchive(entries.Where(pair => pair.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)), prefix, packagePath);
+                }
+
                 extensionPackages.Add(packagePath);
             }
 
@@ -270,6 +562,8 @@ public sealed class AddonPackageService
             {
                 runtimeRefresh?.Invoke();
             }
+
+            return new AddonInstallResult(skippedItems);
         }
         catch (Exception installException)
         {
@@ -301,7 +595,10 @@ public sealed class AddonPackageService
                     var destinationPath = _packLoader.GetInstalledPackPath(packId);
                     if (previousPacks.TryGetValue(packId, out var originalBytes))
                     {
-                        File.WriteAllBytes(destinationPath, originalBytes);
+                        _packLoader.InstallPackAtProfilePath(
+                            WriteTemporaryPack(stagingDirectory, packId, originalBytes.Content),
+                            originalBytes.Path,
+                            replaceExisting: true);
                     }
                     else
                     {
@@ -383,6 +680,11 @@ public sealed class AddonPackageService
             || (manifest.Extensions ?? []).Count == 0 && manifest.Packs.Count == 0 && manifest.Snippets.Count == 0)
         {
             throw new InvalidDataException("Add-on manifest must define an ID, name, version, and at least one pack, snippet, or extension.");
+        }
+
+        if (manifest.Extensions?.Any(path => !path.StartsWith("extensions/", StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            throw new InvalidDataException("Add-on extension paths must be relative to the profile extensions directory.");
         }
     }
 

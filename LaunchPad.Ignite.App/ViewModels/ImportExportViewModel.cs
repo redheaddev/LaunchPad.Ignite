@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 
@@ -15,15 +16,20 @@ namespace LaunchPad.Ignite.App.ViewModels;
 public sealed class ImportExportViewModel : ViewModelBase
 {
     private readonly CommandOwnershipManager _ownershipManager;
-    private readonly Func<string, Task<CommandExecutionResult>> _importPack;
+    private readonly Func<string, bool, Task<CommandExecutionResult>> _importPack;
+    private readonly Func<string, CommandPackPreview> _previewPack;
     private readonly Action _close;
     private readonly AddonPackageService _addonPackageService;
     private readonly Action _runtimeRefresh;
-    private readonly Func<AddonImportPreview, Task<bool>> _confirmAddonReplacement;
     private readonly ObservableCollection<CommandSourceViewModel> _sources = [];
     private CommandDestinationViewModel _selectedDestination;
     private string _importPath = string.Empty;
     private string _importStatus = string.Empty;
+    private string _packPreviewId = string.Empty;
+    private string _packPreviewNamespace = string.Empty;
+    private string _packPreviewMessage = "Choose a command-pack JSON file to preview its contents.";
+    private bool _hasPackPreview;
+    private int _importConflictPolicyIndex;
     private string _movePreview = "Select commands to move.";
     private string _moveStatus = string.Empty;
     private string _newPackId = "new-pack";
@@ -33,11 +39,20 @@ public sealed class ImportExportViewModel : ViewModelBase
     private string _exportPreview = "Select commands to preview the pack export.";
     private string _exportStatus = string.Empty;
     private string _addonPath = string.Empty;
-    private string _addonPreview = "Choose an add-on ZIP to preview its contents.";
+    private string _addonPreviewName = string.Empty;
+    private string _addonPreviewId = string.Empty;
+    private string _addonPreviewVersion = string.Empty;
+    private string _addonPreviewMessage = "Choose an add-on ZIP to preview its contents.";
+    private bool _hasAddonPreview;
     private string _addonStatus = string.Empty;
+    private int _addonConflictPolicyIndex;
     private AddonImportPreview? _addonImportPreview;
     private bool _isWorking;
     private CommandPackExportPlan? _exportPlan;
+    private string _addonId = "my-addon";
+    private string _addonName = "My Add-on";
+    private string _addonVersion = "1.0.0";
+    private string _createAddonStatus = string.Empty;
 
     public ObservableCollection<CommandSourceViewModel> Sources => _sources;
     public IReadOnlyList<CommandDestinationViewModel> Destinations { get; }
@@ -77,12 +92,28 @@ public sealed class ImportExportViewModel : ViewModelBase
     public string ImportPath
     {
         get => _importPath;
-        set => SetProperty(ref _importPath, value);
+        set
+        {
+            if (SetProperty(ref _importPath, value))
+            {
+                RefreshPackPreview();
+            }
+        }
     }
     public string ImportStatus
     {
         get => _importStatus;
         private set => SetProperty(ref _importStatus, value);
+    }
+    public string PackPreviewId { get => _packPreviewId; private set => SetProperty(ref _packPreviewId, value); }
+    public string PackPreviewNamespace { get => _packPreviewNamespace; private set => SetProperty(ref _packPreviewNamespace, value); }
+    public string PackPreviewMessage { get => _packPreviewMessage; private set => SetProperty(ref _packPreviewMessage, value); }
+    public bool HasPackPreview { get => _hasPackPreview; private set => SetProperty(ref _hasPackPreview, value); }
+    public ObservableCollection<AddonPreviewItemViewModel> PackPreviewCommands { get; } = [];
+    public int ImportConflictPolicyIndex
+    {
+        get => _importConflictPolicyIndex;
+        set => SetProperty(ref _importConflictPolicyIndex, value);
     }
     public string MovePreview
     {
@@ -152,79 +183,197 @@ public sealed class ImportExportViewModel : ViewModelBase
             }
         }
     }
-    public string AddonPreview
-    {
-        get => _addonPreview;
-        private set => SetProperty(ref _addonPreview, value);
-    }
+    public string AddonPreviewName { get => _addonPreviewName; private set => SetProperty(ref _addonPreviewName, value); }
+    public string AddonPreviewId { get => _addonPreviewId; private set => SetProperty(ref _addonPreviewId, value); }
+    public string AddonPreviewVersion { get => _addonPreviewVersion; private set => SetProperty(ref _addonPreviewVersion, value); }
+    public string AddonPreviewMessage { get => _addonPreviewMessage; private set => SetProperty(ref _addonPreviewMessage, value); }
+    public bool HasAddonPreview { get => _hasAddonPreview; private set => SetProperty(ref _hasAddonPreview, value); }
+    public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewPacks { get; } = [];
+    public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewSnippets { get; } = [];
+    public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewExtensions { get; } = [];
     public string AddonStatus
     {
         get => _addonStatus;
         private set => SetProperty(ref _addonStatus, value);
     }
+    public int AddonConflictPolicyIndex
+    {
+        get => _addonConflictPolicyIndex;
+        set => SetProperty(ref _addonConflictPolicyIndex, value);
+    }
     public IRelayCommand MoveCommand { get; }
+    public ObservableCollection<AddonPackGroupViewModel> AddonPackGroups { get; } = [];
+    public ObservableCollection<AddonComponentSelectionViewModel> AddonSnippets { get; } = [];
+    public ObservableCollection<AddonComponentSelectionViewModel> AddonExtensions { get; } = [];
+    public string AddonId { get => _addonId; set => SetProperty(ref _addonId, value); }
+    public string AddonName { get => _addonName; set => SetProperty(ref _addonName, value); }
+    public string AddonVersion { get => _addonVersion; set => SetProperty(ref _addonVersion, value); }
+    public string CreateAddonStatus { get => _createAddonStatus; private set => SetProperty(ref _createAddonStatus, value); }
+    public IRelayCommand RefreshAddonComponentsCommand { get; }
     public int SelectedCommandCount => _sources.SelectMany(source => source.Commands).Count(command => command.IsSelected);
 
     public event Action? CloseRequested;
 
     public ImportExportViewModel(
         CommandOwnershipManager ownershipManager,
-        Func<string, Task<CommandExecutionResult>> importPack,
+        Func<string, bool, Task<CommandExecutionResult>> importPack,
+        Func<string, CommandPackPreview> previewPack,
         Action close,
         AddonPackageService addonPackageService,
-        Action runtimeRefresh,
-        Func<AddonImportPreview, Task<bool>> confirmAddonReplacement)
+        Action runtimeRefresh)
     {
         _ownershipManager = ownershipManager;
         _importPack = importPack;
+        _previewPack = previewPack;
         _close = close;
         _addonPackageService = addonPackageService;
         _runtimeRefresh = runtimeRefresh;
-        _confirmAddonReplacement = confirmAddonReplacement;
         ImportCommand = new AsyncRelayCommand(ImportPackFromPathAsync, () => !IsWorking);
         ImportAddonCommand = new AsyncRelayCommand(ImportAddonAsync, () => !IsWorking && _addonImportPreview is not null);
         MoveCommand = new RelayCommand(MoveSelectedCommands);
+        RefreshAddonComponentsCommand = new RelayCommand(RefreshAddonComponents);
         Destinations = new[] { new CommandDestinationViewModel(CommandOwnershipManager.UserOwnerId, "User commands", null) }
             .Concat(ownershipManager.EnabledPacks.Select(pack => new CommandDestinationViewModel(pack.Id, $"Pack: {pack.Id}", pack.Id)))
             .Append(new CommandDestinationViewModel("new-pack", "Create new pack…", null, true))
             .ToArray();
         _selectedDestination = Destinations[0];
+        RefreshAddonComponents();
         RefreshInventory();
+    }
+
+    public void RefreshAddonComponents()
+    {
+        AddonPackGroups.Clear();
+        foreach (var group in _addonPackageService.GetAvailablePacks()
+            .GroupBy(pack => pack.Group ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var packs = group.Select(pack => new AddonComponentSelectionViewModel(pack.Id, pack.Id)).ToArray();
+            AddonPackGroups.Add(new AddonPackGroupViewModel(
+                string.IsNullOrEmpty(group.Key) ? "Ungrouped" : group.Key,
+                packs));
+        }
+
+        AddonSnippets.Clear();
+        foreach (var snippet in _addonPackageService.GetAvailableSnippets())
+        {
+            AddonSnippets.Add(new AddonComponentSelectionViewModel(snippet.Metadata.Name, snippet.Metadata.Name));
+        }
+
+        AddonExtensions.Clear();
+        foreach (var extension in _addonPackageService.GetAvailableExtensions())
+        {
+            AddonExtensions.Add(new AddonComponentSelectionViewModel(extension.Id, extension.Id));
+        }
+
+        OnPropertyChanged(nameof(AddonPackGroups));
+        OnPropertyChanged(nameof(AddonSnippets));
+        OnPropertyChanged(nameof(AddonExtensions));
+    }
+
+    public void CreateAddon(string path)
+    {
+        try
+        {
+            _addonPackageService.CreatePackage(
+                path,
+                AddonId,
+                AddonName,
+                AddonVersion,
+                AddonPackGroups.SelectMany(group => group.Packs).Where(item => item.IsSelected).Select(item => item.Id),
+                AddonSnippets.Where(item => item.IsSelected).Select(item => item.Id),
+                AddonExtensions.Where(item => item.IsSelected).Select(item => item.Id));
+            CreateAddonStatus = $"Created add-on package '{Path.GetFileName(path)}'.";
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
+        {
+            CreateAddonStatus = $"Could not create add-on: {exception.Message}";
+        }
     }
 
     private void RefreshAddonPreview()
     {
         _addonImportPreview = null;
+        HasAddonPreview = false;
+        AddonPreviewPacks.Clear();
+        AddonPreviewSnippets.Clear();
+        AddonPreviewExtensions.Clear();
         if (string.IsNullOrWhiteSpace(AddonPath))
         {
-            AddonPreview = "Choose an add-on ZIP to preview its contents.";
+            AddonPreviewMessage = "Choose an add-on ZIP to preview its contents.";
         }
         else
         {
             try
             {
                 _addonImportPreview = _addonPackageService.Preview(AddonPath.Trim());
-                var lines = new List<string>
+                AddonPreviewName = _addonImportPreview.Manifest.Name;
+                AddonPreviewId = _addonImportPreview.Manifest.Id;
+                AddonPreviewVersion = _addonImportPreview.Manifest.Version;
+                foreach (var item in _addonImportPreview.Items)
                 {
-                    $"{_addonImportPreview.Manifest.Name} ({_addonImportPreview.Manifest.Id}) v{_addonImportPreview.Manifest.Version}",
-                    $"Command packs: {string.Join(", ", _addonImportPreview.PackIds)}",
-                    $"Snippets: {string.Join(", ", _addonImportPreview.SnippetNames)}",
-                    $"Extensions: {string.Join(", ", _addonImportPreview.ExtensionIds)}"
-                };
-                if (_addonImportPreview.Conflicts.Count > 0)
-                {
-                    lines.Add($"Will ask before replacing: {string.Join(", ", _addonImportPreview.Conflicts)}");
+                    var viewModel = new AddonPreviewItemViewModel(item);
+                    switch (item.Category)
+                    {
+                        case "Command pack":
+                            AddonPreviewPacks.Add(viewModel);
+                            break;
+                        case "Snippet":
+                            AddonPreviewSnippets.Add(viewModel);
+                            break;
+                        case "Extension":
+                            AddonPreviewExtensions.Add(viewModel);
+                            break;
+                    }
                 }
 
-                AddonPreview = string.Join(Environment.NewLine, lines);
+                HasAddonPreview = true;
+                AddonPreviewMessage = string.Empty;
             }
             catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException or JsonException)
             {
-                AddonPreview = $"Could not read add-on: {exception.Message}";
+                AddonPreviewMessage = $"Could not read add-on: {exception.Message}";
             }
         }
 
         ImportAddonCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RefreshPackPreview()
+    {
+        HasPackPreview = false;
+        PackPreviewId = string.Empty;
+        PackPreviewNamespace = string.Empty;
+        PackPreviewCommands.Clear();
+
+        if (string.IsNullOrWhiteSpace(ImportPath))
+        {
+            PackPreviewMessage = "Choose a command-pack JSON file to preview its contents.";
+            return;
+        }
+
+        try
+        {
+            var preview = _previewPack(ImportPath.Trim());
+            PackPreviewId = preview.Id;
+            PackPreviewNamespace = string.IsNullOrWhiteSpace(preview.Namespace) ? "Global" : preview.Namespace;
+
+            foreach (var previewCommand in preview.Commands)
+            {
+                PackPreviewCommands.Add(new AddonPreviewItemViewModel(new AddonPreviewItem(
+                    "Command",
+                    previewCommand.Command.QualifiedName,
+                    previewCommand.ExistingOwner is not null,
+                    previewCommand.ExistingOwner)));
+            }
+
+            HasPackPreview = true;
+            PackPreviewMessage = string.Empty;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException or JsonException)
+        {
+            PackPreviewMessage = $"Could not read command pack: {exception.Message}";
+        }
     }
 
     private async Task ImportAddonAsync()
@@ -237,17 +386,14 @@ public sealed class ImportExportViewModel : ViewModelBase
         IsWorking = true;
         try
         {
-            var replaceExisting = _addonImportPreview.Conflicts.Count == 0
-                || await _confirmAddonReplacement(_addonImportPreview);
-            if (!replaceExisting)
-            {
-                AddonStatus = "Add-on import canceled.";
-                return;
-            }
-
-            _addonPackageService.Install(AddonPath.Trim(), _addonImportPreview, replaceExisting: true, _runtimeRefresh);
-            AddonStatus = $"Installed add-on '{_addonImportPreview.Manifest.Name}'.";
-            CloseRequested?.Invoke();
+            var policy = AddonConflictPolicyIndex == 1
+                ? ImportConflictPolicy.OverwriteExisting
+                : ImportConflictPolicy.SkipExisting;
+            var result = _addonPackageService.Install(AddonPath.Trim(), _addonImportPreview, policy, _runtimeRefresh);
+            var skippedMessage = result.SkippedItems.Count == 0
+                ? string.Empty
+                : $" Skipped existing: {string.Join(", ", result.SkippedItems)}.";
+            AddonStatus = $"Installed add-on '{_addonImportPreview.Manifest.Name}'.{skippedMessage}";
         }
         catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
         {
@@ -413,12 +559,8 @@ public sealed class ImportExportViewModel : ViewModelBase
         IsWorking = true;
         try
         {
-            var result = await _importPack(ImportPath.Trim());
+            var result = await _importPack(ImportPath.Trim(), ImportConflictPolicyIndex == 1);
             ImportStatus = result.Message;
-            if (result.Succeeded)
-            {
-                CloseRequested?.Invoke();
-            }
         }
         catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
         {
@@ -493,6 +635,79 @@ public sealed class CommandSourceViewModel : ViewModelBase
         }
 
         RefreshSelectionState();
+    }
+}
+
+public sealed class AddonComponentSelectionViewModel : ViewModelBase
+{
+    private bool _isSelected;
+
+    public string Id { get; }
+    public string Name { get; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
+
+    public AddonComponentSelectionViewModel(string id, string name)
+    {
+        Id = id;
+        Name = name;
+    }
+}
+
+public sealed class AddonPackGroupViewModel : ViewModelBase
+{
+    public string Name { get; }
+    public IReadOnlyList<AddonComponentSelectionViewModel> Packs { get; }
+    public string ToggleSelectionText => Packs.Any(pack => !pack.IsSelected) ? "Select all" : "Clear";
+    public IRelayCommand ToggleSelectionCommand { get; }
+
+    public AddonPackGroupViewModel(string name, IReadOnlyList<AddonComponentSelectionViewModel> packs)
+    {
+        Name = name;
+        Packs = packs;
+        ToggleSelectionCommand = new RelayCommand(ToggleSelection);
+        foreach (var pack in Packs)
+        {
+            pack.PropertyChanged += (_, _) => OnPropertyChanged(nameof(ToggleSelectionText));
+        }
+    }
+
+    private void ToggleSelection()
+    {
+        var selectAll = Packs.Any(pack => !pack.IsSelected);
+        foreach (var pack in Packs)
+        {
+            pack.IsSelected = selectAll;
+        }
+
+        OnPropertyChanged(nameof(ToggleSelectionText));
+    }
+}
+
+public sealed class AddonPreviewItemViewModel : ViewModelBase
+{
+    public string Category { get; }
+    public string Name { get; }
+    public bool AlreadyExists { get; }
+    public string Status => AlreadyExists ? "Already exists" : "New";
+    public string StatusDetail => AlreadyExists
+        ? $"Already exists{(string.IsNullOrWhiteSpace(ExistingOwner) ? string.Empty : $" · {ExistingOwner}")}"
+        : "New";
+    public string? ExistingOwner { get; }
+    public IReadOnlyList<AddonPreviewItemViewModel> Commands { get; }
+    public bool HasCommands => Commands.Count > 0;
+
+    public AddonPreviewItemViewModel(AddonPreviewItem item)
+    {
+        Category = item.Category;
+        Name = item.Name;
+        AlreadyExists = item.AlreadyExists;
+        ExistingOwner = item.ExistingOwner;
+        Commands = (item.Commands ?? []).Select(command => new AddonPreviewItemViewModel(command)).ToArray();
     }
 }
 

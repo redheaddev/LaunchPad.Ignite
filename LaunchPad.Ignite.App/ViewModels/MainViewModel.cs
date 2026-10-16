@@ -421,18 +421,48 @@ public partial class MainViewModel : ViewModelBase
         return new ImportExportViewModel(
             manager,
             ImportCommandPackForDialogAsync,
+            path => CommandPackLoader.PreviewPack(path, GetCommandOwnerLabel),
             close,
-            new AddonPackageService(_commandPackLoader, _snippetStore, new ExtensionPackageManager()),
-            InitializeCommandRuntime,
-            ConfirmAddonReplacementAsync);
+            new AddonPackageService(
+                _commandPackLoader,
+                _snippetStore,
+                new ExtensionPackageManager(),
+                GetCommandOwnerLabel),
+            InitializeCommandRuntime);
     }
 
-    private async Task<CommandExecutionResult> ImportCommandPackForDialogAsync(string path)
+    private string? GetCommandOwnerLabel(string qualifiedName)
+    {
+        if (_userCommandNames.Contains(qualifiedName))
+        {
+            return "User commands";
+        }
+
+        if (_commandPackSources.TryGetValue(qualifiedName, out var packId))
+        {
+            return $"Pack: {packId}";
+        }
+
+        if (_commandSources.TryGetValue(qualifiedName, out var extensionId))
+        {
+            return $"Extension: {extensionId}";
+        }
+
+        return _catalog.Commands.Any(command => string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase))
+            ? "App commands"
+            : null;
+    }
+
+    private async Task<CommandExecutionResult> ImportCommandPackForDialogAsync(string path, bool overwriteExisting)
     {
         var command = new ParsedCommand(
             ExtensionCommandModel.Definition,
             ExtensionCommandModel.Definition.Actions.Single(action => action.Name == "pack-install"),
-            new Dictionary<string, string> { ["json-path"] = path });
+            new Dictionary<string, string>
+            {
+                ["json-path"] = path,
+                ["conflict-policy"] = overwriteExisting ? "overwrite" : "skip"
+            });
         var model = (ExtensionCommandModel)_commandExecutors["extension"];
         return await model.ExecuteAsync(command);
     }

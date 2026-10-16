@@ -28,6 +28,84 @@ public class CommandPackLoaderTests
     }
 
     [Fact]
+    public void ImportPackOverwritesSamePackCommandAndRetainsOtherCommandsButSkipsExternalDuplicates()
+    {
+        using var directory = new TemporaryDirectory();
+        var profilePacks = Path.Combine(directory.Path, "profile", "packs");
+        var incomingPacks = Path.Combine(directory.Path, "incoming");
+        WritePack(profilePacks, "tools", "tools", "tools", "status", "Old status");
+        var loader = new CommandPackLoader([profilePacks]);
+        var installed = loader.ReadInstalledManifest("tools");
+        loader.WriteInstalledManifest(installed with
+        {
+            Schema = installed.Schema with
+            {
+                Commands = installed.Schema.Commands.Append(new CommandDefinition(
+                    "logs", "url", "Retained logs",
+                    [new CommandActionDefinition("default", "", "tools:logs", "https://example.test/logs", [])], "tools")).ToArray()
+            }
+        });
+        WriteManifest(incomingPacks, "tools.json", """
+            {
+              "id": "tools",
+              "namespace": "tools",
+              "schema": {
+                "lists": [],
+                "commands": [
+                  { "name": "status", "namespace": "tools", "kind": "url", "description": "Updated status", "actions": [{ "name": "default", "usage": "tools:status", "targetTemplate": "https://example.test/status", "arguments": [] }] },
+                  { "name": "external", "namespace": "tools", "kind": "url", "description": "External conflict", "actions": [{ "name": "default", "usage": "tools:external", "targetTemplate": "https://example.test/external", "arguments": [] }] }
+                ]
+              }
+            }
+            """);
+
+        var result = loader.ImportPack(
+            Path.Combine(incomingPacks, "tools.json"),
+            ["tools:external"],
+            replaceExisting: true,
+            overwriteExistingCommands: true);
+        var manifest = loader.ReadInstalledManifest("tools");
+
+        Assert.Equal("Updated status", Assert.Single(manifest.Schema.Commands, command => command.Name == "status").Description);
+        Assert.Contains(manifest.Schema.Commands, command => command.Name == "logs" && command.Description == "Retained logs");
+        Assert.Contains("tools:external", result.SkippedCommands);
+    }
+
+    [Fact]
+    public void PreviewPackReturnsValidatedCommandNamesAndExistingOwners()
+    {
+        using var directory = new TemporaryDirectory();
+        WritePack(directory.Path, "tools", "tools", "tools", "status", "Status");
+
+        var preview = CommandPackLoader.PreviewPack(
+            Path.Combine(directory.Path, "tools.json"),
+            name => name == "tools:status" ? "Pack: existing-tools" : null);
+
+        Assert.Equal("tools", preview.Id);
+        Assert.Equal("tools", preview.Namespace);
+        var command = Assert.Single(preview.Commands);
+        Assert.Equal("tools:status", command.Command.QualifiedName);
+        Assert.Equal("Pack: existing-tools", command.ExistingOwner);
+    }
+
+    [Fact]
+    public void LoadsBricotCommandPackWithServerPickerAndNamespacedShortcuts()
+    {
+        var packPath = Path.Combine(AppContext.BaseDirectory, "CommandPacks", "bricot.json");
+        using var directory = new TemporaryDirectory();
+        File.Copy(packPath, Path.Combine(directory.Path, "bricot.json"));
+
+        var schema = new CommandPackLoader([directory.Path]).Load();
+
+        Assert.Equal(15, schema.Commands.Count);
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "pl:arch");
+        Assert.Contains(schema.Commands, command => command.QualifiedName == "gh:token");
+        var sft = Assert.Single(schema.Commands, command => command.Name == "sft");
+        Assert.Equal("enum:sft-server", sft.Actions[0].Arguments[0].Ref);
+        Assert.Equal(["gwappnp11", "gwappsit01cc01"], Assert.Single(schema.Lists, list => list.Name == "sft-server").Values);
+    }
+
+    [Fact]
     public void LoadsCommandsWithDefaultAndCommandSpecificNamespaces()
     {
         using var directory = new TemporaryDirectory();

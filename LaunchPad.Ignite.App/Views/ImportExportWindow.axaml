@@ -143,27 +143,211 @@
 				</Grid>
 			</TabItem>
 			<TabItem Header="Import pack">
-				<StackPanel Spacing="12" Margin="8">
-					<TextBlock Text="Choose a command-pack JSON file to install. Existing pack replacement uses the standard confirmation." TextWrapping="Wrap" />
-					<StackPanel Orientation="Horizontal" Spacing="8">
-						<TextBox Width="600" Text="{Binding ImportPath}" Watermark="Command pack JSON path" />
-						<Button Content="Browse…" Click="BrowseImport_Click" />
+				<ScrollViewer VerticalScrollBarVisibility="Auto">
+					<StackPanel Spacing="16" Margin="12">
+						<StackPanel Spacing="4">
+							<TextBlock Text="COMMAND PACK" Foreground="{DynamicResource ThemeAccent}" FontSize="11" FontWeight="Bold" />
+							<TextBlock Text="Import a command pack" FontSize="22" FontWeight="SemiBold" />
+							<TextBlock Text="Choose how to handle duplicate commands. Commands owned by another pack or by a user are always skipped." Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+						</StackPanel>
+						<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="14">
+							<StackPanel Spacing="10">
+								<TextBlock Text="PACK FILE" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="11" FontWeight="SemiBold" />
+								<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+									<TextBox Grid.Column="0" Text="{Binding ImportPath}" Watermark="Select a command-pack JSON file" />
+									<Button Grid.Column="1" Content="Browse…" Click="BrowseImport_Click" />
+								</Grid>
+								<TextBlock Text="Existing commands" FontWeight="SemiBold" />
+								<ComboBox Width="220" HorizontalAlignment="Left" SelectedIndex="{Binding ImportConflictPolicyIndex}">
+									<ComboBoxItem Content="Skip existing" />
+									<ComboBoxItem Content="Overwrite existing" />
+								</ComboBox>
+								<TextBlock Text="Overwrite updates matching commands in this pack and keeps other commands already in it." Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" TextWrapping="Wrap" />
+							</StackPanel>
+						</Border>
+						<Border Background="{DynamicResource ThemeWindowBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="14">
+							<StackPanel Spacing="8">
+								<TextBlock Text="PACK PREVIEW" Foreground="{DynamicResource ThemeAccent}" FontSize="11" FontWeight="Bold" />
+								<TextBlock Text="{Binding PackPreviewMessage}" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" IsVisible="{Binding !HasPackPreview}" />
+								<StackPanel Spacing="8" IsVisible="{Binding HasPackPreview}">
+									<Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="4">
+										<TextBlock Text="Pack ID" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<TextBlock Grid.Column="1" Text="{Binding PackPreviewId}" FontWeight="SemiBold" />
+										<TextBlock Grid.Row="1" Text="Namespace" Foreground="{DynamicResource ThemeSecondaryText}" />
+										<TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding PackPreviewNamespace}" />
+									</Grid>
+									<Border Height="1" Background="{DynamicResource ThemeBorder}" />
+									<TextBlock Text="Commands" FontWeight="SemiBold" />
+									<ItemsControl ItemsSource="{Binding PackPreviewCommands}">
+										<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+											<Grid ColumnDefinitions="*,Auto" Margin="0,2">
+												<TextBlock Text="{Binding Name}" FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+												<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" FontSize="12" />
+											</Grid>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+									</ItemsControl>
+								</StackPanel>
+							</StackPanel>
+						</Border>
+						<StackPanel Spacing="8">
+							<Button Content="Import pack" Command="{Binding ImportCommand}" HorizontalAlignment="Left" MinWidth="150" />
+							<TextBlock Text="{Binding ImportStatus}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" />
+						</StackPanel>
 					</StackPanel>
-					<Button Content="Import pack" Command="{Binding ImportCommand}" />
-					<TextBlock Text="{Binding ImportStatus}" TextWrapping="Wrap" />
-				</StackPanel>
+				</ScrollViewer>
 			</TabItem>
 			<TabItem Header="Import add-on">
-				<StackPanel Spacing="12" Margin="8">
-					<TextBlock Text="Import a ZIP containing command packs and snippets. Existing content is replaced only after confirmation." TextWrapping="Wrap" />
-					<StackPanel Orientation="Horizontal" Spacing="8">
-						<TextBox Width="600" Text="{Binding AddonPath}" Watermark="LaunchPad add-on ZIP path" />
-						<Button Content="Browse…" Click="BrowseAddon_Click" />
+				<ScrollViewer VerticalScrollBarVisibility="Auto">
+					<StackPanel Spacing="16" Margin="12">
+						<StackPanel Spacing="4">
+							<TextBlock Text="ADD-ON PACKAGE" Foreground="{DynamicResource ThemeAccent}" FontSize="11" FontWeight="Bold" />
+							<TextBlock Text="Import an add-on" FontSize="22" FontWeight="SemiBold" />
+							<TextBlock Text="Review the included content, then choose how to handle each item that already exists in your profile." Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+						</StackPanel>
+						<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="14">
+							<StackPanel Spacing="10">
+								<TextBlock Text="ADD-ON ZIP" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="11" FontWeight="SemiBold" />
+								<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+									<TextBox Grid.Column="0" Text="{Binding AddonPath}" Watermark="Select a LaunchPad add-on ZIP" />
+									<Button Grid.Column="1" Content="Browse…" Click="BrowseAddon_Click" />
+								</Grid>
+								<TextBlock Text="Existing items" FontWeight="SemiBold" />
+								<ComboBox Width="220" HorizontalAlignment="Left" SelectedIndex="{Binding AddonConflictPolicyIndex}">
+									<ComboBoxItem Content="Skip existing" />
+									<ComboBoxItem Content="Overwrite existing" />
+								</ComboBox>
+							</StackPanel>
+						</Border>
+						<Border Background="{DynamicResource ThemeWindowBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="14">
+							<StackPanel Spacing="6">
+								<TextBlock Text="PACKAGE PREVIEW" Foreground="{DynamicResource ThemeAccent}" FontSize="11" FontWeight="Bold" />
+								<TextBlock Text="{Binding AddonPreviewMessage}" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" IsVisible="{Binding !HasAddonPreview}" />
+								<StackPanel Spacing="10" IsVisible="{Binding HasAddonPreview}">
+									<StackPanel Spacing="2">
+										<TextBlock Text="{Binding AddonPreviewName}" FontSize="18" FontWeight="SemiBold" />
+										<TextBlock Text="{Binding AddonPreviewId}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" />
+										<TextBlock Text="{Binding AddonPreviewVersion, StringFormat='Version {0}'}" Foreground="{DynamicResource ThemeSecondaryText}" FontSize="12" />
+									</StackPanel>
+									<Border Height="1" Background="{DynamicResource ThemeBorder}" />
+									<ItemsControl ItemsSource="{Binding AddonPreviewPacks}">
+										<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+											<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+												<StackPanel Spacing="6">
+													<Grid ColumnDefinitions="*,Auto">
+														<TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+														<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+													</Grid>
+													<ItemsControl ItemsSource="{Binding Commands}" IsVisible="{Binding HasCommands}">
+														<ItemsControl.ItemTemplate>
+															<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+																<Grid ColumnDefinitions="*,Auto" Margin="12,2,0,2">
+																	<TextBlock Text="{Binding Name}" FontFamily="Cascadia Mono, Consolas" FontSize="12" />
+																	<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" FontSize="12" />
+																</Grid>
+															</DataTemplate>
+														</ItemsControl.ItemTemplate>
+													</ItemsControl>
+												</StackPanel>
+											</Border>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+									</ItemsControl>
+									<ItemsControl ItemsSource="{Binding AddonPreviewSnippets}">
+										<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+											<Grid ColumnDefinitions="*,Auto" Margin="0,2">
+												<TextBlock Text="{Binding Name}" />
+												<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+											</Grid>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+									</ItemsControl>
+									<ItemsControl ItemsSource="{Binding AddonPreviewExtensions}">
+										<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+											<Grid ColumnDefinitions="*,Auto" Margin="0,2">
+												<TextBlock Text="{Binding Name}" />
+												<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+											</Grid>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+									</ItemsControl>
+								</StackPanel>
+							</StackPanel>
+						</Border>
+						<StackPanel Spacing="8">
+							<Button Content="Import add-on" Command="{Binding ImportAddonCommand}" HorizontalAlignment="Left" MinWidth="150" />
+							<TextBlock Text="{Binding AddonStatus}" Foreground="{DynamicResource ThemeAccent}" TextWrapping="Wrap" />
+						</StackPanel>
 					</StackPanel>
-					<TextBlock Text="{Binding AddonPreview}" TextWrapping="Wrap" />
-					<Button Content="Import add-on" Command="{Binding ImportAddonCommand}" />
-					<TextBlock Text="{Binding AddonStatus}" TextWrapping="Wrap" />
-				</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+			<TabItem Header="Create add-on">
+				<Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10" Margin="8">
+					<StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+						<TextBlock Text="ID" VerticalAlignment="Center" />
+						<TextBox Width="150" Text="{Binding AddonId}" />
+						<TextBlock Text="Name" VerticalAlignment="Center" />
+						<TextBox Width="200" Text="{Binding AddonName}" />
+						<TextBlock Text="Version" VerticalAlignment="Center" />
+						<TextBox Width="100" Text="{Binding AddonVersion}" />
+						<Button Content="Refresh" Command="{Binding RefreshAddonComponentsCommand}" />
+					</StackPanel>
+					<TextBlock Grid.Row="1" Text="Select content to include. The ZIP contains packs/, snippets/, and extensions/ at its root, so it can be extracted directly into the LaunchPad profile directory." TextWrapping="Wrap" />
+					<ScrollViewer Grid.Row="2">
+						<StackPanel Spacing="12">
+							<StackPanel Spacing="4">
+								<TextBlock Text="Command packs" FontWeight="SemiBold" />
+								<ItemsControl ItemsSource="{Binding AddonPackGroups}">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonPackGroupViewModel">
+											<StackPanel Spacing="2" Margin="8,2">
+												<StackPanel Orientation="Horizontal" Spacing="8">
+													<TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+													<Button Content="{Binding ToggleSelectionText}" Command="{Binding ToggleSelectionCommand}" />
+												</StackPanel>
+												<ItemsControl ItemsSource="{Binding Packs}">
+													<ItemsControl.ItemTemplate>
+														<DataTemplate x:DataType="vm:AddonComponentSelectionViewModel">
+															<CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" />
+														</DataTemplate>
+													</ItemsControl.ItemTemplate>
+												</ItemsControl>
+											</StackPanel>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</StackPanel>
+							<StackPanel Spacing="4">
+								<TextBlock Text="Snippets" FontWeight="SemiBold" />
+								<ItemsControl ItemsSource="{Binding AddonSnippets}">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonComponentSelectionViewModel">
+											<CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" />
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</StackPanel>
+							<StackPanel Spacing="4">
+								<TextBlock Text="Installed extensions" FontWeight="SemiBold" />
+								<ItemsControl ItemsSource="{Binding AddonExtensions}">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:AddonComponentSelectionViewModel">
+											<CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" />
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</StackPanel>
+						</StackPanel>
+					</ScrollViewer>
+					<StackPanel Grid.Row="3" Spacing="6">
+						<Button Content="Create add-on ZIP…" Click="CreateAddon_Click" HorizontalAlignment="Left" />
+						<TextBlock Text="{Binding CreateAddonStatus}" TextWrapping="Wrap" />
+					</StackPanel>
+				</Grid>
 			</TabItem>
 		</TabControl>
 		<StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
