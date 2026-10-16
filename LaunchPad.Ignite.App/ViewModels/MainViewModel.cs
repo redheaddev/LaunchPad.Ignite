@@ -88,6 +88,11 @@ public partial class MainViewModel : ViewModelBase
         "app:globalActivationHotkey",
         GlobalActivationHotkey.DefaultValue);
 
+    public bool StartMinimized => string.Equals(
+        _profileSettingsStore.GetValue("app:startMinimized", "Off"),
+        "On",
+        StringComparison.OrdinalIgnoreCase);
+
     public MainViewModel()
     {
         _commandLogger = new ProfileCommandLogger();

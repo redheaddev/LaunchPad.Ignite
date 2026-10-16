@@ -1,3 +1,13 @@
 {
-  "settings": []
+  "settings": [
+    {
+      "name": "startMinimized",
+      "namespace": "app",
+      "label": "Start minimized",
+      "description": "Keep the launcher window hidden at startup. Use the tray icon or activation hotkey to show it.",
+      "defaultValue": "Off",
+      "type": "select",
+      "options": ["Off", "On"]
+    }
+  ]
 }

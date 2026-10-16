@@ -1482,6 +1482,27 @@ public sealed class SettingsAndListDefaultsTests
         Assert.Equal("directory", settings[0].Type);
     }
 
+    [Fact]
+    public void ApplicationSettingsLoader_IncludesStartMinimizedGeneralSetting()
+    {
+        var setting = Assert.Single(
+            new ApplicationSettingsLoader().Load(),
+            setting => setting.QualifiedName == "app:startMinimized");
+
+        Assert.Equal("Start minimized", setting.Label);
+        Assert.Equal("startMinimized", setting.Name);
+        Assert.Equal("app", setting.Namespace);
+        Assert.Equal("Off", setting.DefaultValue);
+        Assert.Equal("select", setting.Type);
+        Assert.Equal(new[] { "Off", "On" }, setting.Options);
+        var schema = new CommandSchema([], [])
+        {
+            Settings = [setting],
+            Variables = [new CommandVariableDefinition(setting.Name, setting.DefaultValue, setting.Namespace)]
+        };
+        Assert.Empty(new CommandSchemaValidator().Validate(schema));
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));

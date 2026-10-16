@@ -46,14 +46,16 @@ public partial class MainWindow : Window
     private bool _secretDialogIsOpen;
     private bool _commandBoxHasFocus;
     private bool _commandBoxFocusPending;
+    private readonly bool _startMinimized;
     private int? _pathSelectionAnchor;
     private int? _pathSelectionCaret;
     private int _pathSelectionStart = -1;
     private int _pathSelectionEnd = -1;
     private int? _pendingCaretIndex;
 
-    public MainWindow()
+    public MainWindow(bool startMinimized = false)
     {
+        _startMinimized = startMinimized;
         InitializeComponent();
         Title = $"LaunchPad.Ignite {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}";
         _commandBox = this.FindControl<TextBox>("CommandBox")
@@ -700,6 +702,11 @@ public partial class MainWindow : Window
 
     private void MainWindow_Opened(object? sender, EventArgs e)
     {
+        if (_startMinimized)
+        {
+            Hide();
+        }
+
         _shortcutViewModel = DataContext as MainViewModel;
         _commandScrollViewer = _commandBox.GetVisualDescendants()
             .OfType<ScrollViewer>()
@@ -712,11 +719,14 @@ public partial class MainWindow : Window
 
         RefreshWindowsActivationHotkey();
 
-        Dispatcher.UIThread.Post(() =>
+        if (!_startMinimized)
         {
-            Activate();
-            RequestCommandBoxFocus();
-        }, DispatcherPriority.Input);
+            Dispatcher.UIThread.Post(() =>
+            {
+                Activate();
+                RequestCommandBoxFocus();
+            }, DispatcherPriority.Input);
+        }
 
         if (_hotKeyTask is not null)
         {

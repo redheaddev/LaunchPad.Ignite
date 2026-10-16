@@ -23,9 +23,10 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             _desktopLifetime = desktop;
-            _mainWindow = new MainWindow
+            var viewModel = new MainViewModel();
+            _mainWindow = new MainWindow(viewModel.StartMinimized)
             {
-                DataContext = new MainViewModel(),
+                DataContext = viewModel,
             };
             desktop.MainWindow = _mainWindow;
             desktop.Exit += Desktop_Exit;
