@@ -26,6 +26,7 @@ namespace LaunchPad.Ignite.App.Views;
 public partial class MainWindow : Window
 {
     private readonly SimpleGlobalHook _globalHook = new();
+    private WindowsRegisteredHotkey? _windowsActivationHotkey;
     private readonly TextBox _commandBox;
     private readonly Border _commandInputBorder;
     private readonly ItemsControl _completionList;
@@ -43,6 +44,7 @@ public partial class MainWindow : Window
     private bool _activationPending;
     private bool _secretDialogIsOpen;
     private bool _commandBoxHasFocus;
+    private bool _commandBoxFocusPending;
     private int? _pathSelectionAnchor;
     private int? _pathSelectionCaret;
     private int _pathSelectionStart = -1;
@@ -224,6 +226,7 @@ public partial class MainWindow : Window
         finally
         {
             _secretDialogIsOpen = false;
+            RefreshWindowsActivationHotkey();
         }
     }
 
@@ -617,6 +620,7 @@ public partial class MainWindow : Window
         finally
         {
             _secretDialogIsOpen = false;
+            RefreshWindowsActivationHotkey();
         }
     }
 
@@ -645,6 +649,8 @@ public partial class MainWindow : Window
             _commandScrollViewer.ScrollChanged += (_, _) => UpdateCommandTextOverlayOffset();
             UpdateCommandTextOverlayOffset();
         }
+
+        RefreshWindowsActivationHotkey();
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -695,6 +701,11 @@ public partial class MainWindow : Window
             && GlobalActivationHotkey.TryParse(mainViewModel.GlobalActivationHotkeyValue, out var activationHotkey)
             && activationHotkey.Matches(_controlPressed, _altPressed, _shiftPressed, _metaPressed, e.Data.KeyCode))
         {
+            if (_windowsActivationHotkey is not null)
+            {
+                return;
+            }
+
             _activationKeyPressed = true;
             _activationKey = e.Data.KeyCode;
             _activationPending = true;
@@ -807,15 +818,75 @@ public partial class MainWindow : Window
         RequestCommandBoxFocus();
     }
 
+    private void RefreshWindowsActivationHotkey()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        _windowsActivationHotkey?.Dispose();
+        _windowsActivationHotkey = null;
+        if (_shortcutViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        _windowsActivationHotkey = WindowsRegisteredHotkey.TryCreate(
+            viewModel.GlobalActivationHotkeyValue,
+            () => Dispatcher.UIThread.Post(() =>
+            {
+                if (!_secretDialogIsOpen)
+                {
+                    ToggleVisibility();
+                }
+            }),
+            out var error);
+
+        if (_windowsActivationHotkey is null && error is not null)
+        {
+            Trace.TraceWarning($"{error} Using the keyboard-hook activation fallback.");
+        }
+    }
+
     private void RequestCommandBoxFocus()
     {
-        Dispatcher.UIThread.Post(() =>
+        if (_commandBoxFocusPending || _secretDialogIsOpen)
         {
-            if (IsVisible && IsActive && !_secretDialogIsOpen)
+            return;
+        }
+
+        _commandBoxFocusPending = true;
+        _ = FocusCommandBoxWhenActiveAsync();
+    }
+
+    private async Task FocusCommandBoxWhenActiveAsync()
+    {
+        try
+        {
+            for (var attempt = 0; attempt < 10; attempt++)
             {
-                _commandBox.Focus();
+                if (!IsVisible || _secretDialogIsOpen)
+                {
+                    return;
+                }
+
+                if (IsActive)
+                {
+                    _commandBox.Focus();
+                    if (_commandBox.IsFocused)
+                    {
+                        return;
+                    }
+                }
+
+                await Task.Delay(50);
             }
-        }, DispatcherPriority.Input);
+        }
+        finally
+        {
+            _commandBoxFocusPending = false;
+        }
     }
 
     internal async Task<string?> ShowSecretEntryDialogAsync(SecretEntryWindow dialog)
@@ -1182,6 +1253,8 @@ public partial class MainWindow : Window
 
         _globalHook.KeyPressed -= GlobalHook_KeyPressed;
         _globalHook.KeyReleased -= GlobalHook_KeyReleased;
+        _windowsActivationHotkey?.Dispose();
+        _windowsActivationHotkey = null;
         ColorThemeService.ThemeChanged -= UpdateUsageText;
         ColorThemeService.ThemeChanged -= UpdateCommandInputBorder;
         try
