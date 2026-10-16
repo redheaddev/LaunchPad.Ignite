@@ -29,6 +29,46 @@ public sealed class AddonPackageServiceTests
     }
 
     [Fact]
+    public void CreatePreviewAndInstallRoundTripNamespacedMacro()
+    {
+        using var directory = new TemporaryDirectory();
+        var sourceService = CreateService(Path.Combine(directory.Path, "source"), out _, out _, out var sourceMacroStore);
+        var macro = CreateMacro("recording", "qms", "url https://example.test/recording");
+        sourceMacroStore.Save(macro);
+        var archivePath = Path.Combine(directory.Path, "macro-addon.zip");
+
+        sourceService.CreatePackage(archivePath, "macro-addon", "Macro Add-on", "1.0.0", [], [], [], ["qms:recording"]);
+        var destinationService = CreateService(Path.Combine(directory.Path, "destination"), out _, out _, out var destinationMacroStore);
+        var preview = destinationService.Preview(archivePath);
+
+        Assert.Equal(["qms:recording"], preview.MacroNames);
+        Assert.Contains(preview.Items, item => item.Category == "Macro" && item.Name == "qms:recording" && !item.AlreadyExists);
+        destinationService.Install(archivePath, preview, ImportConflictPolicy.SkipExisting);
+        Assert.Equal(macro.Script, destinationMacroStore.Find("qms:recording")!.Script);
+        Assert.Contains("macros/qms/recording/metadata.json", GetArchiveEntries(archivePath));
+    }
+
+    [Fact]
+    public void InstallHonorsMacroConflictPolicy()
+    {
+        using var directory = new TemporaryDirectory();
+        var service = CreateService(directory.Path, out _, out _, out var macroStore);
+        var packageMacro = CreateMacro("recording", "qms", "url https://example.test/package");
+        var archivePath = CreateMacroAddon(directory.Path, packageMacro);
+        var preview = service.Preview(archivePath);
+        macroStore.Save(CreateMacro("recording", "qms", "url https://example.test/local"));
+        preview = service.Preview(archivePath);
+
+        var skipped = service.Install(archivePath, preview, ImportConflictPolicy.SkipExisting);
+
+        Assert.Contains("Macro: qms:recording", skipped.SkippedItems);
+        Assert.Equal("url https://example.test/local", macroStore.Find("qms:recording")!.Script);
+
+        service.Install(archivePath, preview, ImportConflictPolicy.OverwriteExisting);
+        Assert.Equal(packageMacro.Script, macroStore.Find("qms:recording")!.Script);
+    }
+
+    [Fact]
     public void PreviewListsExistingItemsAndIncomingCommandOwners()
     {
         using var directory = new TemporaryDirectory();
@@ -294,6 +334,15 @@ public sealed class AddonPackageServiceTests
         out SnippetStore snippetStore,
         ExtensionPackageManager? extensionPackageManager = null,
         Func<string, string?>? getCommandOwner = null)
+        => CreateService(root, out packLoader, out snippetStore, out _, extensionPackageManager, getCommandOwner);
+
+    private static AddonPackageService CreateService(
+        string root,
+        out CommandPackLoader packLoader,
+        out SnippetStore snippetStore,
+        out MacroStore macroStore,
+        ExtensionPackageManager? extensionPackageManager = null,
+        Func<string, string?>? getCommandOwner = null)
     {
         var profile = Path.Combine(root, "profile");
         var packs = Path.Combine(profile, "packs");
@@ -301,7 +350,30 @@ public sealed class AddonPackageServiceTests
         var stateStore = new ExtensionStateStore(Path.Combine(profile, "state.json"));
         packLoader = new CommandPackLoader([packs], stateStore);
         snippetStore = new SnippetStore(Path.Combine(profile, "snippets"));
-        return new AddonPackageService(packLoader, snippetStore, extensionPackageManager, getCommandOwner);
+        macroStore = new MacroStore(Path.Combine(profile, "macros"));
+        return new AddonPackageService(packLoader, snippetStore, extensionPackageManager, getCommandOwner, macroStore);
+    }
+
+    private static MacroDefinition CreateMacro(string name, string? macroNamespace, string script)
+        => new(new MacroMetadata(Guid.NewGuid().ToString("N"), name, macroNamespace, [], MacroErrorBehavior.Break), script);
+
+    private static string CreateMacroAddon(string root, MacroDefinition macro)
+    {
+        var archivePath = Path.Combine(root, "macro-addon.zip");
+        using var archive = new ZipArchive(File.Open(archivePath, FileMode.Create), ZipArchiveMode.Create);
+        var qualifiedName = macro.Metadata.QualifiedName;
+        var directory = $"macros/{macro.Metadata.Namespace ?? "_default"}/{macro.Metadata.Name}";
+        WriteEntry(archive, "addon.json", JsonSerializer.Serialize(new AddonManifest(
+            "macro-addon", "Macro Add-on", "1.0.0", [], [], [], [qualifiedName])));
+        WriteEntry(archive, $"{directory}/metadata.json", JsonSerializer.Serialize(macro.Metadata));
+        WriteEntry(archive, $"{directory}/script.txt", macro.Script);
+        return archivePath;
+    }
+
+    private static IReadOnlyList<string> GetArchiveEntries(string archivePath)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        return archive.Entries.Select(entry => entry.FullName).ToArray();
     }
 
     private static string CreateAddon(string root, string packId, string snippetName, string? extensionId = null)

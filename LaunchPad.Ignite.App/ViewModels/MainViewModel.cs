@@ -18,6 +18,7 @@ using System.Globalization;
 using System.IO;
 using System.Data;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace LaunchPad.Ignite.App.ViewModels;
@@ -41,6 +42,11 @@ public partial class MainViewModel : ViewModelBase
     private CommandPackLoader _commandPackLoader = null!;
     private DefinitionManagementCommandModel _definitionManagementCommandModel = null!;
     private SnippetStore _snippetStore = null!;
+    private MacroStore _macroStore = null!;
+    private MacroInvocationParser _macroInvocationParser = null!;
+    private MacroExecutionEngine _macroExecutionEngine = null!;
+    private MacroCompletionSession _macroCompletionSession = null!;
+    private IReadOnlyList<CommandVariableDefinition> _macroVariables = [];
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
     private CommandArgumentPathCompletion _argumentPathCompletion = null!;
@@ -167,7 +173,8 @@ public partial class MainViewModel : ViewModelBase
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(command.Name, ExitCommandModel.Definition.Name, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(command.QualifiedName, ExtensionCommandModel.Definition.QualifiedName, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(command.Name, SnippetCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(command.Name, SnippetCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(command.Name, MacroCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase))
             .Append(VariableCommandModel.Definition);
         commands = commands.Append(ExtensionCommandModel.Definition);
 
@@ -181,6 +188,7 @@ public partial class MainViewModel : ViewModelBase
                 .Append(ProfileBackupCommandDefinitions.Backup)
                 .Append(ProfileBackupCommandDefinitions.Restore)
                 .Append(SnippetCommandDefinition.Definition)
+                .Append(MacroCommandDefinition.Definition)
                 .Append(ExitCommandModel.Definition)
                 .ToArray()
         };
@@ -188,17 +196,19 @@ public partial class MainViewModel : ViewModelBase
         {
             Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "extension", "shortcut", "definitionManagement" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement" };
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
         var shortcutResolver = new ShortcutResolver(schema.Commands);
         var extensionPackageManager = new ExtensionPackageManager();
         _snippetStore = new SnippetStore();
+        _macroStore = new MacroStore();
         var valueProvider = new CommandSchemaValueProvider(
             schema,
             new CompositeArgumentValueProvider(
                 new SnippetNamesArgumentValueProvider(_snippetStore),
+                new MacroNamesArgumentValueProvider(_macroStore),
                 new SecretNamesArgumentValueProvider(_secretStore),
                 new ThemeNamesArgumentValueProvider(_profileSettingsStore),
                 new CommandNamesArgumentValueProvider(() => _catalog?.Commands.ToArray() ?? []),
@@ -206,6 +216,16 @@ public partial class MainViewModel : ViewModelBase
                 new ExtensionPackageNamesArgumentValueProvider(extensionPackageManager),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
                 new InstalledComponentIdsArgumentValueProvider(componentIds, _extensionStateStore)));
+        _macroInvocationParser = new MacroInvocationParser(
+            _macroStore,
+            new MacroArgumentBinder(valueProvider));
+        _macroExecutionEngine = new MacroExecutionEngine();
+        _macroCompletionSession = new MacroCompletionSession(
+            _macroStore.GetAll(),
+            valueProvider,
+            schema.Variables,
+            schema.Functions);
+        _macroVariables = schema.Variables;
         var functionExpander = new CommandTextFunctionExpander(
             schema.Functions,
             new RegisteredCommandFunctionExecutor(extensionFunctionExecutors: extensions.FunctionExecutors));
@@ -229,6 +249,8 @@ public partial class MainViewModel : ViewModelBase
                     .ToArray();
                 var effectiveVariables = GetEffectiveVariables(updatedVariables, settings);
                 _variableExpander.UpdateVariables(effectiveVariables);
+                _macroVariables = effectiveVariables;
+                _macroCompletionSession.UpdateVariables(effectiveVariables);
                 _urlCommandModel.UpdateVariables(effectiveVariables);
                 extensions.ConfigureCommandExecutors(
                     effectiveVariables,
@@ -253,6 +275,7 @@ public partial class MainViewModel : ViewModelBase
         var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore),
+            ["macro"] = new MacroCommandModel(_macroStore, new AvaloniaMacroDialogService(), InitializeCommandRuntime),
             ["snippet"] = new SnippetCommandModel(
                 _snippetStore,
                 _secretStore,
@@ -427,7 +450,8 @@ public partial class MainViewModel : ViewModelBase
                 _commandPackLoader,
                 _snippetStore,
                 new ExtensionPackageManager(),
-                GetCommandOwnerLabel),
+                GetCommandOwnerLabel,
+                _macroStore),
             InitializeCommandRuntime);
     }
 
@@ -554,7 +578,10 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsStatusMessage => !IsValueOutput;
 
-    public bool IsChecklistActive => _completionSession.State.IsChecklistActive;
+    private CommandCompletionState ActiveCompletionState
+        => CommandText.StartsWith('%') ? _macroCompletionSession.State : _completionSession.State;
+
+    public bool IsChecklistActive => ActiveCompletionState.IsChecklistActive;
 
     public bool HasCompletionOptions => CompletionItems.Count > 0;
 
@@ -593,7 +620,7 @@ public partial class MainViewModel : ViewModelBase
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
                 || _historySuggestionCycler.TryGetSuggestions(CommandText, out _)
-            : _completionSession.State.CanComplete
+            : ActiveCompletionState.CanComplete
                 || (!IsCommandMetadataFilterMode
                     && (GetHistorySuggestions(CommandText).Count > 0
                         || GetShortcutSuggestions(CommandText).Count > 0
@@ -862,6 +889,26 @@ public partial class MainViewModel : ViewModelBase
             }
 
             HandleDirectPathCompletionKey(key);
+            return false;
+        }
+
+        if (!selectedHistoryCompletion
+            && CommandText.StartsWith('%')
+            && key is CommandInputKey.Tab or CommandInputKey.Right or CommandInputKey.Up or CommandInputKey.Down
+                or CommandInputKey.PageUp or CommandInputKey.PageDown or CommandInputKey.First or CommandInputKey.Last
+                or CommandInputKey.SelectAll or CommandInputKey.DeselectAll or CommandInputKey.Space)
+        {
+            _macroCompletionSession.UpdateInputText(CommandText);
+            var macroCompletionState = _macroCompletionSession.HandleKey(key);
+            if (key is CommandInputKey.Tab or CommandInputKey.Right or CommandInputKey.Space)
+            {
+                CommandText = macroCompletionState.InputText;
+            }
+            else
+            {
+                ApplyCompletionState(macroCompletionState);
+            }
+
             return false;
         }
 
@@ -1156,6 +1203,12 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _isManagementCompletionActive = false;
+        if (_macroCompletionSession is not null && value.StartsWith('%'))
+        {
+            ApplyCompletionState(_macroCompletionSession.UpdateInputText(value));
+            return;
+        }
+
         ApplyCompletionState(_completionSession.UpdateInputText(value));
         if (!IsCommandMetadataFilterMode && string.Equals(value.Trim(), "!", StringComparison.Ordinal))
         {
@@ -1229,7 +1282,9 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _isManagementCompletionActive = false;
-        ApplyCompletionState(_completionSession.UpdateInputText(value));
+        ApplyCompletionState(value.StartsWith('%')
+            ? _macroCompletionSession.UpdateInputText(value)
+            : _completionSession.UpdateInputText(value));
         if (!IsCommandMetadataFilterMode && string.Equals(value.Trim(), "!", StringComparison.Ordinal))
         {
             ShowExtensionList();
@@ -2073,10 +2128,76 @@ public sealed record CompletionOptionViewModel(
         return (found, value);
     }
 
+    private async Task<bool> ExecuteMacroInvocationAsync(bool newWindow, CommandLaunchMode launchMode)
+    {
+        var invocationText = CommandText;
+        var parsed = _macroInvocationParser.Parse(invocationText, _macroVariables);
+        if (!parsed.IsMacroInvocation || parsed.Error is not null || parsed.Macro is null || parsed.Arguments is null)
+        {
+            SetStatusMessage(parsed.Error ?? "Macro invocation is invalid.");
+            return false;
+        }
+
+        var result = await _macroExecutionEngine.ExecuteAsync(
+            parsed.Macro,
+            parsed.Arguments,
+            newWindow,
+            launchMode,
+            ExecuteMacroCommandAsync);
+        SetStatusMessage(result.Message);
+        CommandText = result.Succeeded ? string.Empty : invocationText;
+        return result.Succeeded;
+    }
+
+    private async Task<CommandExecutionResult> ExecuteMacroCommandAsync(
+        string commandText,
+        IReadOnlyDictionary<string, string> arguments,
+        bool newWindow,
+        CommandLaunchMode launchMode)
+    {
+        if (commandText.TrimStart().StartsWith('%'))
+        {
+            return new CommandExecutionResult(false, "Nested macro calls are not supported.");
+        }
+
+        var macroArgumentNames = arguments.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var variables = _macroVariables
+            .Where(variable => !string.IsNullOrEmpty(variable.Namespace)
+                || !macroArgumentNames.Contains(variable.Name))
+            .Concat(arguments.Select(argument => new CommandVariableDefinition(
+                argument.Key,
+                JsonSerializer.Serialize(argument.Value))));
+        var expansion = new CommandTextVariableExpander(variables).Expand(commandText);
+        if (expansion.UnresolvedVariables.Count > 0)
+        {
+            return new CommandExecutionResult(
+                false,
+                $"Unknown variable(s): {string.Join(", ", expansion.UnresolvedVariables.Select(name => $"${name}"))}");
+        }
+
+        string expandedText;
+        try
+        {
+            expandedText = await _functionExpander.ExpandAsync(expansion.ExpandedText);
+        }
+        catch (Exception exception)
+        {
+            return new CommandExecutionResult(false, $"Function expansion failed: {exception.Message}");
+        }
+
+        var succeeded = await ExecuteCommandCoreAsync(newWindow, launchMode, expandedText);
+        return new CommandExecutionResult(succeeded, StatusMessage) { IsValueOutput = IsValueOutput };
+    }
+
     private async Task<bool> ExecuteCommandCoreAsync(
         bool newWindow = false,
         CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
+        if (CommandText.TrimStart().StartsWith('%'))
+        {
+            return await ExecuteMacroInvocationAsync(newWindow, launchMode);
+        }
+
         if (_definitionManagementCommandModel.Handles(CommandText))
         {
             var managementResult = _definitionManagementCommandModel.Execute(CommandText);

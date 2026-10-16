@@ -1,0 +1,40 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		x:Class="LaunchPad.Ignite.App.Views.MacroEditorWindow"
+		Title="Macro"
+		Width="720"
+		Height="760"
+		MinWidth="600"
+		MinHeight="600"
+		CanResize="True"
+		WindowStartupLocation="CenterOwner">
+	<Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" Margin="22" RowSpacing="12">
+		<TextBox x:Name="NameBox" Grid.Row="0" IsReadOnly="True" Watermark="Name" />
+		<TextBox x:Name="NamespaceBox" Grid.Row="1" IsReadOnly="True" Watermark="Namespace (optional)" />
+		<Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="6">
+			<TextBlock Text="Arguments (one per line: name:type [list-name] [single|multiple])" />
+			<TextBox x:Name="ArgumentsBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="NoWrap"
+					 FontFamily="Cascadia Mono, Consolas" Height="130" VerticalContentAlignment="Top"
+					 ScrollViewer.VerticalScrollBarVisibility="Auto" />
+		</Grid>
+		<StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+			<TextBlock Text="On command error" VerticalAlignment="Center" />
+			<ComboBox x:Name="OnErrorBox" SelectedIndex="0" Width="130">
+				<ComboBoxItem Content="Break" />
+				<ComboBoxItem Content="Continue" />
+			</ComboBox>
+		</StackPanel>
+		<Grid Grid.Row="4" RowDefinitions="Auto,*" RowSpacing="6">
+			<TextBlock Text="LaunchPad commands (one command per line; use $argName for arguments)" />
+			<TextBox x:Name="ScriptBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="NoWrap"
+					 FontFamily="Cascadia Mono, Consolas" VerticalContentAlignment="Top"
+					 ScrollViewer.VerticalScrollBarVisibility="Auto"
+					 ScrollViewer.HorizontalScrollBarVisibility="Auto" />
+		</Grid>
+		<TextBlock x:Name="ErrorText" Grid.Row="5" Foreground="Red" TextWrapping="Wrap" />
+		<StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+			<Button Content="Cancel" Click="Cancel_Click" />
+			<Button Content="Save" IsDefault="True" Click="Save_Click" />
+		</StackPanel>
+	</Grid>
+</Window>

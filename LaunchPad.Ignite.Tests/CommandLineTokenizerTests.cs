@@ -27,6 +27,14 @@ public class CommandLineTokenizerTests
     }
 
     [Fact]
+    public void TokenizeUnescapesQuotedQuotesAndBackslashes()
+    {
+        var tokens = _tokenizer.Tokenize("run \"a \\\"quoted\\\" value\\\\path\"");
+
+        Assert.Equal("a \"quoted\" value\\path", tokens[1].Value);
+    }
+
+    [Fact]
     public void FindTokenBoundaryKeepsQuotedSpacesAndCommaInsideValue()
     {
         const string input = "\"value, value value\"] next";

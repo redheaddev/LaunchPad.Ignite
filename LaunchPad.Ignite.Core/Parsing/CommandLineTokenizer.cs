@@ -26,6 +26,16 @@ public sealed class CommandLineTokenizer
             var insideQuotes = false;
             while (index < input.Length && (insideQuotes || !char.IsWhiteSpace(input[index])))
             {
+                if (insideQuotes
+                    && input[index] == '\\'
+                    && index + 1 < input.Length
+                    && input[index + 1] is '"' or '\\')
+                {
+                    value.Append(input[index + 1]);
+                    index += 2;
+                    continue;
+                }
+
                 if (input[index] == '"')
                 {
                     insideQuotes = !insideQuotes;
@@ -52,7 +62,14 @@ public sealed class CommandLineTokenizer
         var insideQuotes = false;
         for (var index = start; index < input.Length; index++)
         {
-            if (input[index] == '"')
+            if (insideQuotes
+                && input[index] == '\\'
+                && index + 1 < input.Length
+                && input[index + 1] is '"' or '\\')
+            {
+                index++;
+            }
+            else if (input[index] == '"')
             {
                 insideQuotes = !insideQuotes;
             }

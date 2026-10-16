@@ -278,6 +278,18 @@
 										</DataTemplate>
 									</ItemsControl.ItemTemplate>
 									</ItemsControl>
+										<ItemsControl ItemsSource="{Binding AddonPreviewMacros}">
+											<ItemsControl.ItemTemplate>
+												<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
+													<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+														<Grid ColumnDefinitions="*,Auto">
+															<TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+															<TextBlock Grid.Column="1" Text="{Binding StatusDetail}" Foreground="{DynamicResource ThemeAccent}" />
+														</Grid>
+													</Border>
+												</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
 									<ItemsControl ItemsSource="{Binding AddonPreviewExtensions}">
 										<ItemsControl.ItemTemplate>
 										<DataTemplate x:DataType="vm:AddonPreviewItemViewModel">
@@ -313,7 +325,7 @@
 						<TextBox Width="100" Text="{Binding AddonVersion}" />
 						<Button Content="Refresh" Command="{Binding RefreshAddonComponentsCommand}" />
 					</StackPanel>
-					<TextBlock Grid.Row="1" Text="Select content to include. The ZIP contains packs/, snippets/, and extensions/ at its root, so it can be extracted directly into the LaunchPad profile directory." TextWrapping="Wrap" />
+									<TextBlock Grid.Row="1" Text="Select content to include. The ZIP contains packs/, snippets/, macros/, and extensions/ at its root, so it can be extracted directly into the LaunchPad profile directory." TextWrapping="Wrap" />
 					<ScrollViewer Grid.Row="2">
 						<StackPanel Spacing="12">
 							<StackPanel Spacing="4">
@@ -338,6 +350,16 @@
 									</ItemsControl.ItemTemplate>
 								</ItemsControl>
 							</StackPanel>
+										<StackPanel Spacing="4">
+											<TextBlock Text="Macros" FontWeight="SemiBold" />
+											<ItemsControl ItemsSource="{Binding AddonMacros}">
+												<ItemsControl.ItemTemplate>
+													<DataTemplate x:DataType="vm:AddonComponentSelectionViewModel">
+														<CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" />
+													</DataTemplate>
+												</ItemsControl.ItemTemplate>
+											</ItemsControl>
+										</StackPanel>
 							<StackPanel Spacing="4">
 								<TextBlock Text="Snippets" FontWeight="SemiBold" />
 								<ItemsControl ItemsSource="{Binding AddonSnippets}">

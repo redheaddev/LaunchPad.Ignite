@@ -200,6 +200,7 @@ public sealed class ImportExportViewModel : ViewModelBase
     public bool HasAddonPreview { get => _hasAddonPreview; private set => SetProperty(ref _hasAddonPreview, value); }
     public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewPacks { get; } = [];
     public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewSnippets { get; } = [];
+    public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewMacros { get; } = [];
     public ObservableCollection<AddonPreviewItemViewModel> AddonPreviewExtensions { get; } = [];
     public string AddonStatus
     {
@@ -220,6 +221,7 @@ public sealed class ImportExportViewModel : ViewModelBase
     public IRelayCommand MoveCommand { get; }
     public ObservableCollection<AddonPackGroupViewModel> AddonPackGroups { get; } = [];
     public ObservableCollection<AddonComponentSelectionViewModel> AddonSnippets { get; } = [];
+    public ObservableCollection<AddonComponentSelectionViewModel> AddonMacros { get; } = [];
     public ObservableCollection<AddonComponentSelectionViewModel> AddonExtensions { get; } = [];
     public string AddonId { get => _addonId; set => SetProperty(ref _addonId, value); }
     public string AddonName { get => _addonName; set => SetProperty(ref _addonName, value); }
@@ -276,6 +278,12 @@ public sealed class ImportExportViewModel : ViewModelBase
             AddonSnippets.Add(new AddonComponentSelectionViewModel(snippet.Metadata.Name, snippet.Metadata.Name));
         }
 
+        AddonMacros.Clear();
+        foreach (var macro in _addonPackageService.GetAvailableMacros())
+        {
+            AddonMacros.Add(new AddonComponentSelectionViewModel(macro.Metadata.QualifiedName, macro.Metadata.QualifiedName));
+        }
+
         AddonExtensions.Clear();
         foreach (var extension in _addonPackageService.GetAvailableExtensions())
         {
@@ -284,6 +292,7 @@ public sealed class ImportExportViewModel : ViewModelBase
 
         OnPropertyChanged(nameof(AddonPackGroups));
         OnPropertyChanged(nameof(AddonSnippets));
+        OnPropertyChanged(nameof(AddonMacros));
         OnPropertyChanged(nameof(AddonExtensions));
     }
 
@@ -298,7 +307,8 @@ public sealed class ImportExportViewModel : ViewModelBase
                 AddonVersion,
                 AddonPackGroups.SelectMany(group => group.Packs).Where(item => item.IsSelected).Select(item => item.Id),
                 AddonSnippets.Where(item => item.IsSelected).Select(item => item.Id),
-                AddonExtensions.Where(item => item.IsSelected).Select(item => item.Id));
+                AddonExtensions.Where(item => item.IsSelected).Select(item => item.Id),
+                AddonMacros.Where(item => item.IsSelected).Select(item => item.Id));
             CreateAddonStatus = $"Created add-on package '{Path.GetFileName(path)}'.";
         }
         catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
@@ -313,6 +323,7 @@ public sealed class ImportExportViewModel : ViewModelBase
         HasAddonPreview = false;
         AddonPreviewPacks.Clear();
         AddonPreviewSnippets.Clear();
+        AddonPreviewMacros.Clear();
         AddonPreviewExtensions.Clear();
         if (string.IsNullOrWhiteSpace(AddonPath))
         {
@@ -336,6 +347,9 @@ public sealed class ImportExportViewModel : ViewModelBase
                             break;
                         case "Snippet":
                             AddonPreviewSnippets.Add(viewModel);
+                            break;
+                        case "Macro":
+                            AddonPreviewMacros.Add(viewModel);
                             break;
                         case "Extension":
                             AddonPreviewExtensions.Add(viewModel);

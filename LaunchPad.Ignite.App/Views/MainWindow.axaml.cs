@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.ComponentModel;
 using System.Collections.Generic;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Completion;
@@ -362,6 +363,65 @@ public partial class MainWindow : Window
         try
         {
             return await dialog.ShowDialog<SnippetEditorResult?>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    internal async Task<MacroEditorResult?> ShowMacroEditorAsync(MacroEditorWindow dialog)
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<MacroEditorResult?>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
+    internal async Task<bool> ConfirmMacroRemovalAsync(string qualifiedName)
+    {
+        var dialog = new Window
+        {
+            Title = "Remove macro?",
+            Width = 420,
+            Height = 160,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"Remove macro '{qualifiedName}'? This cannot be undone.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Remove", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
         }
         finally
         {

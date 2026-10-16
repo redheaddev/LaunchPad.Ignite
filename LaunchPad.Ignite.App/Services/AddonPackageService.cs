@@ -17,14 +17,16 @@ public sealed record AddonManifest(
     string Version,
     IReadOnlyList<string> Packs,
     IReadOnlyList<string> Snippets,
-    IReadOnlyList<string>? Extensions = null);
+    IReadOnlyList<string>? Extensions = null,
+    IReadOnlyList<string>? Macros = null);
 
 public sealed record AddonImportPreview(
     AddonManifest Manifest,
     IReadOnlyList<string> PackIds,
     IReadOnlyList<string> SnippetNames,
     IReadOnlyList<string> ExtensionIds,
-    IReadOnlyList<string> Conflicts)
+    IReadOnlyList<string> Conflicts,
+    IReadOnlyList<string> MacroNames)
 {
     public IReadOnlyList<AddonPreviewItem> Items { get; init; } = [];
 }
@@ -63,6 +65,7 @@ public sealed class AddonPackageService
     private readonly CommandPackLoader _packLoader;
     private readonly SnippetStore _snippetStore;
     private readonly ExtensionPackageManager _extensionPackageManager;
+    private readonly MacroStore _macroStore;
     private readonly Func<string, string?>? _getCommandOwner;
 
     public IReadOnlyList<AddonPackInfo> GetAvailablePacks()
@@ -91,6 +94,9 @@ public sealed class AddonPackageService
     public IReadOnlyList<SnippetDefinition> GetAvailableSnippets()
         => _snippetStore.GetAll();
 
+    public IReadOnlyList<MacroDefinition> GetAvailableMacros()
+        => _macroStore.GetAll();
+
     public IReadOnlyList<(string Id, string Directory)> GetAvailableExtensions()
         => _extensionPackageManager.GetInstalledUserExtensions();
 
@@ -101,7 +107,8 @@ public sealed class AddonPackageService
         string version,
         IEnumerable<string> packIds,
         IEnumerable<string> snippetNames,
-        IEnumerable<string> extensionIds)
+        IEnumerable<string> extensionIds,
+        IEnumerable<string>? macroNames = null)
     {
         if (string.IsNullOrWhiteSpace(id)
             || !id.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
@@ -120,10 +127,12 @@ public sealed class AddonPackageService
         var snippetsByName = _snippetStore.GetAll().ToDictionary(snippet => snippet.Metadata.Name, StringComparer.OrdinalIgnoreCase);
         var extensionsById = _extensionPackageManager.GetInstalledUserExtensions()
             .ToDictionary(extension => extension.Id, StringComparer.OrdinalIgnoreCase);
+        var macrosByName = _macroStore.GetAll().ToDictionary(macro => macro.Metadata.QualifiedName, StringComparer.OrdinalIgnoreCase);
         var selectedPacks = packIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var selectedSnippets = snippetNames.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var selectedExtensions = extensionIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (selectedPacks.Length + selectedSnippets.Length + selectedExtensions.Length == 0)
+        var selectedMacros = (macroNames ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (selectedPacks.Length + selectedSnippets.Length + selectedExtensions.Length + selectedMacros.Length == 0)
         {
             throw new ArgumentException("Select at least one pack, snippet, or extension.");
         }
@@ -131,7 +140,8 @@ public sealed class AddonPackageService
         var missingPacks = selectedPacks.Where(id => !packsById.ContainsKey(id)).ToArray();
         var missingSnippets = selectedSnippets.Where(name => !snippetsByName.ContainsKey(name)).ToArray();
         var missingExtensions = selectedExtensions.Where(id => !extensionsById.ContainsKey(id)).ToArray();
-        if (missingPacks.Length + missingSnippets.Length + missingExtensions.Length > 0)
+        var missingMacros = selectedMacros.Where(name => !macrosByName.ContainsKey(name)).ToArray();
+        if (missingPacks.Length + missingSnippets.Length + missingExtensions.Length + missingMacros.Length > 0)
         {
             throw new InvalidOperationException("One or more selected add-on components are no longer available.");
         }
@@ -147,7 +157,8 @@ public sealed class AddonPackageService
             version.Trim(),
             packPaths,
             selectedSnippets,
-            selectedExtensions.Select(extensionId => $"extensions/{extensionId}/extension.json").ToArray());
+            selectedExtensions.Select(extensionId => $"extensions/{extensionId}/extension.json").ToArray(),
+            selectedMacros);
         ValidateManifest(manifest);
 
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -156,6 +167,14 @@ public sealed class AddonPackageService
         {
             var sourcePath = Path.Combine(profileDirectory, packPath.Replace('/', Path.DirectorySeparatorChar));
             WriteEntry(archive, packPath, File.ReadAllBytes(sourcePath));
+        }
+
+        foreach (var macroName in selectedMacros)
+        {
+            var macro = macrosByName[macroName];
+            var macroDirectory = GetMacroPackageDirectory(macro.Metadata);
+            WriteEntry(archive, $"{macroDirectory}/metadata.json", JsonSerializer.Serialize(macro.Metadata, JsonOptions));
+            WriteEntry(archive, $"{macroDirectory}/script.txt", macro.Script);
         }
 
         foreach (var snippetName in selectedSnippets)
@@ -215,12 +234,14 @@ public sealed class AddonPackageService
         CommandPackLoader packLoader,
         SnippetStore snippetStore,
         ExtensionPackageManager? extensionPackageManager = null,
-        Func<string, string?>? getCommandOwner = null)
+        Func<string, string?>? getCommandOwner = null,
+        MacroStore? macroStore = null)
     {
         _packLoader = packLoader;
         _snippetStore = snippetStore;
         _extensionPackageManager = extensionPackageManager ?? new ExtensionPackageManager();
         _getCommandOwner = getCommandOwner;
+        _macroStore = macroStore ?? new MacroStore();
     }
 
     public AddonImportPreview Preview(string archivePath)
@@ -305,6 +326,40 @@ public sealed class AddonPackageService
             snippetNames.Add(snippetName);
         }
 
+        var macroNames = new List<string>();
+        foreach (var macroName in manifest.Macros ?? [])
+        {
+            var macroPath = GetMacroPackageDirectory(macroName);
+            var metadataPath = $"{macroPath}/metadata.json";
+            var scriptPath = $"{macroPath}/script.txt";
+            if (!entries.TryGetValue(metadataPath, out var metadataEntry)
+                || !entries.TryGetValue(scriptPath, out var scriptEntry))
+            {
+                throw new InvalidDataException($"Add-on macro '{macroName}' is missing metadata or script content.");
+            }
+
+            var metadata = JsonSerializer.Deserialize<MacroMetadata>(ReadText(metadataEntry), JsonOptions)
+                ?? throw new InvalidDataException($"Macro metadata for '{macroName}' is empty or invalid.");
+            var macro = new MacroDefinition(metadata, ReadText(scriptEntry));
+            try
+            {
+                _macroStore.Validate(macro);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException($"Macro '{macroName}' is invalid: {exception.Message}", exception);
+            }
+
+            if (!string.Equals(metadata.QualifiedName, macroName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Macro path '{macroName}' does not match metadata name '{metadata.QualifiedName}'.");
+            }
+
+            expectedFiles.Add(metadataPath);
+            expectedFiles.Add(scriptPath);
+            macroNames.Add(metadata.QualifiedName);
+        }
+
         var extensionIds = new List<string>();
         var extensionManifests = new Dictionary<string, ExtensionManifest>(StringComparer.OrdinalIgnoreCase);
         foreach (var extensionPath in manifest.Extensions ?? [])
@@ -386,9 +441,10 @@ public sealed class AddonPackageService
 
         if (packIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != packIds.Count
             || snippetNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != snippetNames.Count
-            || extensionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != extensionIds.Count)
+            || extensionIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != extensionIds.Count
+            || macroNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != macroNames.Count)
         {
-            throw new InvalidDataException("Add-on manifest contains duplicate pack IDs, snippet names, or extension IDs.");
+            throw new InvalidDataException("Add-on manifest contains duplicate pack IDs, snippet names, extension IDs, or macro names.");
         }
 
         var packItems = new List<AddonPreviewItem>();
@@ -440,6 +496,10 @@ public sealed class AddonPackageService
             .Select(name => new AddonPreviewItem("Snippet", name, _snippetStore.Find(name) is not null,
                 _snippetStore.Find(name) is null ? null : "Installed snippet"))
             .ToArray();
+        var macroItems = macroNames
+            .Select(name => new AddonPreviewItem("Macro", name, _macroStore.Find(name) is not null,
+                _macroStore.Find(name) is null ? null : "Installed macro"))
+            .ToArray();
         var extensionItems = extensionIds
             .Select(id =>
             {
@@ -470,12 +530,14 @@ public sealed class AddonPackageService
             .Select(id => $"Command pack: {id}")
             .Concat(snippetNames.Where(name => _snippetStore.Find(name) is not null)
                 .Select(name => $"Snippet: {name}"))
+            .Concat(macroNames.Where(name => _macroStore.Find(name) is not null)
+                .Select(name => $"Macro: {name}"))
             .Concat(extensionIds.Where(_extensionPackageManager.IsUserExtensionInstalled)
                 .Select(id => $"Extension: {id}"))
             .ToArray();
-        return new AddonImportPreview(manifest, packIds, snippetNames, extensionIds, conflicts)
+        return new AddonImportPreview(manifest, packIds, snippetNames, extensionIds, conflicts, macroNames)
         {
-            Items = packItems.Concat(snippetItems).Concat(extensionItems).ToArray()
+            Items = packItems.Concat(snippetItems).Concat(macroItems).Concat(extensionItems).ToArray()
         };
     }
 
@@ -501,8 +563,10 @@ public sealed class AddonPackageService
     {
         var previousPacks = new Dictionary<string, (string Path, byte[] Content)>(StringComparer.OrdinalIgnoreCase);
         var previousSnippets = new Dictionary<string, SnippetDefinition?>(StringComparer.OrdinalIgnoreCase);
+        var previousMacros = new Dictionary<string, MacroDefinition?>(StringComparer.OrdinalIgnoreCase);
         var installedPackIds = new List<string>();
         var installedSnippetNames = new List<string>();
+        var installedMacroNames = new List<string>();
         var skippedItems = new List<string>();
         using var archive = ZipFile.OpenRead(archivePath);
         var entries = GetFileEntries(archive);
@@ -513,6 +577,7 @@ public sealed class AddonPackageService
                 StringComparison.Ordinal)
             || !preview.PackIds.SequenceEqual(currentPreview.PackIds, StringComparer.OrdinalIgnoreCase)
             || !preview.SnippetNames.SequenceEqual(currentPreview.SnippetNames, StringComparer.OrdinalIgnoreCase)
+            || !preview.MacroNames.SequenceEqual(currentPreview.MacroNames, StringComparer.OrdinalIgnoreCase)
             || !preview.ExtensionIds.SequenceEqual(currentPreview.ExtensionIds, StringComparer.OrdinalIgnoreCase)
             || !preview.Conflicts.SequenceEqual(currentPreview.Conflicts, StringComparer.OrdinalIgnoreCase))
         {
@@ -565,6 +630,24 @@ public sealed class AddonPackageService
                 previousSnippets[snippetName] = _snippetStore.Find(snippetName);
                 installedSnippetNames.Add(snippetName);
                 _snippetStore.Save(metadata.Name, metadata.Type, metadata.Arguments, metadata.AllowedSecrets, script);
+            }
+
+            foreach (var macroName in preview.MacroNames)
+            {
+                var existingMacro = _macroStore.Find(macroName);
+                if (existingMacro is not null && conflictPolicy == ImportConflictPolicy.SkipExisting)
+                {
+                    skippedItems.Add($"Macro: {macroName}");
+                    continue;
+                }
+
+                var macroDirectory = GetMacroPackageDirectory(macroName);
+                var metadata = JsonSerializer.Deserialize<MacroMetadata>(ReadText(entries[$"{macroDirectory}/metadata.json"]), JsonOptions)
+                    ?? throw new InvalidDataException($"Macro metadata for '{macroName}' is invalid.");
+                var script = ReadText(entries[$"{macroDirectory}/script.txt"]);
+                previousMacros[macroName] = existingMacro;
+                installedMacroNames.Add(macroName);
+                _macroStore.Save(new MacroDefinition(metadata, script));
             }
 
             var extensionPackages = new List<string>();
@@ -661,8 +744,28 @@ public sealed class AddonPackageService
                 }
             }
 
-            if (installedPackIds.Count > 0 || installedSnippetNames.Count > 0 || preview.ExtensionIds.Count > 0)
+            if (installedPackIds.Count > 0 || installedSnippetNames.Count > 0 || installedMacroNames.Count > 0 || preview.ExtensionIds.Count > 0)
             {
+                foreach (var macroName in installedMacroNames.AsEnumerable().Reverse())
+                {
+                    try
+                    {
+                        var previous = previousMacros[macroName];
+                        if (previous is null)
+                        {
+                            _macroStore.Remove(macroName);
+                        }
+                        else
+                        {
+                            _macroStore.Save(previous);
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        rollbackFailures.Add($"Macro '{macroName}': {exception.Message}");
+                    }
+                }
+
                 try
                 {
                     runtimeRefresh?.Invoke();
@@ -719,6 +822,26 @@ public sealed class AddonPackageService
         return normalized;
     }
 
+    private static string GetMacroPackageDirectory(MacroMetadata metadata)
+        => $"macros/{metadata.Namespace ?? "_default"}/{metadata.Name}";
+
+    private static string GetMacroPackageDirectory(string qualifiedName)
+    {
+        var separator = qualifiedName.IndexOf(':');
+        var macroNamespace = separator < 0 ? null : qualifiedName[..separator];
+        var name = separator < 0 ? qualifiedName : qualifiedName[(separator + 1)..];
+        var metadata = new MacroMetadata(Guid.Empty.ToString("N"), name, macroNamespace, [], MacroErrorBehavior.Break);
+        try
+        {
+            _ = new MacroStore(Path.GetTempPath()).Validate(new MacroDefinition(metadata, "validation"));
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException($"Add-on macro name '{qualifiedName}' is invalid.", exception);
+        }
+        return GetMacroPackageDirectory(metadata);
+    }
+
     private static void ValidateManifest(AddonManifest manifest)
     {
         if (string.IsNullOrWhiteSpace(manifest.Id)
@@ -727,9 +850,10 @@ public sealed class AddonPackageService
             || string.IsNullOrWhiteSpace(manifest.Version)
             || manifest.Packs is null
             || manifest.Snippets is null
-            || (manifest.Extensions ?? []).Count == 0 && manifest.Packs.Count == 0 && manifest.Snippets.Count == 0)
+            || (manifest.Extensions ?? []).Count == 0 && manifest.Packs.Count == 0
+                && manifest.Snippets.Count == 0 && (manifest.Macros ?? []).Count == 0)
         {
-            throw new InvalidDataException("Add-on manifest must define an ID, name, version, and at least one pack, snippet, or extension.");
+            throw new InvalidDataException("Add-on manifest must define an ID, name, version, and at least one pack, snippet, macro, or extension.");
         }
 
         if (manifest.Extensions?.Any(path => !path.StartsWith("extensions/", StringComparison.OrdinalIgnoreCase)) == true)
