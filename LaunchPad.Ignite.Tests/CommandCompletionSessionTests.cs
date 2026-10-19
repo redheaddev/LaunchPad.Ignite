@@ -55,6 +55,20 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public async Task ClickingCompletionAcceptsTabTextAndRequiredArgumentSpace()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "ext";
+        var completionIndex = viewModel.CompletionItems.ToList()
+            .FindIndex(item => item.DisplayText == "extension");
+
+        Assert.True(completionIndex >= 0);
+        await viewModel.AcceptCompletionAtIndexAsync(completionIndex);
+
+        Assert.Equal("extension ", viewModel.CommandInputText);
+    }
+
+    [Fact]
     public void CommandMetadataFilterPrefixIsRemovedFromCommandInput()
     {
         var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();

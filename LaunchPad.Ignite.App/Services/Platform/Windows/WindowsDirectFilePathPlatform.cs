@@ -1,11 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.Windows;
 
-public sealed class DirectFilePathCompletion
+public sealed class WindowsDirectFilePathPlatform : IDirectFilePathPlatform
 {
     public const int MaximumSuggestions = 50;
 
@@ -13,14 +14,14 @@ public sealed class DirectFilePathCompletion
     private readonly Func<string, bool> _directoryExists;
     private readonly Func<string, IEnumerable<string>> _enumerateUncShares;
 
-    public DirectFilePathCompletion(
+    public WindowsDirectFilePathPlatform(
         Func<string, IEnumerable<string>>? enumerateEntries = null,
         Func<string, bool>? directoryExists = null,
         Func<string, IEnumerable<string>>? enumerateUncShares = null)
     {
         _enumerateEntries = enumerateEntries ?? Directory.EnumerateFileSystemEntries;
         _directoryExists = directoryExists ?? Directory.Exists;
-        _enumerateUncShares = enumerateUncShares ?? UncShareEnumerator.EnumerateShares;
+        _enumerateUncShares = enumerateUncShares ?? WindowsUncShareEnumerator.EnumerateShares;
     }
 
     public bool IsDirectPath(string text)
@@ -35,17 +36,6 @@ public sealed class DirectFilePathCompletion
             && text[1] == ':'
             && IsDirectorySeparator(text[2])
             || IsUncPath(text);
-    }
-
-    private static bool IsUncPath(string text)
-    {
-        if (!text.StartsWith("\\\\", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var serverEnd = text.IndexOf('\\', 2);
-        return serverEnd > 2 || serverEnd < 0 && text.Length > 2;
     }
 
     public bool TryGetCompletionPath(string text, out string path)
@@ -82,8 +72,8 @@ public sealed class DirectFilePathCompletion
         try
         {
             return _enumerateEntries(directory)
-                .Where(path => GetName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .Select(path => (Path: path, IsDirectory: _directoryExists(path)))
+                .Where(entry => GetName(entry).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(entry => (Path: entry, IsDirectory: _directoryExists(entry)))
                 .OrderByDescending(entry => entry.IsDirectory)
                 .ThenBy(entry => GetName(entry.Path), StringComparer.OrdinalIgnoreCase)
                 .Take(MaximumSuggestions)
@@ -103,6 +93,56 @@ public sealed class DirectFilePathCompletion
             return Array.Empty<string>();
         }
     }
+
+    public bool TryAcceptNextPathSegment(string currentPath, string suggestion, out string acceptedPath)
+    {
+        acceptedPath = currentPath;
+        if (!suggestion.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase)
+            || suggestion.Length == currentPath.Length)
+        {
+            return false;
+        }
+
+        var remaining = suggestion[currentPath.Length..];
+        if (currentPath.Length == 1
+            && char.IsAsciiLetter(currentPath[0])
+            && remaining.Length >= 2
+            && remaining[0] == ':'
+            && IsDirectorySeparator(remaining[1]))
+        {
+            acceptedPath = currentPath + remaining[..2];
+            return true;
+        }
+
+        if (currentPath.Length == 2
+            && char.IsAsciiLetter(currentPath[0])
+            && currentPath[1] == ':'
+            && remaining.Length > 0
+            && IsDirectorySeparator(remaining[0]))
+        {
+            acceptedPath = currentPath + remaining[0];
+            return true;
+        }
+
+        var separatorStart = IsDirectorySeparator(remaining[0]) ? 1 : 0;
+        var nextSeparatorIndex = remaining.IndexOfAny(['\\', '/'], separatorStart);
+        var acceptedLength = nextSeparatorIndex < 0 ? remaining.Length : nextSeparatorIndex + 1;
+        acceptedPath = currentPath + remaining[..acceptedLength];
+        return acceptedLength > 0;
+    }
+
+    public ProcessStartInfo CreateOpenPathStartInfo(string path, bool isDirectory)
+    {
+        var startInfo = new ProcessStartInfo("explorer.exe")
+        {
+            UseShellExecute = true
+        };
+        startInfo.ArgumentList.Add(isDirectory ? path : $"/select,{path}");
+        return startInfo;
+    }
+
+    public bool IsPathPrefix(string path, string prefix)
+        => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 
     private bool TryGetUncShareSuggestions(string path, out IReadOnlyList<string> suggestions)
     {
@@ -145,53 +185,15 @@ public sealed class DirectFilePathCompletion
         return true;
     }
 
-    public static bool TrySelectSuggestion(IReadOnlyList<string> suggestions, int index, out string suggestion)
+    private static bool IsUncPath(string text)
     {
-        if (index < 0 || index >= suggestions.Count)
-        {
-            suggestion = string.Empty;
-            return false;
-        }
-
-        suggestion = suggestions[index];
-        return true;
-    }
-
-    public static bool TryAcceptNextPathSegment(string currentPath, string suggestion, out string acceptedPath)
-    {
-        acceptedPath = currentPath;
-        if (!suggestion.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase)
-            || suggestion.Length == currentPath.Length)
+        if (!text.StartsWith("\\\\", StringComparison.Ordinal))
         {
             return false;
         }
 
-        var remaining = suggestion[currentPath.Length..];
-        if (currentPath.Length == 1
-            && char.IsAsciiLetter(currentPath[0])
-            && remaining.Length >= 2
-            && remaining[0] == ':'
-            && IsDirectorySeparator(remaining[1]))
-        {
-            acceptedPath = currentPath + remaining[..2];
-            return true;
-        }
-
-        if (currentPath.Length == 2
-            && char.IsAsciiLetter(currentPath[0])
-            && currentPath[1] == ':'
-            && remaining.Length > 0
-            && IsDirectorySeparator(remaining[0]))
-        {
-            acceptedPath = currentPath + remaining[0];
-            return true;
-        }
-
-        var separatorStart = IsDirectorySeparator(remaining[0]) ? 1 : 0;
-        var nextSeparatorIndex = remaining.IndexOfAny(['\\', '/'], separatorStart);
-        var acceptedLength = nextSeparatorIndex < 0 ? remaining.Length : nextSeparatorIndex + 1;
-        acceptedPath = currentPath + remaining[..acceptedLength];
-        return acceptedLength > 0;
+        var serverEnd = text.IndexOf('\\', 2);
+        return serverEnd > 2 || serverEnd < 0 && text.Length > 2;
     }
 
     private static string GetName(string path)

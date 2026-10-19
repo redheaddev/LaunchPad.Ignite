@@ -1,9 +1,22 @@
 using System;
+using System.Collections.Generic;
 
 namespace LaunchPad.Ignite.App.Services;
 
 public static class DirectFilePathSelection
 {
+    public static bool TrySelectSuggestion<T>(IReadOnlyList<T> suggestions, int index, out T suggestion)
+    {
+        if (index < 0 || index >= suggestions.Count)
+        {
+            suggestion = default!;
+            return false;
+        }
+
+        suggestion = suggestions[index];
+        return true;
+    }
+
     public static bool TryGetPath(string text, int selectionStart, int selectionEnd, int caretIndex, out string path)
     {
         var start = Math.Clamp(Math.Min(selectionStart, selectionEnd), 0, text.Length);

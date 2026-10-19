@@ -189,6 +189,12 @@ public partial class MainViewModel : ViewModelBase
     public void SaveWindowPosition(LauncherWindowMode mode, LauncherWindowPosition position)
         => _launcherWindowStateStore.SetPosition(mode, position);
 
+    public bool TryGetWindowSize(LauncherWindowMode mode, out LauncherWindowSize size)
+        => _launcherWindowStateStore.TryGetSize(mode, out size);
+
+    public void SaveWindowSize(LauncherWindowMode mode, LauncherWindowSize size)
+        => _launcherWindowStateStore.SetSize(mode, size);
+
     private void InitializeCommandRuntime()
     {
         var extensions = new ExtensionLoader(_extensionStateStore).Load();
@@ -893,6 +899,22 @@ public partial class MainViewModel : ViewModelBase
     public int GetCommandInputCaretIndex(int commandCaretIndex)
         => Math.Clamp(_commandMetadataFilterPrefix.Length + commandCaretIndex, 0, CommandInputText.Length);
 
+    public async Task AcceptCompletionAtIndexAsync(int index)
+    {
+        if (_isExtensionListVisible || index < 0 || index >= CompletionItems.Count)
+        {
+            return;
+        }
+
+        await HandleInputKeyAsync(CommandInputKey.First);
+        for (var completionIndex = 0; completionIndex < index; completionIndex++)
+        {
+            await HandleInputKeyAsync(CommandInputKey.Down);
+        }
+
+        await HandleInputKeyAsync(CommandInputKey.Tab);
+    }
+
     public async Task<bool> HandleInputKeyAsync(
         CommandInputKey key,
         bool newWindow = false,
@@ -1194,7 +1216,7 @@ public partial class MainViewModel : ViewModelBase
         var inputPath = input.Trim('"');
         if (acceptDirectPathSegments
             && _directFilePathHandler.TryGetCompletionPath(suggestion, out var suggestionPath)
-            && DirectFilePathCompletion.TryAcceptNextPathSegment(inputPath, suggestionPath, out var nextPath))
+            && _directFilePathHandler.TryAcceptNextPathSegment(inputPath, suggestionPath, out var nextPath))
         {
             var completedPath = _directFilePathHandler.GetSuggestionText(nextPath);
             CommandText = completedPath;
@@ -2015,14 +2037,14 @@ public partial class MainViewModel : ViewModelBase
             && hasRetainedHistory
             && _directFilePathHandler.TryGetCompletionPath(retainedHistory[0].CommandText, out var historyPath)
             && _directFilePathHandler.TryGetCompletionPath(CommandText, out var currentPath)
-            && historyPath.StartsWith(currentPath, StringComparison.OrdinalIgnoreCase)
+            && _directFilePathHandler.IsPathPrefix(historyPath, currentPath)
                 ? historyPath[currentPath.Length..]
-                : DirectFilePathCompletion.TrySelectSuggestion(
+                : DirectFilePathSelection.TrySelectSuggestion(
                     _directPathSuggestions,
                     _directPathHighlightedIndex,
                     out var selectedPath)
                     && _directFilePathHandler.TryGetCompletionPath(CommandText, out var typedPath)
-                    && selectedPath.StartsWith(typedPath, StringComparison.OrdinalIgnoreCase)
+                    && _directFilePathHandler.IsPathPrefix(selectedPath, typedPath)
                         ? selectedPath[typedPath.Length..]
                         : string.Empty;
         UsageText = "Files and folders";
@@ -2069,7 +2091,7 @@ public partial class MainViewModel : ViewModelBase
 
         if (key == CommandInputKey.Tab)
         {
-            if (DirectFilePathCompletion.TrySelectSuggestion(
+            if (DirectFilePathSelection.TrySelectSuggestion(
                 _directPathSuggestions,
                 _directPathHighlightedIndex,
                 out var selectedPath))
@@ -2111,11 +2133,11 @@ public partial class MainViewModel : ViewModelBase
 
     private void AcceptNextDirectPathSegment()
     {
-        if (!DirectFilePathCompletion.TrySelectSuggestion(
+        if (!DirectFilePathSelection.TrySelectSuggestion(
                 _directPathSuggestions,
                 _directPathHighlightedIndex,
                 out var selectedPath)
-            || !DirectFilePathCompletion.TryAcceptNextPathSegment(
+            || !_directFilePathHandler.TryAcceptNextPathSegment(
                 GetCurrentDirectPathText(),
                 selectedPath,
                 out var acceptedPath))

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.Windows;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
@@ -17,7 +18,7 @@ public class DirectFilePathTests
     [InlineData(@"\\server\share\folder")]
     public void RecognizesAbsoluteWindowsPaths(string path)
     {
-        var completion = new DirectFilePathCompletion();
+        var completion = new WindowsDirectFilePathPlatform();
 
         Assert.True(completion.IsDirectPath(path));
     }
@@ -28,7 +29,7 @@ public class DirectFilePathTests
     [InlineData(" C:\\work")]
     public void DoesNotRecognizeNonAbsolutePaths(string path)
     {
-        var completion = new DirectFilePathCompletion();
+        var completion = new WindowsDirectFilePathPlatform();
 
         Assert.False(completion.IsDirectPath(path));
     }
@@ -36,7 +37,7 @@ public class DirectFilePathTests
     [Fact]
     public void GetSuggestionsReturnsMatchingFoldersFirst()
     {
-        var completion = new DirectFilePathCompletion(
+        var completion = new WindowsDirectFilePathPlatform(
             _ => [@"C:\projects", @"C:\photo.txt", @"C:\Archive"],
             path => path == @"C:\projects" || path == @"C:\Archive");
 
@@ -49,7 +50,7 @@ public class DirectFilePathTests
     public void GetSuggestionsCompletesUncSharesForServerRootAndPrefix()
     {
         string? requestedServer = null;
-        var completion = new DirectFilePathCompletion(
+        var completion = new WindowsDirectFilePathPlatform(
             enumerateUncShares: server =>
             {
                 requestedServer = server;
@@ -70,7 +71,7 @@ public class DirectFilePathTests
     public void GetSuggestionsEnumeratesEntriesInsideUncShare()
     {
         var requestedDirectories = new List<string>();
-        var completion = new DirectFilePathCompletion(
+        var completion = new WindowsDirectFilePathPlatform(
             directory =>
             {
                 requestedDirectories.Add(directory);
@@ -89,7 +90,7 @@ public class DirectFilePathTests
     public void GetSuggestionsRecognizesUncServerPrefixBeforeShareSeparator()
     {
         var requestedServer = string.Empty;
-        var completion = new DirectFilePathCompletion(
+        var completion = new WindowsDirectFilePathPlatform(
             enumerateUncShares: server =>
             {
                 requestedServer = server;
@@ -105,7 +106,7 @@ public class DirectFilePathTests
     [Fact]
     public void DoesNotTreatBareUncPrefixAsDirectPath()
     {
-        var completion = new DirectFilePathCompletion();
+        var completion = new WindowsDirectFilePathPlatform();
 
         Assert.False(completion.IsDirectPath(@"\\"));
     }
@@ -115,7 +116,7 @@ public class DirectFilePathTests
     {
         var suggestions = new[] { @"C:\projects\", @"C:\photo.txt" };
 
-        var selected = DirectFilePathCompletion.TrySelectSuggestion(suggestions, 1, out var path);
+        var selected = DirectFilePathSelection.TrySelectSuggestion(suggestions, 1, out var path);
 
         Assert.True(selected);
         Assert.Equal(@"C:\photo.txt", path);
@@ -126,19 +127,19 @@ public class DirectFilePathTests
     {
         const string suggestion = @"\\server\share\folder\";
 
-        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+        Assert.True(new WindowsDirectFilePathPlatform().TryAcceptNextPathSegment(
             @"\\server\sha",
             suggestion,
             out var firstPath));
         Assert.Equal(@"\\server\share\", firstPath);
 
-        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+        Assert.True(new WindowsDirectFilePathPlatform().TryAcceptNextPathSegment(
             firstPath,
             suggestion,
             out var secondPath));
         Assert.Equal(@"\\server\share\folder\", secondPath);
 
-        Assert.False(DirectFilePathCompletion.TryAcceptNextPathSegment(
+        Assert.False(new WindowsDirectFilePathPlatform().TryAcceptNextPathSegment(
             secondPath,
             suggestion,
             out _));
@@ -154,7 +155,7 @@ public class DirectFilePathTests
         string suggestion,
         string expectedPath)
     {
-        Assert.True(DirectFilePathCompletion.TryAcceptNextPathSegment(
+        Assert.True(new WindowsDirectFilePathPlatform().TryAcceptNextPathSegment(
             currentPath,
             suggestion,
             out var acceptedPath));
@@ -216,7 +217,7 @@ public class DirectFilePathTests
     public void TryOpenOpensDriveRootInExplorer()
     {
         var starter = new RecordingProcessStarter();
-        var completion = new DirectFilePathCompletion(_ => Array.Empty<string>());
+        var completion = new WindowsDirectFilePathPlatform(_ => Array.Empty<string>());
         var handler = new DirectFilePathHandler(
             starter,
             completion,
@@ -227,7 +228,7 @@ public class DirectFilePathTests
 
         Assert.True(handled);
         Assert.True(result.Succeeded);
-        Assert.Equal("Opened folder in Explorer.", result.Message);
+        Assert.Equal("Opened folder.", result.Message);
         Assert.Equal("explorer.exe", starter.StartInfo!.FileName);
         Assert.True(starter.StartInfo.UseShellExecute);
         Assert.Equal([@"C:\"], starter.StartInfo.ArgumentList);

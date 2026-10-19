@@ -2,14 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.Windows;
 
-internal static class UncShareEnumerator
+internal static class WindowsUncShareEnumerator
 {
     private const int MaximumPreferredLength = -1;
     private const int ErrorMoreData = 234;
     private const uint DiskTreeShare = 0;
-    private const uint SpecialShare = 0x80000000;
 
     public static IReadOnlyList<string> EnumerateShares(string serverName)
     {
@@ -39,8 +38,7 @@ internal static class UncShareEnumerator
             for (var index = 0; index < entriesRead; index++)
             {
                 var entry = Marshal.PtrToStructure<ShareInfo1>(IntPtr.Add(buffer, index * entrySize));
-                if (entry.Type == DiskTreeShare
-                    && !string.IsNullOrEmpty(entry.Name))
+                if (entry.Type == DiskTreeShare && !string.IsNullOrEmpty(entry.Name))
                 {
                     shares.Add(entry.Name);
                 }

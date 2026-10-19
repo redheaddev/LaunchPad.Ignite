@@ -66,6 +66,25 @@ public sealed class LauncherWindowStateTests
         Assert.Equal(miniPosition, restoredMiniPosition);
     }
 
+    [Fact]
+    public void LauncherWindowStateStore_PersistsSeparateSizesForEachMode()
+    {
+        using var directory = new TemporaryDirectory();
+        var settingsPath = Path.Combine(directory.Path, "settings.json");
+        var stateStore = new LauncherWindowStateStore(new ProfileSettingsStore(settingsPath));
+        var mainSize = new LauncherWindowSize(920, 540);
+        var miniSize = new LauncherWindowSize(580, 92);
+
+        stateStore.SetSize(LauncherWindowMode.Main, mainSize);
+        stateStore.SetSize(LauncherWindowMode.Mini, miniSize);
+
+        var reloadedStore = new LauncherWindowStateStore(new ProfileSettingsStore(settingsPath));
+        Assert.True(reloadedStore.TryGetSize(LauncherWindowMode.Main, out var restoredMainSize));
+        Assert.True(reloadedStore.TryGetSize(LauncherWindowMode.Mini, out var restoredMiniSize));
+        Assert.Equal(mainSize, restoredMainSize);
+        Assert.Equal(miniSize, restoredMiniSize);
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));

@@ -27,7 +27,7 @@
             <Setter Property="MinHeight" Value="30" />
         </Style>
         <Style Selector="Border.main-panel">
-            <Setter Property="Padding" Value="22" />
+            <Setter Property="Padding" Value="9" />
             <Setter Property="CornerRadius" Value="18" />
         </Style>
         <Style Selector="Border.mini-panel">
@@ -53,6 +53,9 @@
             <Setter Property="MinHeight" Value="28" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Border.completion-item">
+            <Setter Property="Background" Value="Transparent" />
         </Style>
         <Style Selector="Border.completion-item.highlighted">
             <Setter Property="Background" Value="{DynamicResource ThemeHighlight}" />
@@ -178,6 +181,8 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
+                                            HorizontalAlignment="Stretch"
+                                            PointerPressed="CompletionItem_PointerPressed"
                                             Classes.highlighted="{Binding IsHighlighted}">
                                         <TextBlock Classes="completion-item-text"
                                                    Classes.highlighted="{Binding IsHighlighted}"
@@ -226,6 +231,20 @@
 				<TextBlock Text="Tab/Right-Arrow -> accept" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Esc -> close" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
             </StackPanel>
+
+            <Border Grid.RowSpan="4" Width="18" Height="18" Background="Transparent"
+                    IsVisible="{Binding IsMainMode}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="0,0,-1,-1" PointerPressed="MainResizeGrip_PointerPressed">
+                <Path Width="18" Height="18" Data="M 4,17 L 17,4 M 9,17 L 17,9 M 14,17 L 17,14"
+                      Stretch="None" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      Stroke="{DynamicResource ThemeMutedText}" StrokeThickness="1" />
+            </Border>
+            <Border Grid.RowSpan="4" Width="18" Height="18" Background="Transparent"
+                    IsVisible="{Binding IsMiniMode}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="0,0,-1,-1" PointerPressed="MiniResizeGrip_PointerPressed">
+                <TextBlock Text="⋮" IsHitTestVisible="False" HorizontalAlignment="Right"
+                           VerticalAlignment="Bottom" Foreground="{DynamicResource ThemeMutedText}" FontSize="12" />
+            </Border>
 
         </Grid>
     </Border>

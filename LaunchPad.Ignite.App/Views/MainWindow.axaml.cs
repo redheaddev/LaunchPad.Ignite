@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Platform.Storage;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -33,7 +34,7 @@ public partial class MainWindow : Window
     private readonly ItemsControl _completionList;
     private readonly TextBlock _commandTextOverlay;
     private readonly TextBlock _usageTextBlock;
-    private readonly DispatcherTimer _positionSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly DispatcherTimer _windowStateSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private ScrollViewer? _commandScrollViewer;
     private MainViewModel? _shortcutViewModel;
     private Task? _hotKeyTask;
@@ -54,11 +55,32 @@ public partial class MainWindow : Window
     private int _pathSelectionEnd = -1;
     private int? _pendingCaretIndex;
     private LauncherWindowMode? _appliedWindowMode;
+    private bool _windowStateInitialized;
+    private IPointer? _resizePointer;
+    private Point _resizeStartPoint;
+    private double _resizeStartWidth;
+    private double _resizeStartHeight;
+    private bool _resizeWidth;
+    private bool _resizeHeight;
+    private readonly Cursor _horizontalResizeCursor;
+    private readonly Cursor _verticalResizeCursor;
+    private readonly Cursor _diagonalResizeCursor;
+    private readonly Cursor _pointerCursor;
+
+    private const double ResizeGripSize = 24;
+    private const double MainDefaultWidth = 760;
+    private const double MainDefaultHeight = 360;
+    private const double MiniDefaultWidth = 640;
+    private const double MiniDefaultHeight = 92;
 
     public MainWindow(bool startMinimized = false)
     {
         _startMinimized = startMinimized;
         InitializeComponent();
+        _horizontalResizeCursor = new Cursor(StandardCursorType.SizeWestEast);
+        _verticalResizeCursor = new Cursor(StandardCursorType.SizeNorthSouth);
+        _diagonalResizeCursor = new Cursor(StandardCursorType.BottomRightCorner);
+        _pointerCursor = new Cursor(StandardCursorType.Arrow);
         Title = $"LaunchPad.Ignite {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown"}";
         _commandBox = this.FindControl<TextBox>("CommandBox")
             ?? throw new InvalidOperationException("Command input control was not found.");
@@ -119,13 +141,22 @@ public partial class MainWindow : Window
         Activated += MainWindow_Activated;
         AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
         AddHandler(PointerPressedEvent, MainWindow_PointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
-        PositionChanged += (_, _) => ScheduleWindowPositionSave();
-        _positionSaveTimer.Tick += (_, _) =>
+        AddHandler(PointerMovedEvent, MainWindow_PointerMoved, RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, MainWindow_PointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
+        PositionChanged += (_, _) =>
         {
-            _positionSaveTimer.Stop();
-            SaveCurrentWindowPosition();
+            if (_windowStateInitialized)
+            {
+                ScheduleWindowStateSave();
+            }
+        };
+        _windowStateSaveTimer.Tick += (_, _) =>
+        {
+            _windowStateSaveTimer.Stop();
+            SaveCurrentWindowState();
         };
         Opened += MainWindow_Opened;
+        Closing += (_, _) => FlushWindowState();
         Closed += MainWindow_Closed;
     }
 
@@ -283,15 +314,153 @@ public partial class MainWindow : Window
 
     private void MainWindow_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
-            || e.Source is not Visual source
-            || source is TextBox
-            || source.GetVisualAncestors().Any(ancestor => ancestor is TextBox or Button))
+        if (_resizePointer is not null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             return;
         }
 
+        if (e.Source is not Visual source
+            || source is TextBox
+            || source is ScrollBar
+            || source.GetVisualAncestors().Any(ancestor => ancestor is TextBox or Button or ScrollBar or ScrollViewer))
+        {
+            return;
+        }
+
+        var point = e.GetPosition(this);
+        _resizeWidth = point.X >= Bounds.Width - ResizeGripSize;
+        _resizeHeight = _appliedWindowMode == LauncherWindowMode.Main
+            && point.Y >= Bounds.Height - ResizeGripSize;
+        if (_resizeWidth || _resizeHeight)
+        {
+            BeginResize(e, _resizeWidth, _resizeHeight);
+            return;
+        }
+
         BeginMoveDrag(e);
+    }
+
+    private async void CompletionItem_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            || sender is not Control control
+            || control.DataContext is null
+            || DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        var index = viewModel.CompletionItems.ToList()
+            .FindIndex(item => ReferenceEquals(item, control.DataContext));
+        if (index < 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await viewModel.AcceptCompletionAtIndexAsync(index);
+        RequestCommandBoxFocus();
+        var acceptedText = viewModel.CommandInputText;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_commandBox.IsFocused)
+            {
+                return;
+            }
+
+            if (!string.Equals(_commandBox.Text, acceptedText, StringComparison.Ordinal))
+            {
+                _commandBox.Text = acceptedText;
+            }
+
+            var caretIndex = acceptedText.Length;
+            _commandBox.CaretIndex = caretIndex;
+            _commandBox.SelectionStart = caretIndex;
+            _commandBox.SelectionEnd = caretIndex;
+        }, DispatcherPriority.Background);
+    }
+
+    private void MainResizeGrip_PointerPressed(object? sender, PointerPressedEventArgs e)
+        => BeginResize(e, resizeWidth: true, resizeHeight: true);
+
+    private void MiniResizeGrip_PointerPressed(object? sender, PointerPressedEventArgs e)
+        => BeginResize(e, resizeWidth: true, resizeHeight: false);
+
+    private void BeginResize(PointerPressedEventArgs e, bool resizeWidth, bool resizeHeight)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _resizeWidth = resizeWidth;
+        _resizeHeight = resizeHeight;
+        _resizePointer = e.Pointer;
+        _resizeStartPoint = e.GetPosition(this);
+        _resizeStartWidth = Width;
+        _resizeStartHeight = Height;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+    }
+
+    private void MainWindow_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_resizePointer is null || !ReferenceEquals(_resizePointer, e.Pointer))
+        {
+            UpdateResizeCursor(e);
+            return;
+        }
+
+        var point = e.GetPosition(this);
+        if (_resizeWidth)
+        {
+            Width = Math.Max(MinWidth, _resizeStartWidth + point.X - _resizeStartPoint.X);
+        }
+
+        if (_resizeHeight)
+        {
+            Height = Math.Max(MinHeight, _resizeStartHeight + point.Y - _resizeStartPoint.Y);
+        }
+
+        ScheduleWindowStateSave();
+        e.Handled = true;
+    }
+
+    private void UpdateResizeCursor(PointerEventArgs e)
+    {
+        if (e.Source is Visual source
+            && (source is ScrollBar || source.GetVisualAncestors().Any(ancestor => ancestor is ScrollBar)))
+        {
+            Cursor = _pointerCursor;
+            return;
+        }
+
+        var point = e.GetPosition(this);
+        var resizeWidth = point.X >= Bounds.Width - ResizeGripSize;
+        var resizeHeight = _appliedWindowMode == LauncherWindowMode.Main
+            && point.Y >= Bounds.Height - ResizeGripSize;
+        Cursor = resizeWidth && resizeHeight
+            ? _diagonalResizeCursor
+            : resizeWidth
+                ? _horizontalResizeCursor
+                : resizeHeight
+                    ? _verticalResizeCursor
+                    : null;
+    }
+
+    private void MainWindow_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_resizePointer is null || !ReferenceEquals(_resizePointer, e.Pointer))
+        {
+            return;
+        }
+
+        _resizePointer = null;
+        _resizeWidth = false;
+        _resizeHeight = false;
+        e.Pointer.Capture(null);
+        UpdateResizeCursor(e);
+        e.Handled = true;
     }
 
     private void ApplyWindowMode(MainViewModel viewModel)
@@ -299,29 +468,43 @@ public partial class MainWindow : Window
         var mode = viewModel.CurrentWindowMode;
         if (_appliedWindowMode is { } previousMode && previousMode != mode)
         {
-            _positionSaveTimer.Stop();
-            SaveWindowPosition(viewModel, previousMode);
+            _windowStateSaveTimer.Stop();
+            SaveWindowState(viewModel, previousMode);
         }
 
         _appliedWindowMode = mode;
-        Width = mode == LauncherWindowMode.Mini ? 640 : 760;
         MinWidth = mode == LauncherWindowMode.Mini ? 460 : 640;
-        Height = mode == LauncherWindowMode.Mini ? 92 : 360;
-        MinHeight = mode == LauncherWindowMode.Mini ? 84 : 300;
+        MinHeight = mode == LauncherWindowMode.Mini ? MiniDefaultHeight : 300;
 
-        if (_appliedWindowMode == mode && viewModel.TryGetWindowPosition(mode, out var position)
-            && IsLoaded)
+        var defaultWidth = mode == LauncherWindowMode.Mini ? MiniDefaultWidth : MainDefaultWidth;
+        var defaultHeight = mode == LauncherWindowMode.Mini ? MiniDefaultHeight : MainDefaultHeight;
+        if (viewModel.TryGetWindowSize(mode, out var size))
+        {
+            Width = Math.Max(MinWidth, size.Width);
+            Height = mode == LauncherWindowMode.Mini
+                ? defaultHeight
+                : Math.Max(MinHeight, size.Height);
+        }
+        else
+        {
+            Width = defaultWidth;
+            Height = defaultHeight;
+        }
+
+        if (IsLoaded && viewModel.TryGetWindowPosition(mode, out var position))
         {
             Position = ClampToVisibleScreen(new PixelPoint(position.X, position.Y));
         }
     }
 
-    private void RestoreWindowPosition(MainViewModel viewModel)
+    private void RestoreWindowState(MainViewModel viewModel)
     {
         if (viewModel.TryGetWindowPosition(viewModel.CurrentWindowMode, out var position))
         {
             Position = ClampToVisibleScreen(new PixelPoint(position.X, position.Y));
         }
+
+        _windowStateInitialized = true;
     }
 
     private PixelPoint ClampToVisibleScreen(PixelPoint position)
@@ -348,32 +531,41 @@ public partial class MainWindow : Window
             Math.Clamp(position.Y, workingArea.Y, maxY));
     }
 
-    private void ScheduleWindowPositionSave()
+    private void ScheduleWindowStateSave()
     {
         if (_appliedWindowMode is null)
         {
             return;
         }
 
-        _positionSaveTimer.Stop();
-        _positionSaveTimer.Start();
+        _windowStateSaveTimer.Stop();
+        _windowStateSaveTimer.Start();
     }
 
-    private void SaveCurrentWindowPosition()
+    private void SaveCurrentWindowState()
     {
-        if (_appliedWindowMode is { } mode && DataContext is MainViewModel viewModel)
+        if (_windowStateInitialized
+            && _appliedWindowMode is { } mode
+            && DataContext is MainViewModel viewModel)
         {
-            SaveWindowPosition(viewModel, mode);
+            SaveWindowState(viewModel, mode);
         }
     }
 
-    private void SaveWindowPosition(MainViewModel viewModel, LauncherWindowMode mode)
-        => viewModel.SaveWindowPosition(mode, new LauncherWindowPosition(Position.X, Position.Y));
-
-    private void FlushWindowPosition()
+    private void SaveWindowState(MainViewModel viewModel, LauncherWindowMode mode)
     {
-        _positionSaveTimer.Stop();
-        SaveCurrentWindowPosition();
+        viewModel.SaveWindowPosition(mode, new LauncherWindowPosition(Position.X, Position.Y));
+        var width = (int)Math.Round(Width);
+        var height = mode == LauncherWindowMode.Mini
+            ? (int)MiniDefaultHeight
+            : (int)Math.Round(Height);
+        viewModel.SaveWindowSize(mode, new LauncherWindowSize(width, height));
+    }
+
+    private void FlushWindowState()
+    {
+        _windowStateSaveTimer.Stop();
+        SaveCurrentWindowState();
     }
 
     internal async Task<bool> ConfirmCommandPackReplacementAsync(string id)
@@ -855,7 +1047,7 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainViewModel viewModel)
         {
-            RestoreWindowPosition(viewModel);
+            RestoreWindowState(viewModel);
         }
 
         if (_startMinimized)
@@ -884,7 +1076,7 @@ public partial class MainWindow : Window
             }, DispatcherPriority.Input);
         }
 
-        if (_hotKeyTask is not null)
+        if (!OperatingSystem.IsWindows() || _hotKeyTask is not null)
         {
             return;
         }
@@ -1033,10 +1225,18 @@ public partial class MainWindow : Window
 
     private void MainWindow_Deactivated(object? sender, EventArgs e)
     {
-        if (!_secretDialogIsOpen
-            && DataContext is not MainViewModel { KeepWindowOpen: true })
+        if (_secretDialogIsOpen || DataContext is MainViewModel { KeepWindowOpen: true })
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsWindows())
         {
             HideMainWindow();
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            WindowState = WindowState.Minimized;
         }
     }
 
@@ -1495,14 +1695,13 @@ public partial class MainWindow : Window
     public void ShowAndActivate()
     {
         Show();
+        WindowState = WindowState.Normal;
         Activate();
         RequestCommandBoxFocus();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
-        FlushWindowPosition();
-
         if (DataContext is MainViewModel viewModel)
         {
             viewModel.ResetHistoryNavigation();

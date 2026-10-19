@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using LaunchPad.Ignite.Core.Execution;
@@ -10,30 +9,36 @@ namespace LaunchPad.Ignite.App.Services;
 public sealed class DirectFilePathHandler
 {
     private readonly IProcessStarter _processStarter;
-    private readonly DirectFilePathCompletion _completion;
+    private readonly IDirectFilePathPlatform _platform;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<string, bool> _directoryExists;
     private readonly ISecretTerminalLauncher _terminalLauncher;
 
     public DirectFilePathHandler(
         IProcessStarter processStarter,
-        DirectFilePathCompletion? completion = null,
+        IDirectFilePathPlatform? platform = null,
         Func<string, bool>? fileExists = null,
         Func<string, bool>? directoryExists = null,
         ISecretTerminalLauncher? terminalLauncher = null)
     {
         _processStarter = processStarter;
-        _completion = completion ?? new DirectFilePathCompletion();
+        _platform = platform ?? DirectFilePathPlatformFactory.Create();
         _fileExists = fileExists ?? File.Exists;
         _directoryExists = directoryExists ?? Directory.Exists;
         _terminalLauncher = terminalLauncher ?? new SystemSecretTerminalLauncher(processStarter);
     }
 
-    public bool IsDirectPath(string text) => _completion.IsDirectPath(text);
+    public bool IsDirectPath(string text) => _platform.IsDirectPath(text);
 
-    public bool TryGetCompletionPath(string text, out string path) => _completion.TryGetCompletionPath(text, out path);
+    public bool TryGetCompletionPath(string text, out string path) => _platform.TryGetCompletionPath(text, out path);
 
-    public IReadOnlyList<string> GetSuggestions(string text) => _completion.GetSuggestions(text);
+    public IReadOnlyList<string> GetSuggestions(string text) => _platform.GetSuggestions(text);
+
+    public bool TryAcceptNextPathSegment(string currentPath, string suggestion, out string acceptedPath)
+        => _platform.TryAcceptNextPathSegment(currentPath, suggestion, out acceptedPath);
+
+    public bool IsPathPrefix(string path, string prefix)
+        => _platform.IsPathPrefix(path, prefix);
 
     public string GetSuggestionText(string text)
     {
@@ -43,7 +48,7 @@ public sealed class DirectFilePathHandler
 
     public bool TryOpen(string text, out CommandExecutionResult result)
     {
-        if (!_completion.TryGetCompletionPath(text, out var path))
+        if (!_platform.TryGetCompletionPath(text, out var path))
         {
             result = new CommandExecutionResult(false, string.Empty);
             return false;
@@ -56,20 +61,14 @@ public sealed class DirectFilePathHandler
             return true;
         }
 
-        var startInfo = new ProcessStartInfo("explorer.exe")
-        {
-            UseShellExecute = true
-        };
-        startInfo.ArgumentList.Add(isDirectory ? path : $"/select,{path}");
-
         try
         {
-            _processStarter.Start(startInfo);
-            result = new CommandExecutionResult(true, isDirectory ? "Opened folder in Explorer." : "Opened file in Explorer.");
+            _processStarter.Start(_platform.CreateOpenPathStartInfo(path, isDirectory));
+            result = new CommandExecutionResult(true, isDirectory ? "Opened folder." : "Opened file.");
         }
         catch (Exception exception)
         {
-            result = new CommandExecutionResult(false, $"Unable to open path in Explorer: {exception.Message}");
+            result = new CommandExecutionResult(false, $"Unable to open path: {exception.Message}");
         }
 
         return true;
@@ -77,7 +76,7 @@ public sealed class DirectFilePathHandler
 
     public bool TryOpenInTerminal(string text, out CommandExecutionResult result)
     {
-        if (!_completion.TryGetCompletionPath(text, out var path))
+        if (!_platform.TryGetCompletionPath(text, out var path))
         {
             result = new CommandExecutionResult(false, string.Empty);
             return false;
