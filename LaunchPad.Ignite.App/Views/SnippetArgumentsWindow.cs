@@ -11,6 +11,7 @@ public sealed class SnippetArgumentsWindow : Window
 
     public SnippetArgumentsWindow(string snippetName, IReadOnlyList<string> arguments)
     {
+        EscapeToClose.Attach(this);
         Title = $"Run snippet: {snippetName}";
         Width = 460;
         SizeToContent = SizeToContent.Height;

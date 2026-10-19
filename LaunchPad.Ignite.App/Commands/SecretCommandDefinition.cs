@@ -42,6 +42,11 @@ public static class SecretCommandDefinition
                 [new CommandArgumentDefinition("secretName", Ref: "list:secrets", ListMode: ListSelectionMode.Single)]),
             new CommandActionDefinition("lock", "Lock secret access", "secret lock", "secret", []),
             new CommandActionDefinition("unlock", "Unlock secret access", "secret unlock", "secret", []),
+            new CommandActionDefinition("toggle", "Toggle secret access", "secret toggle", "secret", [])
+            {
+                KeyboardShortcut = "ctrl+l",
+                ExecuteOnKeyboardShortcut = true
+            },
             new CommandActionDefinition(
                 "master",
                 "Set the master password",

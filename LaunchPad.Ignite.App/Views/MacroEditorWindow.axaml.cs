@@ -13,6 +13,7 @@ public partial class MacroEditorWindow : Window
     public MacroEditorWindow(string qualifiedName, MacroDefinition? macro)
     {
         InitializeComponent();
+        EscapeToClose.Attach(this);
         var (name, macroNamespace) = ParseQualifiedName(qualifiedName);
         NameBox.Text = macro?.Metadata.Name ?? name;
         NamespaceBox.Text = macro?.Metadata.Namespace ?? macroNamespace ?? string.Empty;

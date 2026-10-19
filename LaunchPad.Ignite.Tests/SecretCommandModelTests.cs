@@ -52,6 +52,44 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task ToggleLocksUnlockedSecretAccess()
+    {
+        var gate = new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: true);
+        var model = CreateModel(gate: gate);
+
+        var result = await ExecuteAsync(model, "secret toggle");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("Secret access locked.", result.Message);
+        Assert.False(gate.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task ToggleUnlocksLockedSecretAccessAfterPasswordEntry()
+    {
+        var gate = new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: false);
+        var dialog = new FakeDialogService("master-password");
+        var model = CreateModel(gate: gate, dialog: dialog);
+
+        var result = await ExecuteAsync(model, "secret toggle");
+
+        Assert.True(result.Succeeded);
+        Assert.True(gate.IsUnlocked);
+        Assert.Equal(["Unlock secrets"], dialog.Titles);
+    }
+
+    [Fact]
+    public void SecretToggleActionUsesCtrlLAndExecutesImmediately()
+    {
+        var resolver = new ShortcutResolver([SecretCommandDefinition.Definition]);
+        Assert.True(KeyboardShortcutChord.TryParse("ctrl+l", out var chord));
+
+        Assert.True(resolver.TryExpandChord(chord, out var expansion, out var executeImmediately));
+        Assert.Equal("secret toggle ", expansion);
+        Assert.True(executeImmediately);
+    }
+
+    [Fact]
     public void ThemeCommandPersistsAndAppliesSelectedTheme()
     {
         using var directory = new TemporaryDirectory();

@@ -16,6 +16,7 @@ public partial class SnippetEditorWindow : Window
         IReadOnlyList<string> availableSecrets)
     {
         InitializeComponent();
+        EscapeToClose.Attach(this);
         NameBox.Text = name;
         TypeBox.SelectedIndex = string.Equals(snippet?.Metadata.Type, "shell", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         ArgumentsBox.Text = string.Join(",", snippet?.Metadata.Arguments ?? []);

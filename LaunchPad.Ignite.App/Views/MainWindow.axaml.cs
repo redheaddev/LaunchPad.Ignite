@@ -603,6 +603,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -649,6 +650,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -721,6 +723,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -767,6 +770,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -813,6 +817,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -859,6 +864,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -936,6 +942,7 @@ public partial class MainWindow : Window
             }
         };
 
+        EscapeToClose.Attach(dialog);
         _secretDialogIsOpen = true;
         try
         {
@@ -1018,10 +1025,15 @@ public partial class MainWindow : Window
 
     private async Task OpenHelpAsync()
     {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
         _secretDialogIsOpen = true;
         try
         {
-            await new HelpWindow().ShowDialog(this);
+            await new HelpWindow(viewModel.CreateHelpViewModel()).ShowDialog(this);
         }
         finally
         {

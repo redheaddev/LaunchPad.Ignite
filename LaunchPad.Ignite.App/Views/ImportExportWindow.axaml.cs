@@ -14,6 +14,7 @@ public partial class ImportExportWindow : Window
     public ImportExportWindow(ImportExportViewModel viewModel)
     {
         InitializeComponent();
+        EscapeToClose.Attach(this);
         _viewModel = viewModel;
         DataContext = viewModel;
         viewModel.CloseRequested += Close;

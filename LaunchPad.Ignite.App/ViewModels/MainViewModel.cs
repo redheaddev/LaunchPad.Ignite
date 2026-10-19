@@ -162,18 +162,14 @@ public partial class MainViewModel : ViewModelBase
     public void RequestNavigation(LauncherNavigationTarget target)
         => NavigationRequested?.Invoke(target);
 
+    public HelpViewModel CreateHelpViewModel()
+        => new(_catalog.Schema.Commands, _commandSources);
+
     public async Task ToggleSecretAccessAsync()
     {
         RefreshSecretAccessState();
-        if (!_secretAccessGate.HasMasterPassword)
-        {
-            SetStatusMessage("Set a master password before locking secret access.");
-            return;
-        }
-
-        var actionName = SecretAccessLocked ? "unlock" : "lock";
         var action = SecretCommandDefinition.Definition.Actions
-            .First(candidate => string.Equals(candidate.Name, actionName, StringComparison.OrdinalIgnoreCase));
+            .First(candidate => string.Equals(candidate.Name, "toggle", StringComparison.OrdinalIgnoreCase));
         var parsedCommand = new ParsedCommand(
             SecretCommandDefinition.Definition,
             action,

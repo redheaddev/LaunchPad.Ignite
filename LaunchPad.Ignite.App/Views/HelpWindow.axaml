@@ -1,53 +1,205 @@
 <Window xmlns="https://github.com/avaloniaui"
 		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:vm="using:LaunchPad.Ignite.App.ViewModels"
 		x:Class="LaunchPad.Ignite.App.Views.HelpWindow"
+		x:DataType="vm:HelpViewModel"
 		Title="LaunchPad Help"
 		Icon="/Assets/rocket.ico"
-		Width="520" SizeToContent="Height" MinWidth="440"
-		WindowStartupLocation="CenterOwner" CanResize="False"
+		Width="700" MinWidth="520" MaxHeight="860"
+		SizeToContent="Height"
+		WindowStartupLocation="CenterOwner" CanResize="True"
 		ShowInTaskbar="False" Background="Transparent">
+	<Window.Resources>
+		<DataTemplate x:Key="KeyboardShortcutTemplate" x:DataType="vm:HelpKeyboardShortcut">
+			<Grid ColumnDefinitions="160,*" ColumnSpacing="12" Margin="0,2">
+				<TextBlock Text="{Binding Shortcut}" FontFamily="Cascadia Mono, Consolas"
+						   Foreground="{DynamicResource ThemeAccent}" />
+				<TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap"
+						   Foreground="{DynamicResource ThemeSecondaryText}" />
+			</Grid>
+		</DataTemplate>
+	</Window.Resources>
 	<Border Background="{DynamicResource ThemePanelBackground}"
 			BorderBrush="{DynamicResource ThemeBorder}"
 			BorderThickness="1" CornerRadius="18" Padding="24">
-		<StackPanel Spacing="16">
-			<StackPanel Orientation="Horizontal" Spacing="10">
+		<DockPanel LastChildFill="True">
+			<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,14">
 				<Image Source="/Assets/rocket.png" Width="24" Height="24" Stretch="Uniform" />
 				<StackPanel Spacing="2" VerticalAlignment="Center">
 					<TextBlock Text="LaunchPad Help" FontSize="22" FontWeight="SemiBold"
 							   Foreground="{DynamicResource ThemeText}" />
-					<TextBlock Text="Commands and keyboard shortcuts"
+					<TextBlock Text="Shortcuts, command syntax, and object reference"
 							   Foreground="{DynamicResource ThemeSecondaryText}" />
 				</StackPanel>
 			</StackPanel>
 
-			<TextBlock Text="Quick commands" FontSize="15" FontWeight="SemiBold"
-					   Foreground="{DynamicResource ThemeAccent}" />
-			<Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="9">
-				<TextBlock Text="settings" FontFamily="Cascadia Mono, Consolas"
-						   Foreground="{DynamicResource ThemeText}" />
-				<TextBlock Grid.Column="1" Text="Open application settings (Ctrl+.)"
-						   Foreground="{DynamicResource ThemeSecondaryText}" />
-				<TextBlock Grid.Row="1" Text="import-export" FontFamily="Cascadia Mono, Consolas"
-						   Foreground="{DynamicResource ThemeText}" />
-				<TextBlock Grid.Row="1" Grid.Column="1" Text="Open profile import/export (Ctrl+I)"
-						   Foreground="{DynamicResource ThemeSecondaryText}" />
-				<TextBlock Grid.Row="2" Text="help" FontFamily="Cascadia Mono, Consolas"
-						   Foreground="{DynamicResource ThemeText}" />
-				<TextBlock Grid.Row="2" Grid.Column="1" Text="Open this help screen (Ctrl+H)"
-						   Foreground="{DynamicResource ThemeSecondaryText}" />
-				<TextBlock Grid.Row="3" Text="mode toggle" FontFamily="Cascadia Mono, Consolas"
-						   Foreground="{DynamicResource ThemeText}" />
-				<TextBlock Grid.Row="3" Grid.Column="1" Text="Switch between main and mini mode (Ctrl+M)"
-						   Foreground="{DynamicResource ThemeSecondaryText}" />
-			</Grid>
+			<Button DockPanel.Dock="Bottom" Content="Close" HorizontalAlignment="Right" MinWidth="84"
+					Margin="0,14,0,0" Click="CloseButton_Click" />
 
-			<TextBlock Text="Launcher keys" FontSize="15" FontWeight="SemiBold"
-					   Foreground="{DynamicResource ThemeAccent}" />
-			<TextBlock Text="Enter runs a command. Tab or Right Arrow accepts a suggestion. Esc closes the launcher."
-					   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+			<ScrollViewer HorizontalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+				<StackPanel HorizontalAlignment="Stretch" Spacing="8">
+					<Expander HorizontalAlignment="Stretch" Header="Keyboard shortcuts" IsExpanded="True">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Global launcher shortcuts for settings, navigation, and window mode."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<ItemsControl ItemsSource="{Binding KeyboardShortcuts}"
+										  ItemTemplate="{StaticResource KeyboardShortcutTemplate}" />
+							<TextBlock Text="Configure command and action chords in Settings."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+						</StackPanel>
+					</Expander>
 
-			<Button Content="Close" HorizontalAlignment="Right" MinWidth="84"
-					Click="CloseButton_Click" />
-		</StackPanel>
+					<Expander HorizontalAlignment="Stretch" Header="Commands">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="A command names an operation; actions describe what it does and which arguments it accepts. A default action can be run without typing its action name. Configured command shortcuts are listed below."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Use command [action] [arguments]. For a namespaced command, write namespace:command: the namespace comes before the colon, followed by the command name. If a command has a default action, omit the action name. Arguments can be positional or name=value; command and action names are case-insensitive."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Examples: ado:pr 12345  or  ado:artifacts my-project"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Examples:&#x0A;launchpad command add url weather --target &quot;https://example.test/{city}&quot; --arg city:required&#x0A;launchpad command edit weather --key ctrl+alt+w&#x0A;launchpad command list&#x0A;launchpad command show weather&#x0A;launchpad command remove weather"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Command input shortcuts" FontWeight="SemiBold"
+									   Foreground="{DynamicResource ThemeText}" />
+							<ItemsControl ItemsSource="{Binding CommandInputKeyboardShortcuts}"
+										  ItemTemplate="{StaticResource KeyboardShortcutTemplate}" />
+							<StackPanel IsVisible="{Binding HasCommandKeyboardShortcuts}" Spacing="6">
+								<TextBlock Text="Command shortcuts" FontWeight="SemiBold"
+										   Foreground="{DynamicResource ThemeText}" />
+								<ItemsControl ItemsSource="{Binding CommandKeyboardShortcuts}"
+											  ItemTemplate="{StaticResource KeyboardShortcutTemplate}" />
+							</StackPanel>
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="URL commands">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="A URL command opens its resolved target in the browser. Targets can include $variables and @functions, which are expanded when the command runs. Extensions can add namespaced URL commands such as ado:artifacts."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Example: ado:artifacts my-project"
+									   FontFamily="Cascadia Mono, Consolas" Foreground="{DynamicResource ThemeText}" />
+							<StackPanel IsVisible="{Binding HasUrlCommandKeyboardShortcuts}" Spacing="6">
+								<TextBlock Text="URL command shortcuts" FontWeight="SemiBold"
+										   Foreground="{DynamicResource ThemeText}" />
+								<ItemsControl ItemsSource="{Binding UrlCommandKeyboardShortcuts}"
+											  ItemTemplate="{StaticResource KeyboardShortcutTemplate}" />
+							</StackPanel>
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Functions">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Functions expand inline when a command runs. Use @name(arguments) or @namespace:name(arguments); arguments are positional. Extension functions may call an approved HTTP endpoint or script."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Example: @weather:temp(98101)"
+									   FontFamily="Cascadia Mono, Consolas" Foreground="{DynamicResource ThemeText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Variables">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Variables expand as $name or $namespace:name. Manage persistent user variables with variable set &lt;name&gt; &lt;value&gt; and variable remove &lt;name&gt;. Extensions can supply namespaced variables."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Examples:&#x0A;variable set location Seattle&#x0A;variable remove location"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Lists">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Lists provide suggested values for command arguments. Enum lists are declared by the app or an extension; other lists can be supplied at runtime, such as saved secrets or snippets."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Examples:&#x0A;launchpad list add enum weather:cities --values &quot;forecast,current&quot; --default forecast&#x0A;launchpad list edit weather:cities --add current --default current"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Macros">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Macros store reusable scripts with named arguments. Invoke one with %name or %namespace:name, then provide positional values or name=value pairs. Macro arguments can represent values, variables, lists, or secrets."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Use macro set, macro edit, macro list, and macro remove to manage macros."
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Examples:&#x0A;macro set greet&#x0A;macro edit greet&#x0A;macro list&#x0A;macro remove greet&#x0A;%greet(name=Sam)"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Snippets">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Type ^ to filter saved snippets. Tab or Right Arrow accepts a suggestion and inserts snippet run &lt;name&gt;. Snippets run in a terminal and can declare arguments and explicitly allowed secrets."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Use snippet set, snippet edit, snippet run, snippet rename, and snippet remove to manage snippets."
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Examples:&#x0A;snippet set greet&#x0A;snippet run greet name=Sam&#x0A;snippet rename greet welcome&#x0A;snippet remove welcome"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Secrets">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Use secret set, secret show, secret copy-value, secret copy-env, and secret shell to work with saved secrets. A master password is required to lock access; Ctrl+L toggles lock state and prompts for the password when unlocking."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Examples:&#x0A;secret set api-token&#x0A;secret copy-env api-token&#x0A;secret rename api-token api-token-next&#x0A;secret remove api-token-next&#x0A;secret master set"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Extensions have no secret access by default. Grant access per secret and extension in Settings."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Extensions">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Type ! to list extensions. Use extension install &lt;id-or-zip-path&gt;, extension enable &lt;id&gt;, extension disable &lt;id&gt;, and extension uninstall &lt;id&gt; to manage them."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="An extension can provide namespaced commands, functions, variables, lists, settings, and scripts. Its commands use namespace:command syntax."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Extension examples:&#x0A;extension install ./weather-extension.zip&#x0A;extension enable weather&#x0A;extension disable weather&#x0A;extension uninstall weather"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Command pack examples:&#x0A;extension pack-install ./weather-pack.json&#x0A;extension enable weather-pack"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<StackPanel IsVisible="{Binding HasExtensionShortcutGroups}" Spacing="8">
+								<TextBlock Text="Extension shortcuts" FontWeight="SemiBold"
+										   Foreground="{DynamicResource ThemeText}" />
+								<ItemsControl ItemsSource="{Binding ExtensionShortcutGroups}">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate x:DataType="vm:HelpExtensionShortcutGroup">
+											<StackPanel Spacing="4">
+												<TextBlock Text="{Binding ExtensionId}" FontWeight="SemiBold"
+													   Foreground="{DynamicResource ThemeText}" />
+												<ItemsControl ItemsSource="{Binding Shortcuts}"
+														  ItemTemplate="{StaticResource KeyboardShortcutTemplate}" />
+											</StackPanel>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</StackPanel>
+						</StackPanel>
+					</Expander>
+
+					<Expander HorizontalAlignment="Stretch" Header="Themes, profiles, and command definitions">
+						<StackPanel Margin="12,8,8,12" Spacing="8">
+							<TextBlock Text="Use theme &lt;name&gt; to change the color theme, backup [name] to create a profile backup, and restore &lt;file&gt; to restore one. Type * to list saved secret names without revealing values."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Examples:&#x0A;theme default&#x0A;backup before-upgrade&#x0A;restore &lt;backup-file-from-suggestions&gt;"
+									   FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap"
+									   Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="The launchpad command can add, edit, list, show, or remove user command and list definitions. Use Settings to inspect editable command definitions and assign shortcuts."
+									   TextWrapping="Wrap" Foreground="{DynamicResource ThemeSecondaryText}" />
+						</StackPanel>
+					</Expander>
+				</StackPanel>
+			</ScrollViewer>
+		</DockPanel>
 	</Border>
 </Window>

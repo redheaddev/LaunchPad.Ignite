@@ -106,6 +106,7 @@ public sealed class SecretCommandModel
                 "master" => await SetMasterPasswordAsync(command.Arguments["operation"]),
                 "unlock" => await UnlockAsync(),
                 "lock" => Lock(),
+                "toggle" => await ToggleAccessAsync(),
                 "remove" => Remove(command.Arguments["secretName"]),
                 "rename" => Rename(command.Arguments["secretName"], command.Arguments["newName"]),
                 "copy-value" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: false),
@@ -224,6 +225,18 @@ public sealed class SecretCommandModel
 
         _accessGate.Lock();
         return new CommandExecutionResult(true, "Secret access locked.");
+    }
+
+    private async Task<CommandExecutionResult> ToggleAccessAsync()
+    {
+        if (!_accessGate.HasMasterPassword)
+        {
+            return new CommandExecutionResult(false, "Set a master password before locking secret access.");
+        }
+
+        return _accessGate.IsUnlocked
+            ? Lock()
+            : await UnlockAsync();
     }
 
     private CommandExecutionResult Remove(string name)

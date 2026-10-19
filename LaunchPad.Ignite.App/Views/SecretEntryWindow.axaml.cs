@@ -11,6 +11,7 @@ public partial class SecretEntryWindow : Window
     public SecretEntryWindow(string title, bool requireConfirmation, string? displayedValue = null)
     {
         InitializeComponent();
+        EscapeToClose.Attach(this);
         Title = title;
         _requireConfirmation = requireConfirmation;
         _displayOnly = displayedValue is not null;
