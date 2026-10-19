@@ -1,5 +1,5 @@
 #ifndef AppVersion
-	#define AppVersion "1.0.23"
+	#define AppVersion "1.0.24"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\LaunchPad.Ignite.App\bin\Release\net8.0\win-x64\publish"
