@@ -920,7 +920,7 @@ public partial class MainViewModel : ViewModelBase
 
     public bool UndoCommandInput(out int caretIndex)
     {
-        if (!_commandInputUndoHistory.TryUndo(out var previousText, out caretIndex))
+        if (!_commandInputUndoHistory.TryUndo(CommandInputText, _commandInputCaretIndex, out var previousText, out caretIndex))
         {
             return false;
         }
@@ -930,6 +930,30 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             CommandInputText = previousText;
+        }
+        finally
+        {
+            _isUndoingCommandInput = false;
+        }
+
+        return true;
+    }
+
+    public bool RedoCommandInput()
+        => RedoCommandInput(out _);
+
+    public bool RedoCommandInput(out int caretIndex)
+    {
+        if (!_commandInputUndoHistory.TryRedo(CommandInputText, _commandInputCaretIndex, out var nextText, out caretIndex))
+        {
+            return false;
+        }
+
+        _commandInputCaretIndex = caretIndex;
+        _isUndoingCommandInput = true;
+        try
+        {
+            CommandInputText = nextText;
         }
         finally
         {

@@ -5,10 +5,13 @@ namespace LaunchPad.Ignite.App.Services;
 
 public sealed class CommandInputUndoHistory
 {
-    private readonly Stack<(string Text, int CaretIndex)> _states = new();
+    private readonly Stack<(string Text, int CaretIndex)> _undoStates = new();
+    private readonly Stack<(string Text, int CaretIndex)> _redoStates = new();
     private bool _sessionEnded;
 
-    public bool CanUndo => _states.Count > 0;
+    public bool CanUndo => _undoStates.Count > 0;
+
+    public bool CanRedo => _redoStates.Count > 0;
 
     public void RecordUserChange(string previousText, string currentText, int previousCaretIndex = 0)
     {
@@ -24,10 +27,7 @@ public sealed class CommandInputUndoHistory
         }
     }
 
-    public bool TryUndo(out string text)
-        => TryUndo(out text, out _);
-
-    public bool TryUndo(out string text, out int caretIndex)
+    public bool TryUndo(string currentText, int currentCaretIndex, out string text, out int caretIndex)
     {
         if (!CanUndo)
         {
@@ -36,7 +36,24 @@ public sealed class CommandInputUndoHistory
             return false;
         }
 
-        var state = _states.Pop();
+        _redoStates.Push((currentText, Math.Clamp(currentCaretIndex, 0, currentText.Length)));
+        var state = _undoStates.Pop();
+        text = state.Text;
+        caretIndex = state.CaretIndex;
+        return true;
+    }
+
+    public bool TryRedo(string currentText, int currentCaretIndex, out string text, out int caretIndex)
+    {
+        if (!CanRedo)
+        {
+            text = string.Empty;
+            caretIndex = 0;
+            return false;
+        }
+
+        _undoStates.Push((currentText, Math.Clamp(currentCaretIndex, 0, currentText.Length)));
+        var state = _redoStates.Pop();
         text = state.Text;
         caretIndex = state.CaretIndex;
         return true;
@@ -44,7 +61,8 @@ public sealed class CommandInputUndoHistory
 
     public void EndSession()
     {
-        _states.Clear();
+        _undoStates.Clear();
+        _redoStates.Clear();
         _sessionEnded = true;
     }
 
@@ -55,6 +73,7 @@ public sealed class CommandInputUndoHistory
             return;
         }
 
-        _states.Push((previousText, Math.Clamp(previousCaretIndex, 0, previousText.Length)));
+        _redoStates.Clear();
+        _undoStates.Push((previousText, Math.Clamp(previousCaretIndex, 0, previousText.Length)));
     }
 }

@@ -98,6 +98,49 @@ public class CommandCompletionSessionTests
         Assert.False(viewModel.UndoCommandInput());
     }
 
+    [Fact]
+    public void UndoCanBeRedone()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "a";
+        viewModel.CommandInputText = "ab";
+
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal("a", viewModel.CommandInputText);
+        Assert.True(viewModel.RedoCommandInput());
+        Assert.Equal("ab", viewModel.CommandInputText);
+        Assert.False(viewModel.RedoCommandInput());
+    }
+
+    [Fact]
+    public void RedoRestoresCaretPosition()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "a";
+        viewModel.SetCommandInputCaretIndex(1);
+        viewModel.CommandInputText = "ab";
+        viewModel.SetCommandInputCaretIndex(2);
+
+        Assert.True(viewModel.UndoCommandInput(out var undoCaretIndex));
+        Assert.Equal(1, undoCaretIndex);
+        Assert.True(viewModel.RedoCommandInput(out var redoCaretIndex));
+        Assert.Equal("ab", viewModel.CommandInputText);
+        Assert.Equal(2, redoCaretIndex);
+    }
+
+    [Fact]
+    public void NewInputAfterUndoClearsRedoHistory()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "a";
+        viewModel.CommandInputText = "ab";
+
+        Assert.True(viewModel.UndoCommandInput());
+        viewModel.CommandInputText = "ac";
+
+        Assert.False(viewModel.RedoCommandInput());
+    }
+
     [Theory]
     [InlineData(CommandInputKey.Enter)]
     [InlineData(CommandInputKey.Escape)]
@@ -110,6 +153,7 @@ public class CommandCompletionSessionTests
         await viewModel.HandleInputKeyAsync(boundaryKey);
 
         Assert.False(viewModel.UndoCommandInput());
+        Assert.False(viewModel.RedoCommandInput());
 
         var nextSessionStart = viewModel.CommandInputText;
         viewModel.CommandInputText = $"{nextSessionStart} next";

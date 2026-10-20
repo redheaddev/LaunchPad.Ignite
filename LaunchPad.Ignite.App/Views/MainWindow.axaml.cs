@@ -1410,6 +1410,34 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Y && e.KeyModifiers == KeyModifiers.Control)
+        {
+            if (viewModel.RedoCommandInput(out var caretIndex))
+            {
+                var restoredText = viewModel.CommandInputText;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!_commandBox.IsFocused)
+                    {
+                        return;
+                    }
+
+                    if (!string.Equals(_commandBox.Text, restoredText, StringComparison.Ordinal))
+                    {
+                        _commandBox.Text = restoredText;
+                    }
+
+                    var restoredCaret = Math.Clamp(caretIndex, 0, restoredText.Length);
+                    _commandBox.CaretIndex = restoredCaret;
+                    _commandBox.SelectionStart = restoredCaret;
+                    _commandBox.SelectionEnd = restoredCaret;
+                }, DispatcherPriority.Background);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Shift)
         {
             viewModel.EndCommandInputSession();
