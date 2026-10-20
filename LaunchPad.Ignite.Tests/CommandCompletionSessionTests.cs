@@ -55,6 +55,71 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
+    public async Task TabCompletionCanBeUndoneToThePreviousInput()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "ext";
+
+        await viewModel.HandleInputKeyAsync(CommandInputKey.Tab);
+
+        Assert.NotEqual("ext", viewModel.CommandInputText);
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal("ext", viewModel.CommandInputText);
+    }
+
+    [Fact]
+    public async Task UndoTabRestoresTheCaretPositionBeforeCompletion()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "ext";
+        viewModel.SetCommandInputCaretIndex(1);
+
+        await viewModel.HandleInputKeyAsync(CommandInputKey.Tab);
+
+        Assert.True(viewModel.UndoCommandInput(out var caretIndex));
+        Assert.Equal("ext", viewModel.CommandInputText);
+        Assert.Equal(1, caretIndex);
+    }
+
+    [Fact]
+    public void MultipleInputChangesCanBeUndoneToTheBeginning()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "a";
+        viewModel.CommandInputText = "ab";
+        viewModel.CommandInputText = "abc";
+
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal("ab", viewModel.CommandInputText);
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal("a", viewModel.CommandInputText);
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal(string.Empty, viewModel.CommandInputText);
+        Assert.False(viewModel.UndoCommandInput());
+    }
+
+    [Theory]
+    [InlineData(CommandInputKey.Enter)]
+    [InlineData(CommandInputKey.Escape)]
+    [InlineData(CommandInputKey.Clear)]
+    public async Task SessionBoundaryKeyResetsTheUndoHistory(CommandInputKey boundaryKey)
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "not-a-command";
+
+        await viewModel.HandleInputKeyAsync(boundaryKey);
+
+        Assert.False(viewModel.UndoCommandInput());
+
+        var nextSessionStart = viewModel.CommandInputText;
+        viewModel.CommandInputText = $"{nextSessionStart} next";
+
+        Assert.True(viewModel.UndoCommandInput());
+        Assert.Equal(nextSessionStart, viewModel.CommandInputText);
+        Assert.False(viewModel.UndoCommandInput());
+    }
+
+    [Fact]
     public async Task ClickingCompletionAcceptsTabTextAndRequiredArgumentSpace()
     {
         var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();

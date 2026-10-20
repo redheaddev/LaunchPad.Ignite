@@ -358,6 +358,7 @@ public partial class MainWindow : Window
         }
 
         e.Handled = true;
+        viewModel.SetCommandInputCaretIndex(_commandBox.CaretIndex);
         await viewModel.AcceptCompletionAtIndexAsync(index);
         RequestCommandBoxFocus();
         var acceptedText = viewModel.CommandInputText;
@@ -1377,6 +1378,41 @@ public partial class MainWindow : Window
         {
             ResetPathSelection();
             return;
+        }
+
+        viewModel.SetCommandInputCaretIndex(_commandBox.CaretIndex);
+
+        if (e.Key == Key.Z && e.KeyModifiers == KeyModifiers.Control)
+        {
+            if (viewModel.UndoCommandInput(out var caretIndex))
+            {
+                var restoredText = viewModel.CommandInputText;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!_commandBox.IsFocused)
+                    {
+                        return;
+                    }
+
+                    if (!string.Equals(_commandBox.Text, restoredText, StringComparison.Ordinal))
+                    {
+                        _commandBox.Text = restoredText;
+                    }
+
+                    var restoredCaret = Math.Clamp(caretIndex, 0, restoredText.Length);
+                    _commandBox.CaretIndex = restoredCaret;
+                    _commandBox.SelectionStart = restoredCaret;
+                    _commandBox.SelectionEnd = restoredCaret;
+                }, DispatcherPriority.Background);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Shift)
+        {
+            viewModel.EndCommandInputSession();
         }
 
         if (e.Key == Key.Enter

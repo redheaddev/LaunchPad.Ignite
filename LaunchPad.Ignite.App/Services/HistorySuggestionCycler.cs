@@ -13,6 +13,8 @@ public sealed class HistorySuggestionCycler
 
     public int SelectedIndex => _selectedIndex;
 
+    public int EntryCount => _entries.Count;
+
     public bool TryGetSuggestions(string inputText, out IReadOnlyList<CommandHistoryEntry> entries)
     {
         if (_isCycling && string.Equals(_inputText, inputText, StringComparison.Ordinal))

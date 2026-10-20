@@ -25,6 +25,8 @@ namespace LaunchPad.Ignite.App.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
+    private const string HistoryIcon = "↶";
+
     public event Action<string?>? CommandEditorRequested;
     public event Action<LauncherNavigationTarget>? NavigationRequested;
     public string AppVersion => typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "unknown";
@@ -60,8 +62,10 @@ public partial class MainViewModel : ViewModelBase
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
     private readonly HistorySuggestionCycler _historySuggestionCycler = new();
+    private readonly CommandInputUndoHistory _commandInputUndoHistory = new();
     private IReadOnlyList<CommandHistoryEntry> _historyCommands = Array.Empty<CommandHistoryEntry>();
     private string _historyInputText = string.Empty;
+    private int _commandInputCaretIndex;
     private CommandMetadataFilter? _activeCommandMetadataFilter;
     private string _commandMetadataFilterPrefix = string.Empty;
     private CommandMetadataFilterInput _commandMetadataFilterInput;
@@ -87,6 +91,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _directPathReplacesWholeInput;
     private bool _syncingInput;
     private bool _isMiniMode;
+    private bool _isUndoingCommandInput;
 
     public string GlobalActivationHotkeyValue => _profileSettingsStore.GetValue(
         "app:globalActivationHotkey",
@@ -693,12 +698,32 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
+            var statusIndex = highlightedIndex < 0 && CompletionItems.Count > 0
+                ? 0
+                : highlightedIndex;
+            var historySuggestions = GetHistorySuggestions(CommandText);
+            var positionIndex = -1;
+            var positionCount = 0;
+            if (statusIndex >= 0 && statusIndex < historySuggestions.Count)
+            {
+                (positionIndex, positionCount) = GetHistoryPosition(CommandText, statusIndex);
+            }
+            else if (statusIndex >= historySuggestions.Count && statusIndex < CompletionItems.Count)
+            {
+                positionIndex = statusIndex - historySuggestions.Count;
+                positionCount = CompletionItems.Count - historySuggestions.Count;
+            }
+
             return MiniUsageStatusBuilder.Build(
                 CommandInputText,
                 UsageText,
-                CompletionItems.Select(item => item.DisplayText).ToArray(),
-                highlightedIndex,
-                HasSelectedCommandWithTrailingSpace);
+                CompletionItems.Select(item => string.IsNullOrEmpty(item.StatusText)
+                    ? item.DisplayText
+                    : item.StatusText).ToArray(),
+                statusIndex,
+                HasSelectedCommandWithTrailingSpace,
+                positionIndex,
+                positionCount);
         }
     }
 
@@ -890,6 +915,36 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsCommandTextEmpty => string.IsNullOrEmpty(CommandText);
 
+    public bool UndoCommandInput()
+        => UndoCommandInput(out _);
+
+    public bool UndoCommandInput(out int caretIndex)
+    {
+        if (!_commandInputUndoHistory.TryUndo(out var previousText, out caretIndex))
+        {
+            return false;
+        }
+
+        _commandInputCaretIndex = caretIndex;
+        _isUndoingCommandInput = true;
+        try
+        {
+            CommandInputText = previousText;
+        }
+        finally
+        {
+            _isUndoingCommandInput = false;
+        }
+
+        return true;
+    }
+
+    public void SetCommandInputCaretIndex(int caretIndex)
+        => _commandInputCaretIndex = Math.Clamp(caretIndex, 0, CommandInputText.Length);
+
+    public void EndCommandInputSession()
+        => _commandInputUndoHistory.EndSession();
+
     public bool ShowCommandPlaceholder => string.IsNullOrEmpty(CommandInputText) && string.IsNullOrEmpty(CompletionGhostText);
 
     public int GetCommandInputCaretIndex(int commandCaretIndex)
@@ -916,6 +971,11 @@ public partial class MainViewModel : ViewModelBase
         bool newWindow = false,
         CommandLaunchMode launchMode = CommandLaunchMode.Normal)
     {
+        if (key is CommandInputKey.Enter or CommandInputKey.Escape or CommandInputKey.Clear)
+        {
+            EndCommandInputSession();
+        }
+
         if (key is CommandInputKey.Clear or CommandInputKey.Escape)
         {
             if (_isEditingCommandMetadataFilter)
@@ -971,7 +1031,7 @@ public partial class MainViewModel : ViewModelBase
         var selectedHistoryCompletion = key is CommandInputKey.Right or CommandInputKey.Tab
             && CompletionItems.Any(item =>
                 item.IsHighlighted
-                && item.DisplayText.StartsWith("[history] ", StringComparison.Ordinal));
+                && item.DisplayText.StartsWith($"{HistoryIcon} ", StringComparison.Ordinal));
         if (key == CommandInputKey.Right
             && selectedHistoryCompletion
             && historySuggestions.Count > 0)
@@ -1327,6 +1387,17 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    partial void OnCommandTextChanging(string oldValue, string newValue)
+    {
+        if (!_syncingInput && !_isUndoingCommandInput)
+        {
+            _commandInputUndoHistory.RecordProgrammaticChange(
+                CommandInputText,
+                _commandMetadataFilterPrefix + newValue,
+                _commandInputCaretIndex);
+        }
+    }
+
     partial void OnCommandTextChanged(string value)
     {
         OnPropertyChanged(nameof(IsCommandTextEmpty));
@@ -1358,6 +1429,14 @@ public partial class MainViewModel : ViewModelBase
         if (!IsCommandMetadataFilterMode && string.Equals(value.Trim(), "!", StringComparison.Ordinal))
         {
             ShowExtensionList();
+        }
+    }
+
+    partial void OnCommandInputTextChanging(string oldValue, string newValue)
+    {
+        if (!_syncingInput && !_isUndoingCommandInput)
+        {
+            _commandInputUndoHistory.RecordUserChange(oldValue, newValue, _commandInputCaretIndex);
         }
     }
 
@@ -1716,6 +1795,15 @@ public partial class MainViewModel : ViewModelBase
 
     private void ApplyCompletionState(CommandCompletionState state)
     {
+        if (!_isUndoingCommandInput
+            && !string.Equals(CommandInputText, state.InputText, StringComparison.Ordinal))
+        {
+            _commandInputUndoHistory.RecordProgrammaticChange(
+                CommandInputText,
+                state.InputText,
+                _commandInputCaretIndex);
+        }
+
         _isExtensionListVisible = false;
         if (!string.Equals(_historyInputText, state.InputText, StringComparison.Ordinal))
         {
@@ -1841,11 +1929,14 @@ public partial class MainViewModel : ViewModelBase
         {
             var age = ProfileCommandLogger.FormatHistoryAge(entry.RunTime, DateTimeOffset.Now);
             var ageLabel = age.Length == 0 ? string.Empty : $" [{age}]";
+            var (historyPositionIndex, historyPositionCount) = GetHistoryPosition(state.InputText, index);
+            var historyText = $"{HistoryIcon} {entry.CommandText}";
             return new CompletionOptionViewModel(
-                $"[history] {entry.CommandText}",
+                $"{HistoryIcon} {historyPositionIndex + 1}/{historyPositionCount} {entry.CommandText}",
                 index == selectedHistoryIndex,
                 false,
-                ageLabel);
+                ageLabel,
+                StatusText: historyText);
         });
         var shortcutItems = shortcutSuggestions.Select((shortcut, index) =>
             new CompletionOptionViewModel(
@@ -1884,6 +1975,22 @@ public partial class MainViewModel : ViewModelBase
         }
 
         return ProfileCommandLogger.FilterHistoryEntries(_historyCommands, inputText);
+    }
+
+    private (int Index, int Count) GetHistoryPosition(string inputText, int suggestionIndex)
+    {
+        if (_historySuggestionCycler.TryGetSuggestions(inputText, out _)
+            && _historySuggestionCycler.SelectedIndex >= 0)
+        {
+            return (_historySuggestionCycler.SelectedIndex, _historySuggestionCycler.EntryCount);
+        }
+
+        var historyPrefix = TryGetHistoryFilter(inputText, out var historySearchText)
+            ? historySearchText
+            : inputText;
+        return (
+            suggestionIndex,
+            ProfileCommandLogger.FilterHistoryEntriesByPrefix(_historyCommands, historyPrefix).Count);
     }
 
     private static bool TryGetHistoryFilter(string inputText, out string searchText)
@@ -2058,11 +2165,14 @@ public partial class MainViewModel : ViewModelBase
             var entry = retainedHistory[0];
             var age = ProfileCommandLogger.FormatHistoryAge(entry.RunTime, DateTimeOffset.Now);
             var ageLabel = age.Length == 0 ? string.Empty : $" [{age}]";
+            var (historyPositionIndex, historyPositionCount) = GetHistoryPosition(CommandText, 0);
+            var historyText = $"{HistoryIcon} {entry.CommandText}";
             pathItems.Insert(0, new CompletionOptionViewModel(
-                $"[history] {entry.CommandText}",
+                $"{HistoryIcon} {historyPositionIndex + 1}/{historyPositionCount} {entry.CommandText}",
                 _isHistoryPathStepping || _highlightedCompletionIndex == 0,
                 false,
-                ageLabel));
+                ageLabel,
+                StatusText: historyText));
         }
 
         CompletionItems = pathItems;
@@ -2222,7 +2332,8 @@ public sealed record CompletionOptionViewModel(
     bool IsHighlighted,
     bool IsSelected,
     string CyanText = "",
-    string KindText = "");
+    string KindText = "",
+    string StatusText = "");
 
     private (string Text, string CommandText) GetUsageText(string inputText)
     {
