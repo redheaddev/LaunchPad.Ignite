@@ -93,7 +93,7 @@ foreach ($rid in $runtimeIdentifiers) {
 	$installerPath = Join-Path $outputDir ($outputName + ".exe")
 	Write-Host "Installer created: $installerPath" -ForegroundColor Green
 	if ($rid -eq "win-x64") {
-	$tempDir = "C:\temp\LaunchPad.Ignite"
+	$tempDir = "C:\temp\LaunchPad.Ignite.Install"
 		New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 		$tempInstallerPath = Join-Path $tempDir ($outputName + ".exe")
 		Copy-Item -LiteralPath $installerPath -Destination $tempInstallerPath -Force

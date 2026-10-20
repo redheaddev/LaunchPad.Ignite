@@ -1932,9 +1932,17 @@ public partial class MainViewModel : ViewModelBase
         var selectedHistoryPrefixLength = TryGetHistoryFilter(state.InputText, out var historySearchText)
             ? historySearchText.Length
             : state.InputText.Length;
-        CompletionGhostText = TryGetShortcutFilter(state.InputText, out _)
-            || SnippetCompletion.TryGetFilterPrefix(state.InputText, out _)
-            ? string.Empty
+        var isShortcutFilter = TryGetShortcutFilter(state.InputText, out var shortcutPrefix);
+        var isSnippetFilter = SnippetCompletion.TryGetFilterPrefix(state.InputText, out var snippetPrefix);
+        var filterGhostText = isShortcutFilter
+            ? selectedShortcutIndex >= 0
+                ? CompletionText.GetGhostSuffix(shortcutSuggestions[selectedShortcutIndex].Key, shortcutPrefix)
+                : string.Empty
+            : isSnippetFilter && selectedSnippetIndex >= 0
+                ? CompletionText.GetGhostSuffix(snippetSuggestions[selectedSnippetIndex], snippetPrefix)
+                : string.Empty;
+        CompletionGhostText = isShortcutFilter || isSnippetFilter
+            ? filterGhostText
             : selectedHistoryText is not null
                 ? selectedHistoryPrefixLength <= selectedHistoryText.Length
                     ? selectedHistoryText[selectedHistoryPrefixLength..]

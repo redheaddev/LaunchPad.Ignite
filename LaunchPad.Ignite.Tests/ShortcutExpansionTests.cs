@@ -78,6 +78,21 @@ public class ShortcutExpansionTests
     }
 
     [Fact]
+    public void ShortcutAliasPrefixCanProvideGhostSuffix()
+    {
+        var shortcut = new CommandDefinition(
+            "arch",
+            "shortcut",
+            "Text expansion",
+            [new CommandActionDefinition("default", "", "", "pipeline architecture", [])],
+            Namespace: "pl");
+        var resolver = new ShortcutResolver([shortcut]);
+        var match = Assert.Single(resolver.GetAliasExpansions("pl:ar"));
+
+        Assert.Equal("ch", CompletionText.GetGhostSuffix(match.Key, "pl:ar"));
+    }
+
+    [Fact]
     public void ShortcutExpansionCanResolveVariablesInItsExpandedText()
     {
         var shortcut = CreateShortcut("plc", "ado:pipeline $project ", null);

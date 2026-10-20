@@ -112,6 +112,16 @@ public sealed class SnippetSupportTests
         Assert.Equal("snippet run Deploy", SnippetCompletion.BuildRunCommand("Deploy"));
     }
 
+    [Theory]
+    [InlineData("Deploy", "de", "ploy")]
+    [InlineData("Deploy", "DEP", "loy")]
+    [InlineData("Deploy", "deploy", "")]
+    [InlineData("Deploy", "x", "")]
+    public void GhostSuffixReturnsUnmatchedCaseInsensitivePrefix(string candidate, string prefix, string expected)
+    {
+        Assert.Equal(expected, CompletionText.GetGhostSuffix(candidate, prefix));
+    }
+
     [Fact]
     public void SnippetNameArgumentsUseSingleChoiceCompletion()
     {
