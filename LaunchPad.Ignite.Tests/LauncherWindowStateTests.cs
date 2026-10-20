@@ -73,7 +73,7 @@ public sealed class LauncherWindowStateTests
         var settingsPath = Path.Combine(directory.Path, "settings.json");
         var stateStore = new LauncherWindowStateStore(new ProfileSettingsStore(settingsPath));
         var mainSize = new LauncherWindowSize(920, 540);
-        var miniSize = new LauncherWindowSize(580, 92);
+        var miniSize = new LauncherWindowSize(580, 80);
 
         stateStore.SetSize(LauncherWindowMode.Main, mainSize);
         stateStore.SetSize(LauncherWindowMode.Mini, miniSize);

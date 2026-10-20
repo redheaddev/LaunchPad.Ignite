@@ -73,7 +73,7 @@ public partial class MainWindow : Window
     private const double MainDefaultWidth = 760;
     private const double MainDefaultHeight = 360;
     private const double MiniDefaultWidth = 640;
-    private const double MiniDefaultHeight = 92;
+    private const double MiniDefaultHeight = 80;
 
     public MainWindow(bool startMinimized = false)
     {
@@ -486,7 +486,7 @@ public partial class MainWindow : Window
         }
 
         _appliedWindowMode = mode;
-        MinWidth = mode == LauncherWindowMode.Mini ? 460 : 640;
+        MinWidth = mode == LauncherWindowMode.Mini ? 300 : 640;
         MinHeight = mode == LauncherWindowMode.Mini ? MiniDefaultHeight : 300;
 
         var defaultWidth = mode == LauncherWindowMode.Mini ? MiniDefaultWidth : MainDefaultWidth;

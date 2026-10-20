@@ -31,7 +31,7 @@
             <Setter Property="CornerRadius" Value="18" />
         </Style>
         <Style Selector="Border.mini-panel">
-            <Setter Property="Padding" Value="8" />
+            <Setter Property="Padding" Value="6" />
             <Setter Property="CornerRadius" Value="12" />
         </Style>
         <Style Selector="Border.command-input">
@@ -39,18 +39,34 @@
             <Setter Property="CornerRadius" Value="10" />
         </Style>
         <Style Selector="Border.command-input.mini">
-            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="Padding" Value="8,3" />
             <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="TextBox.command-text">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="Padding" Value="12,0,0,0" />
+        </Style>
+        <Style Selector="TextBox.command-text.mini">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Padding" Value="8,0,0,0" />
+        </Style>
+        <Style Selector="TextBlock.command-text">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="Margin" Value="12,0,0,0" />
+        </Style>
+        <Style Selector="TextBlock.command-text.mini">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="Margin" Value="8,0,0,0" />
         </Style>
         <Style Selector="Button.mini-action">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource ThemeSecondaryText}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="28" />
-            <Setter Property="MinWidth" Value="28" />
-            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
@@ -90,14 +106,12 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
-                    <Image Source="/Assets/rocket.png" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center" />
+                    <Image Source="/Assets/rocket.png" Width="16" Height="16" Stretch="Uniform" VerticalAlignment="Center"
+                           ToolTip.Tip="{Binding AppVersion, StringFormat='LaunchPad v{0}'}" />
                     <TextBlock Text="LaunchPad" FontSize="15" FontWeight="SemiBold"
                                Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
                     <TextBlock Text="command launcher" FontSize="15"
                                Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding AppVersion}" FontSize="11"
-                               Foreground="{DynamicResource ThemeMutedText}" VerticalAlignment="Center"
-                               Margin="4,0,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding SecretLockIcon}"
@@ -117,23 +131,18 @@
                 <Grid ClipToBounds="True" ColumnDefinitions="Auto,*" ColumnSpacing="4">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center"
                                 Spacing="2" IsVisible="{Binding IsMiniMode}">
-                        <Image Source="/Assets/rocket.png" Width="18" Height="18" Stretch="Uniform"
-                               VerticalAlignment="Center" Margin="2" />
+                        <Image Source="/Assets/rocket.png" Width="16" Height="16" Stretch="Uniform"
+                               VerticalAlignment="Center" Margin="2"
+                                ToolTip.Tip="{Binding AppVersion, StringFormat='LaunchPad v{0}'}" />
                         <Button Classes="mini-action" Content="{Binding SecretLockIcon}"
                                 Foreground="{Binding SecretLockBrush}"
                                 ToolTip.Tip="{Binding SecretLockTooltip}"
                                 Click="SecretLockButton_Click" />
-                        <Button Classes="mini-action" Content="?" ToolTip.Tip="Help"
-                                Click="HelpButton_Click" />
-                        <Button Classes="mini-action" Content="⇅" ToolTip.Tip="Import / Export"
-                                Click="ImportExportButton_Click" />
-                        <Button Classes="mini-action" Content="⚙" ToolTip.Tip="Settings"
-                                Click="SettingsButton_Click" />
                     </StackPanel>
-                    <TextBox x:Name="CommandBox" Grid.Column="1" Text="{Binding CommandInputText}"
+                    <TextBox x:Name="CommandBox" Grid.Column="1" Classes="command-text" Classes.mini="{Binding IsMiniMode}" Text="{Binding CommandInputText}"
                              FontFamily="Cascadia Mono, Consolas"
-                              FontSize="22" Foreground="{DynamicResource ThemeText}"
-                             Background="{DynamicResource ThemeInputBackground}" BorderThickness="0" Padding="12,0,0,0"
+                              Foreground="{DynamicResource ThemeText}"
+                              Background="{DynamicResource ThemeInputBackground}" BorderThickness="0"
                              FocusAdorner="{x:Null}"
                              GotFocus="CommandBox_GotFocus" LostFocus="CommandBox_LostFocus"
                              SelectionBrush="{DynamicResource ThemeTextSelection}"
@@ -142,13 +151,12 @@
                              ScrollViewer.HorizontalScrollBarVisibility="Hidden"
                              VerticalContentAlignment="Center"
                              CaretBrush="{DynamicResource ThemeAccent}" />
-                    <TextBlock Grid.Column="1" Text="Enter a command" IsVisible="{Binding ShowCommandPlaceholder}"
-                                IsHitTestVisible="False" VerticalAlignment="Center" Margin="12,0,0,0"
-                               FontFamily="Cascadia Mono, Consolas" FontSize="22"
+                    <TextBlock Grid.Column="1" Classes="command-text" Classes.mini="{Binding IsMiniMode}" Text="Enter a command" IsVisible="{Binding ShowCommandPlaceholder}"
+                                IsHitTestVisible="False" VerticalAlignment="Center"
+                                FontFamily="Cascadia Mono, Consolas"
                                 Foreground="{DynamicResource ThemeMutedText}" />
-                    <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" IsHitTestVisible="False" VerticalAlignment="Center"
-                                Margin="12,0,0,0"
-                               FontFamily="Cascadia Mono, Consolas" FontSize="22"
+                    <TextBlock x:Name="CommandTextOverlay" Grid.Column="1" Classes="command-text" Classes.mini="{Binding IsMiniMode}" IsHitTestVisible="False" VerticalAlignment="Center"
+                                FontFamily="Cascadia Mono, Consolas"
                                TextWrapping="NoWrap" ClipToBounds="True">
                         <TextBlock.Inlines><Run Text="{Binding CommandInputText}" Foreground="Transparent"/><Run Text="{Binding CompletionGhostText}" Foreground="{DynamicResource ThemeMutedText}"/></TextBlock.Inlines>
                     </TextBlock>
