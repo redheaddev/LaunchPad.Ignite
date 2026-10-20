@@ -18,6 +18,16 @@ public sealed record LoadedExtensions(
     IReadOnlyDictionary<string, ICommandFunctionExecutor> FunctionExecutors,
     IReadOnlyList<LoadedExtensionInfo> Extensions)
 {
+    public IReadOnlyList<AssemblyLoadContext> LoadContexts { get; init; } = [];
+
+    public void Unload()
+    {
+        foreach (var loadContext in LoadContexts)
+        {
+            loadContext.Unload();
+        }
+    }
+
     public IReadOnlyList<IExtensionShutdownAware> ShutdownAwareExecutors { get; init; } = [];
 
     public IReadOnlyList<ExtensionLoadFailure> Failures { get; init; } = [];
@@ -217,6 +227,7 @@ public sealed class ExtensionLoader
         var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         var extensionLoadErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var loadContexts = new List<AssemblyLoadContext>();
         foreach (var (manifest, extensionDirectory) in enabledManifests)
         {
             try
@@ -248,7 +259,8 @@ public sealed class ExtensionLoader
                     extensionDirectory,
                     extensionExecutors,
                     extensionAsyncExecutors,
-                    extensionFunctionExecutors);
+                    extensionFunctionExecutors,
+                    loadContexts);
                 var extensionFunctionNameSet = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var function in extensionFunctions)
                 {
@@ -345,6 +357,7 @@ public sealed class ExtensionLoader
             Settings = settings
         }, executors, functionExecutors, extensionInfo)
         {
+            LoadContexts = loadContexts,
             CommandSources = commandSources,
             AsyncExecutors = asyncExecutors,
             Failures = failures,
@@ -479,7 +492,8 @@ public sealed class ExtensionLoader
         string extensionDirectory,
         IDictionary<string, ICommandExecutor> executors,
         IDictionary<string, IAsyncCommandExecutor> asyncExecutors,
-        IDictionary<string, ICommandFunctionExecutor> functionExecutors)
+        IDictionary<string, ICommandFunctionExecutor> functionExecutors,
+        ICollection<AssemblyLoadContext> loadContexts)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
         {
@@ -499,6 +513,7 @@ public sealed class ExtensionLoader
         }
 
         var loadContext = new ExtensionLoadContext(assemblyPath);
+        loadContexts.Add(loadContext);
         using var assemblyStream = File.OpenRead(assemblyPath);
         var assembly = loadContext.LoadFromStream(assemblyStream);
         var executorTypes = assembly.GetTypes()
@@ -569,7 +584,7 @@ public sealed class ExtensionLoader
         private readonly string _coreAssemblyName = typeof(ICommandExecutor).Assembly.GetName().Name!;
 
         public ExtensionLoadContext(string assemblyPath)
-            : base(isCollectible: false)
+            : base(isCollectible: true)
         {
             _resolver = new AssemblyDependencyResolver(assemblyPath);
         }
@@ -578,11 +593,17 @@ public sealed class ExtensionLoader
         {
             if (string.Equals(assemblyName.Name, _coreAssemblyName, StringComparison.OrdinalIgnoreCase))
             {
-                return null;
+                return typeof(ICommandExecutor).Assembly;
             }
 
             var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
-            return assemblyPath is null ? null : LoadFromAssemblyPath(assemblyPath);
+            if (assemblyPath is null)
+            {
+                return null;
+            }
+
+            using var assemblyStream = File.OpenRead(assemblyPath);
+            return LoadFromStream(assemblyStream);
         }
     }
 }

@@ -12,6 +12,18 @@ namespace LaunchPad.Ignite.Tests;
 public class ExtensionPackageManagerTests
 {
     [Fact]
+    public void ValidatePackageReturnsExtensionId()
+    {
+        using var directory = new TemporaryDirectory();
+        var packagePath = CreatePackage(directory.Path);
+        var packageManager = new ExtensionPackageManager(Path.Combine(directory.Path, "extensions"));
+
+        var extensionId = packageManager.ValidatePackage(packagePath);
+
+        Assert.Equal("sample", extensionId);
+    }
+
+    [Fact]
     public void InstallsAndUninstallsZipPackage()
     {
         using var directory = new TemporaryDirectory();

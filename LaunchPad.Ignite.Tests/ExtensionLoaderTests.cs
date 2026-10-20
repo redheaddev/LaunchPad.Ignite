@@ -61,6 +61,9 @@ public class ExtensionLoaderTests
         Assert.True(result.Succeeded);
         Assert.Equal("Executed by extension.", result.Message);
         Assert.Equal(new LoadedExtensionInfo("sample", "unknown", true), Assert.Single(extensions.Extensions));
+        Assert.NotEmpty(extensions.LoadContexts);
+        Assert.All(extensions.LoadContexts, loadContext => Assert.True(loadContext.IsCollectible));
+        extensions.Unload();
     }
 
     [Fact]

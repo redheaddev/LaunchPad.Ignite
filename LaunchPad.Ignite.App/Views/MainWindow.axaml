@@ -201,18 +201,18 @@
                     </ScrollViewer>
                     <StackPanel Grid.Row="4" Spacing="6">
                         <Border Height="1" Background="{DynamicResource ThemeBorder}" />
-                        <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*" ColumnSpacing="6"
-                              IsVisible="{Binding IsValueOutput}">
-                            <TextBlock Text="Result:" Foreground="{DynamicResource ThemeAccent}" FontSize="14"
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                            <TextBlock Text="Result:" IsVisible="{Binding IsValueOutput}"
+                                       Foreground="{DynamicResource ThemeAccent}" FontSize="14"
                                        VerticalAlignment="Top" />
-                            <TextBlock Grid.Column="1" Text="{Binding StatusMessage}"
-                                       Foreground="{Binding StatusMessageBrush}" FontSize="14"
-                                       TextWrapping="Wrap" VerticalAlignment="Top" />
+                            <TextBox x:Name="ResultTextBlock" Grid.Column="1" Text="{Binding StatusMessage}"
+                                     IsReadOnly="True" BorderThickness="0" Padding="0"
+                                     Background="Transparent" Foreground="{Binding StatusMessageBrush}"
+                                     FontSize="14" TextWrapping="Wrap" VerticalAlignment="Top"
+                                     SelectionBrush="{DynamicResource ThemeTextSelection}"
+                                     SelectionForegroundBrush="{DynamicResource ThemeTextSelectionForeground}"
+                                     PointerPressed="ResultTextBox_PointerPressed" />
                         </Grid>
-                        <TextBlock Text="{Binding StatusMessage}"
-                                   IsVisible="{Binding IsStatusMessage}"
-                                   Foreground="{Binding StatusMessageBrush}" FontSize="14"
-                                   TextWrapping="Wrap" VerticalAlignment="Bottom" />
                     </StackPanel>
                 </Grid>
             </Grid>

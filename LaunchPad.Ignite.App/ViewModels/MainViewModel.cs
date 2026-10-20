@@ -198,6 +198,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void InitializeCommandRuntime()
     {
+        var previousExtensions = _extensions;
         var extensions = new ExtensionLoader(_extensionStateStore).Load();
         var profileSettings = _profileSettingsStore.GetValues();
         var extensionSecretAccessPolicy = new ExtensionSecretAccessPolicy(
@@ -422,6 +423,25 @@ public partial class MainViewModel : ViewModelBase
         _commandSources = commandSources;
         _commandPackSources = commandPackSources;
         ApplyCompletionState(_completionSession.State);
+
+        if (previousExtensions is not null)
+        {
+            foreach (var executor in previousExtensions.ShutdownAwareExecutors)
+            {
+                try
+                {
+                    executor.Shutdown();
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            foreach (var loadContext in previousExtensions.LoadContexts)
+            {
+                loadContext.Unload();
+            }
+        }
     }
 
     private IReadOnlyList<CommandVariableDefinition> GetEffectiveVariables(

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Platform.Storage;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -33,6 +34,7 @@ public partial class MainWindow : Window
     private readonly Border _commandInputBorder;
     private readonly ItemsControl _completionList;
     private readonly TextBlock _commandTextOverlay;
+    private readonly TextBox _resultTextBlock;
     private readonly TextBlock _usageTextBlock;
     private readonly DispatcherTimer _windowStateSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private ScrollViewer? _commandScrollViewer;
@@ -90,6 +92,8 @@ public partial class MainWindow : Window
             ?? throw new InvalidOperationException("Completion list control was not found.");
         _commandTextOverlay = this.FindControl<TextBlock>("CommandTextOverlay")
             ?? throw new InvalidOperationException("Command text overlay was not found.");
+        _resultTextBlock = this.FindControl<TextBox>("ResultTextBlock")
+            ?? throw new InvalidOperationException("Result text control was not found.");
         _usageTextBlock = this.FindControl<TextBlock>("UsageTextBlock")
             ?? throw new InvalidOperationException("Usage text control was not found.");
         ColorThemeService.ThemeChanged += UpdateUsageText;
@@ -140,7 +144,7 @@ public partial class MainWindow : Window
         Deactivated += MainWindow_Deactivated;
         Activated += MainWindow_Activated;
         AddHandler(KeyDownEvent, MainWindow_KeyDown, RoutingStrategies.Tunnel);
-        AddHandler(PointerPressedEvent, MainWindow_PointerPressed, RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, MainWindow_PointerPressed, RoutingStrategies.Bubble);
         AddHandler(PointerMovedEvent, MainWindow_PointerMoved, RoutingStrategies.Bubble, handledEventsToo: true);
         AddHandler(PointerReleasedEvent, MainWindow_PointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
         PositionChanged += (_, _) =>
@@ -314,7 +318,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_resizePointer is not null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (e.Handled || _resizePointer is not null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -338,6 +342,14 @@ public partial class MainWindow : Window
         }
 
         BeginMoveDrag(e);
+    }
+
+    private void ResultTextBox_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(_resultTextBlock).Properties.IsLeftButtonPressed)
+        {
+            e.Handled = true;
+        }
     }
 
     private async void CompletionItem_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -1372,6 +1384,19 @@ public partial class MainWindow : Window
             }
             e.Handled = true;
             return;
+        }
+
+        if (e.Key == Key.C && e.KeyModifiers == KeyModifiers.Control
+            && _resultTextBlock.SelectionStart == _resultTextBlock.SelectionEnd
+            && (!_commandBox.IsFocused || _commandBox.SelectionStart == _commandBox.SelectionEnd))
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard is not null && !string.IsNullOrEmpty(viewModel.StatusMessage))
+            {
+                await clipboard.SetTextAsync(viewModel.StatusMessage);
+                e.Handled = true;
+                return;
+            }
         }
 
         if (!_commandBox.IsFocused)

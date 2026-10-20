@@ -96,7 +96,15 @@ public sealed class ExtensionPackageManager
             var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions)
                 ?? throw new InvalidDataException($"Extension package manifest '{manifestPath}' is empty.");
             ValidateManifestId(manifest.Id);
-            EnsureValidExtensions(new ExtensionLoader([stagingRoot]).Load());
+            var loadedExtensions = new ExtensionLoader([stagingRoot]).Load();
+            try
+            {
+                EnsureValidExtensions(loadedExtensions);
+            }
+            finally
+            {
+                loadedExtensions.Unload();
+            }
             return manifest.Id;
         }
         finally
@@ -232,10 +240,70 @@ public sealed class ExtensionPackageManager
             return [];
         }
 
+        var installedVersions = GetInstalledUserExtensions()
+            .ToDictionary(
+                extension => extension.Id,
+                extension => ReadInstalledVersion(extension.Directory),
+                StringComparer.OrdinalIgnoreCase);
+
         return Directory.EnumerateFiles(_packageDirectory, "*.zip")
+            .Where(packagePath => IsNewerThanInstalled(packagePath, installedVersions))
             .Select(packagePath => Path.GetFileNameWithoutExtension(packagePath)!)
             .OrderBy(packageName => packageName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static Version? ReadInstalledVersion(string extensionDirectory)
+    {
+        var manifestPath = Path.Combine(extensionDirectory, ManifestFileName);
+        var manifest = JsonSerializer.Deserialize<ExtensionManifest>(File.ReadAllText(manifestPath), SerializerOptions);
+        return Version.TryParse(manifest?.Version, out var version) ? version : null;
+    }
+
+    private static bool IsNewerThanInstalled(
+        string packagePath,
+        IReadOnlyDictionary<string, Version?> installedVersions)
+    {
+        var packageName = Path.GetFileNameWithoutExtension(packagePath)!;
+        var idSeparator = packageName.LastIndexOf('-');
+        if (idSeparator <= 0 || !installedVersions.TryGetValue(packageName[..idSeparator], out var installedVersion))
+        {
+            return true;
+        }
+
+        if (installedVersion is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var archive = ZipFile.OpenRead(packagePath);
+            var manifestEntry = archive.GetEntry(ManifestFileName);
+            if (manifestEntry is null)
+            {
+                return false;
+            }
+
+            using var stream = manifestEntry.Open();
+            var manifest = JsonSerializer.Deserialize<ExtensionManifest>(stream, SerializerOptions);
+            return manifest is not null
+                && string.Equals(manifest.Id, packageName[..idSeparator], StringComparison.OrdinalIgnoreCase)
+                && Version.TryParse(manifest.Version, out var packageVersion)
+                && packageVersion > installedVersion;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     public void Uninstall(string extensionId, Action<string>? runtimeRefresh = null)

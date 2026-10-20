@@ -40,6 +40,35 @@ public class ExtensionPackageNamesArgumentValueProviderTests
         Assert.Equal(CommandParseStatus.Valid, parser.Parse(state.InputText).Status);
     }
 
+    [Fact]
+    public void SuggestionsOnlyIncludeVersionsNewerThanTheInstalledExtension()
+    {
+        using var directory = new TemporaryDirectory();
+        var packageDirectory = Path.Combine(directory.Path, "packages");
+        Directory.CreateDirectory(packageDirectory);
+        var extensionRoot = Path.Combine(directory.Path, "extensions");
+        var packageManager = new ExtensionPackageManager(extensionRoot, packageDirectory);
+
+        File.Copy(CreatePackage(directory.Path, "media", "1.0.0"), Path.Combine(packageDirectory, "media-1.0.0.zip"));
+        File.Copy(CreatePackage(directory.Path, "media", "1.0.2"), Path.Combine(packageDirectory, "media-1.0.2.zip"));
+        File.Copy(CreatePackage(directory.Path, "media", "1.1.0"), Path.Combine(packageDirectory, "media-1.1.0.zip"));
+        File.Copy(CreatePackage(directory.Path, "other", "1.0.0"), Path.Combine(packageDirectory, "other-1.0.0.zip"));
+        packageManager.Install(CreatePackage(directory.Path, "media", "1.0.1"));
+
+        var packageNames = packageManager.GetAvailablePackageNames();
+
+        Assert.Equal(["media-1.0.2", "media-1.1.0", "other-1.0.0"], packageNames);
+    }
+
+    private static string CreatePackage(string directory, string id, string version)
+    {
+        var packagePath = Path.Combine(directory, $"{Guid.NewGuid():N}.zip");
+        using var archive = System.IO.Compression.ZipFile.Open(packagePath, System.IO.Compression.ZipArchiveMode.Create);
+        using var writer = new StreamWriter(archive.CreateEntry("extension.json").Open());
+        writer.Write($"{{\"id\":\"{id}\",\"name\":\"{id}\",\"namespace\":\"{id}\",\"version\":\"{version}\",\"schema\":{{\"lists\":[],\"commands\":[]}}}}");
+        return packagePath;
+    }
+
     private sealed class TemporaryDirectory : IDisposable
     {
         public TemporaryDirectory()
