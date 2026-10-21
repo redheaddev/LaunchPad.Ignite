@@ -30,9 +30,7 @@ public sealed class UrlCommandModel : ICommandModel
     public bool TryExecuteDirectUrl(string text, out CommandExecutionResult result, bool newWindow = false)
     {
         var candidate = text.Trim();
-        if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            || !Uri.IsWellFormedUriString(candidate, UriKind.Absolute))
+        if (!TryCreateDirectUri(candidate, out var uri))
         {
             result = new CommandExecutionResult(false, string.Empty);
             return false;
@@ -49,6 +47,53 @@ public sealed class UrlCommandModel : ICommandModel
         }
 
         return true;
+    }
+
+    private static bool TryCreateDirectUri(string candidate, out Uri uri)
+    {
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absoluteUri)
+            && (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps))
+        {
+            uri = absoluteUri;
+            return Uri.IsWellFormedUriString(candidate, UriKind.Absolute);
+        }
+
+        if (candidate.Length == 0
+            || candidate.Any(char.IsWhiteSpace)
+            || candidate.StartsWith("//", StringComparison.Ordinal)
+            || HasNonHttpScheme(candidate))
+        {
+            uri = null!;
+            return false;
+        }
+
+        if (!Uri.TryCreate($"https://{candidate}", UriKind.Absolute, out uri!)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || uri.HostNameType != UriHostNameType.Dns
+            || !uri.Host.Contains('.', StringComparison.Ordinal)
+            || uri.UserInfo.Length > 0
+            || !Uri.IsWellFormedUriString(uri.AbsoluteUri, UriKind.Absolute))
+        {
+            uri = null!;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool HasNonHttpScheme(string candidate)
+    {
+        var separatorIndex = candidate.IndexOf("://", StringComparison.Ordinal);
+        if (separatorIndex <= 0)
+        {
+            return false;
+        }
+
+        var scheme = candidate[..separatorIndex];
+        return scheme.Length > 0
+            && char.IsAsciiLetter(scheme[0])
+            && scheme.Skip(1).All(character =>
+                char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.');
     }
 
     public CommandExecutionResult Execute(ParsedCommand command)

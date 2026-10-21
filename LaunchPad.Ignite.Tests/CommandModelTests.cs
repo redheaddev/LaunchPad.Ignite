@@ -530,6 +530,25 @@ public class CommandModelTests
         Assert.Equal("https://dev.azure.com/saifcorporation", Assert.Single(opener.Targets).Value);
     }
 
+    [Theory]
+    [InlineData("google.com", "https://google.com/")]
+    [InlineData("www.foxnews.com", "https://www.foxnews.com/")]
+    [InlineData("example.com/news?q=launchpad", "https://example.com/news?q=launchpad")]
+    [InlineData("example.com:8443/path", "https://example.com:8443/path")]
+    [InlineData("example.com:8443/search?next=https://other.example/path&mode=full", "https://example.com:8443/search?next=https://other.example/path&mode=full")]
+    [InlineData("www.example.com?query=a:b&mode=full#results", "https://www.example.com/?query=a:b&mode=full#results")]
+    public void UrlCommandModelOpensBareDomainsAsHttps(string input, string expectedUrl)
+    {
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var handled = model.TryExecuteDirectUrl(input, out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal(expectedUrl, Assert.Single(opener.Targets).Value);
+    }
+
     [Fact]
     public void UrlCommandModelForwardsNewWindowRequestForDirectUrl()
     {
@@ -562,6 +581,23 @@ public class CommandModelTests
         var model = new UrlCommandModel(opener);
 
         var handled = model.TryExecuteDirectUrl("mailto:user@example.com", out _);
+
+        Assert.False(handled);
+        Assert.Empty(opener.Targets);
+    }
+
+    [Theory]
+    [InlineData("mailto:user@example.com")]
+    [InlineData("search these words")]
+    [InlineData("localhost")]
+    [InlineData("example.com:abc")]
+    [InlineData("example.com/path with spaces")]
+    public void UrlCommandModelDoesNotHandleNonUrlTextAsBareDomain(string input)
+    {
+        var opener = new RecordingUrlTargetOpener();
+        var model = new UrlCommandModel(opener);
+
+        var handled = model.TryExecuteDirectUrl(input, out _);
 
         Assert.False(handled);
         Assert.Empty(opener.Targets);
