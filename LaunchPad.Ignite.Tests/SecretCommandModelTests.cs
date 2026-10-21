@@ -36,6 +36,29 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task RenameMovesSecretMetadataAndRemoveDeletesIt()
+    {
+        using var directory = new TemporaryDirectory();
+        var profileSettings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        profileSettings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Secret,
+            "oldName",
+            new Dictionary<string, string> { ["notes"] = "rotation" }));
+        var model = CreateModel(
+            store: new FakeSecretStore(("oldName", "secret-value")),
+            profileSettings: profileSettings);
+
+        var renameResult = await ExecuteAsync(model, "secret rename oldName newName");
+        var movedMetadata = profileSettings.GetObjectMetadata(MetadataObjectType.Secret, "newName");
+        var removeResult = await ExecuteAsync(model, "secret remove newName");
+
+        Assert.True(renameResult.Succeeded);
+        Assert.Equal("rotation", movedMetadata.Values["notes"]);
+        Assert.True(removeResult.Succeeded);
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Secret, "newName").Values);
+    }
+
+    [Fact]
     public async Task ShowRequiresUnlockAndNeverReturnsTheSecretInTheExecutionResult()
     {
         const string secretValue = "sensitive";
@@ -189,7 +212,13 @@ public class SecretCommandModelTests
         var store = new FakeSecretStore(("oldName", "old-value"));
         var gate = new FakeSecretAccessGate(hasMasterPassword: true, isUnlocked: false);
         var dialog = new FakeDialogService("new-value");
-        var model = CreateModel(store, gate, dialog: dialog);
+        using var directory = new TemporaryDirectory();
+        var profileSettings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var model = CreateModel(store, gate, dialog: dialog, profileSettings: profileSettings);
+        profileSettings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Secret,
+            "oldName",
+            new Dictionary<string, string> { ["notes"] = "keep" }));
 
         var setResult = await ExecuteAsync(model, "secret set newName");
         var renameResult = await ExecuteAsync(model, "secret rename oldName renamed");
@@ -200,6 +229,7 @@ public class SecretCommandModelTests
         Assert.True(removeResult.Succeeded);
         Assert.Equal(["newName"], store.GetNames());
         Assert.Equal(["Set secret 'newName'"], dialog.Titles);
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Secret, "renamed").Values);
     }
 
     [Fact]
@@ -492,11 +522,12 @@ public class SecretCommandModelTests
         FakeClipboardService? clipboard = null,
         FakeTerminalLauncher? terminal = null,
         FakeDialogService? dialog = null,
-        IReadOnlyList<string>? extensionGrants = null)
+        IReadOnlyList<string>? extensionGrants = null,
+        ProfileSettingsStore? profileSettings = null)
     {
         var actualStore = store ?? new FakeSecretStore();
         var actualGate = gate ?? new FakeSecretAccessGate();
-        var profileSettings = new ProfileSettingsStore(Path.Combine(Path.GetTempPath(), $"ignite-test-{Guid.NewGuid():N}.json"));
+        profileSettings ??= new ProfileSettingsStore(Path.Combine(Path.GetTempPath(), $"ignite-test-{Guid.NewGuid():N}.json"));
         if (extensionGrants is not null)
         {
             profileSettings.SetValue(
@@ -511,7 +542,8 @@ public class SecretCommandModelTests
             dialog ?? new FakeDialogService("secret-value"),
             clipboard ?? new FakeClipboardService(),
             terminal ?? new FakeTerminalLauncher(),
-            policy);
+            policy,
+            profileSettings);
     }
 
     private static async Task<CommandExecutionResult> ExecuteAsync(SecretCommandModel model, string commandText)

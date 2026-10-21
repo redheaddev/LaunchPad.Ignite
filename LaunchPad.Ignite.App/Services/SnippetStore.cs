@@ -20,18 +20,20 @@ public sealed class SnippetStore
     };
 
     private readonly string _snippetsDirectory;
+    private readonly ProfileSettingsStore? _profileSettingsStore;
 
     public SnippetStore()
         : this(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "LaunchPad.Ignite",
-            "snippets"))
+            "snippets"), new ProfileSettingsStore())
     {
     }
 
-    public SnippetStore(string snippetsDirectory)
+    public SnippetStore(string snippetsDirectory, ProfileSettingsStore? profileSettingsStore = null)
     {
         _snippetsDirectory = snippetsDirectory;
+        _profileSettingsStore = profileSettingsStore;
     }
 
     public IReadOnlyList<SnippetDefinition> GetAll()
@@ -138,6 +140,7 @@ public sealed class SnippetStore
         }
 
         Directory.Delete(GetSnippetDirectory(snippet.Metadata.Name), recursive: true);
+        _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Snippet, snippet.Metadata.Id);
         return true;
     }
 

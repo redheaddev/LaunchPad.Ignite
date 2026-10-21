@@ -1061,7 +1061,9 @@ public sealed class SettingsAndListDefaultsTests
         Assert.All(ado.Secrets, secret => Assert.False(secret.IsAllowed));
         Assert.All(vscode.Secrets, secret => Assert.False(secret.IsAllowed));
 
-        Assert.DoesNotContain(viewModel.NavigationItems, item => item.Category == "secrets");
+        var metadataPage = Assert.Single(viewModel.NavigationItems.Where(item => item.Category == "metadata"));
+        viewModel.SelectedNavigationItem = metadataPage;
+        Assert.True(viewModel.IsMetadataSelected);
         var adoPage = viewModel.NavigationItems.Single(item => item.Category == "extension" && item.Id == "ado");
         var vscodePage = viewModel.NavigationItems.Single(item => item.Category == "extension" && item.Id == "vscode");
         viewModel.SelectedNavigationItem = adoPage;

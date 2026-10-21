@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Text;
 using System.Threading.Tasks;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
@@ -20,6 +21,7 @@ public sealed class SecretCommandModel
     private readonly IClipboardService _clipboardService;
     private readonly ISecretTerminalLauncher _terminalLauncher;
     private readonly ExtensionSecretAccessPolicy? _extensionSecretAccessPolicy;
+    private readonly ProfileSettingsStore? _profileSettingsStore;
     private readonly AsyncLocal<CommandSecretAccessScope?> _commandSecretAccessScope = new();
 
     private sealed class CommandSecretAccessScope(bool wasUnlocked)
@@ -35,7 +37,8 @@ public sealed class SecretCommandModel
         ISecretEntryDialogService dialogService,
         IClipboardService clipboardService,
         ISecretTerminalLauncher terminalLauncher,
-        ExtensionSecretAccessPolicy? extensionSecretAccessPolicy = null)
+        ExtensionSecretAccessPolicy? extensionSecretAccessPolicy = null,
+        ProfileSettingsStore? profileSettingsStore = null)
     {
         _secretStore = secretStore;
         _accessGate = accessGate;
@@ -43,6 +46,7 @@ public sealed class SecretCommandModel
         _clipboardService = clipboardService;
         _terminalLauncher = terminalLauncher;
         _extensionSecretAccessPolicy = extensionSecretAccessPolicy;
+        _profileSettingsStore = profileSettingsStore;
     }
 
     public async Task<CommandExecutionResult> ExecuteWithSecretRelockAsync(
@@ -246,9 +250,13 @@ public sealed class SecretCommandModel
             return InvalidName();
         }
 
-        return _secretStore.Remove(name)
-            ? new CommandExecutionResult(true, $"Secret '{name}' removed.")
-            : new CommandExecutionResult(false, $"Secret '{name}' was not found.");
+        if (!_secretStore.Remove(name))
+        {
+            return new CommandExecutionResult(false, $"Secret '{name}' was not found.");
+        }
+
+        _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Secret, name);
+        return new CommandExecutionResult(true, $"Secret '{name}' removed.");
     }
 
     private CommandExecutionResult Rename(string name, string newName)
@@ -279,6 +287,8 @@ public sealed class SecretCommandModel
             _secretStore.Remove(newName);
             return new CommandExecutionResult(false, $"Unable to rename secret '{name}'.");
         }
+
+        _profileSettingsStore?.RenameObjectMetadata(MetadataObjectType.Secret, name, newName);
 
         return new CommandExecutionResult(true, $"Secret '{name}' renamed to '{newName}'.");
     }

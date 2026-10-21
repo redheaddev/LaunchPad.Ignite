@@ -15,6 +15,7 @@ public sealed class ProfileBackupServiceTests
         var profileDirectory = Path.Combine(directory.Path, "profile");
         Directory.CreateDirectory(profileDirectory);
         File.WriteAllText(Path.Combine(profileDirectory, "settings.json"), "profile-settings");
+        File.WriteAllText(Path.Combine(profileDirectory, "metadata.json"), "profile-metadata");
         Directory.CreateDirectory(Path.Combine(profileDirectory, "backups"));
         File.WriteAllText(Path.Combine(profileDirectory, "backups", "old.zip"), "old-backup");
         var service = new ProfileBackupService(profileDirectory, "8.2.1");
@@ -23,8 +24,9 @@ public sealed class ProfileBackupServiceTests
 
         Assert.Matches(@"^backup-8\.2\.1-\d{8}-\d{9}-my profile\.zip$", Path.GetFileName(backupPath));
         using var archive = ZipFile.OpenRead(backupPath);
-        Assert.Equal(["settings.json"], archive.Entries.Select(entry => entry.FullName));
+        Assert.Equal(["metadata.json", "settings.json"], archive.Entries.Select(entry => entry.FullName).OrderBy(name => name, System.StringComparer.Ordinal));
         Assert.Equal("profile-settings", ReadEntry(archive, "settings.json"));
+        Assert.Equal("profile-metadata", ReadEntry(archive, "metadata.json"));
     }
 
     [Fact]

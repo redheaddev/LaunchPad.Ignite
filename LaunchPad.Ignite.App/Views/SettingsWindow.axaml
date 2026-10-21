@@ -421,6 +421,71 @@
 					<TextBlock Text="No enum lists are available." IsVisible="{Binding HasNoEnumLists}" Foreground="{DynamicResource ThemeSecondaryText}" />
 				</StackPanel>
 			</ScrollViewer>
+			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsMetadataSelected}">
+				<StackPanel Spacing="14">
+					<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">
+						<StackPanel Spacing="10">
+							<TextBlock Text="Object metadata schema" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<ComboBox ItemsSource="{Binding MetadataObjectTypes}" SelectedItem="{Binding SelectedMetadataObjectType, Mode=TwoWay}" />
+							<TextBlock Text="Metadata is stored in your profile and is not secret. Do not enter passwords, tokens, or other sensitive values." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<ListBox ItemsSource="{Binding MetadataEditor.Fields}" SelectedItem="{Binding MetadataEditor.SelectedField, Mode=TwoWay}" MinHeight="90">
+								<ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" Foreground="{DynamicResource ThemeText}" /></DataTemplate></ListBox.ItemTemplate>
+							</ListBox>
+							<Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+								<TextBox Text="{Binding MetadataEditor.FieldName, Mode=TwoWay}" Watermark="Field name" />
+								<ComboBox Grid.Column="1" ItemsSource="{Binding MetadataEditor.FieldTypes}" SelectedItem="{Binding MetadataEditor.SelectedFieldType, Mode=TwoWay}" />
+							</Grid>
+							<TextBox Text="{Binding MetadataEditor.ChoicesText, Mode=TwoWay}" Watermark="Choices, one per line" AcceptsReturn="True" MinHeight="70" IsVisible="{Binding MetadataEditor.IsChoicesType}" />
+							<StackPanel Orientation="Horizontal" Spacing="8">
+								<Button Content="Add field" Click="AddMetadataField_Click" />
+								<Button Content="Save field" Click="SaveMetadataField_Click" />
+								<Button Content="Delete field" Click="DeleteMetadataField_Click" />
+								<TextBlock Text="{Binding MetadataEditor.Status}" Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
+							</StackPanel>
+						</StackPanel>
+					</Border>
+					<Border Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16" IsVisible="{Binding MetadataEditor.HasTargets}">
+						<StackPanel Spacing="10">
+							<TextBlock Text="Object metadata values" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<TextBlock Text="Objects with metadata" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<ListBox ItemsSource="{Binding MetadataEditor.TargetsWithMetadata}" SelectedItem="{Binding MetadataEditor.SelectedTargetWithMetadata, Mode=TwoWay}" MaxHeight="150">
+								<ListBox.ItemTemplate>
+									<DataTemplate x:DataType="vm:ObjectMetadataTargetViewModel">
+										<StackPanel Spacing="3" Margin="0,3">
+											<TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+											<ItemsControl ItemsSource="{Binding SummaryValues}">
+												<ItemsControl.ItemTemplate>
+													<DataTemplate x:DataType="vm:ObjectMetadataSummaryViewModel">
+														<TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{DynamicResource ThemeSecondaryText}" TextWrapping="Wrap" />
+													</DataTemplate>
+												</ItemsControl.ItemTemplate>
+											</ItemsControl>
+										</StackPanel>
+									</DataTemplate>
+								</ListBox.ItemTemplate>
+							</ListBox>
+							<TextBlock Text="No objects have metadata yet." IsVisible="{Binding MetadataEditor.HasNoMetadataTargets}" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="All objects" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
+							<ComboBox ItemsSource="{Binding MetadataEditor.Targets}" SelectedItem="{Binding MetadataEditor.SelectedTarget, Mode=TwoWay}">
+								<ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayName}" /></DataTemplate></ComboBox.ItemTemplate>
+							</ComboBox>
+							<ItemsControl ItemsSource="{Binding MetadataEditor.Values}">
+								<ItemsControl.ItemTemplate>
+									<DataTemplate x:DataType="vm:ObjectMetadataValueEditorViewModel">
+										<Grid ColumnDefinitions="140,*" ColumnSpacing="10" Margin="0,4">
+											<TextBlock Text="{Binding Field.Name}" Foreground="{DynamicResource ThemeText}" VerticalAlignment="Center" />
+											<ComboBox Grid.Column="1" ItemsSource="{Binding Choices}" SelectedItem="{Binding Value, Mode=TwoWay}" IsVisible="{Binding IsChoices}" />
+											<ComboBox Grid.Column="1" ItemsSource="{Binding BooleanChoices}" SelectedItem="{Binding Value, Mode=TwoWay}" IsVisible="{Binding IsYesNo}" />
+											<TextBox Grid.Column="1" Text="{Binding Value, Mode=TwoWay}" Watermark="{Binding Field.Type}" IsVisible="{Binding IsText}" AcceptsReturn="{Binding IsNotes}" />
+										</Grid>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</StackPanel>
+					</Border>
+					<TextBlock Text="No objects of this type are available for metadata." Foreground="{DynamicResource ThemeSecondaryText}" IsVisible="{Binding MetadataEditor.HasNoTargets}" />
+				</StackPanel>
+			</ScrollViewer>
 			<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" IsVisible="{Binding IsSettingsListVisible}">
 				<StackPanel Spacing="12">
 					<Border IsVisible="{Binding IsApplicationSelected}" Background="{DynamicResource ThemePanelBackground}" BorderBrush="{DynamicResource ThemeBorder}" BorderThickness="1" CornerRadius="10" Padding="16">

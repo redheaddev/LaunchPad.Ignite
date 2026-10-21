@@ -24,6 +24,7 @@ public sealed class MacroStore
     };
 
     private readonly string _macrosDirectory;
+    private readonly ProfileSettingsStore? _profileSettingsStore;
 
     public MacroStore()
         : this(Path.Combine(
@@ -33,9 +34,10 @@ public sealed class MacroStore
     {
     }
 
-    public MacroStore(string macrosDirectory)
+    public MacroStore(string macrosDirectory, ProfileSettingsStore? profileSettingsStore = null)
     {
         _macrosDirectory = macrosDirectory;
+        _profileSettingsStore = profileSettingsStore;
     }
 
     public IReadOnlyList<MacroDefinition> GetAll()
@@ -104,6 +106,7 @@ public sealed class MacroStore
         }
 
         Directory.Delete(GetMacroDirectory(macro.Metadata.Namespace, macro.Metadata.Name), recursive: true);
+        _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Macro, macro.Metadata.Id);
         return true;
     }
 

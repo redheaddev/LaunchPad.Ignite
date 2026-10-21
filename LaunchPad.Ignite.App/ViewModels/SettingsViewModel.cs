@@ -10,6 +10,7 @@ using Avalonia;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Schema;
 
@@ -23,6 +24,9 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly Action<ColorTheme> _themeChanged;
     private readonly IReadOnlyList<ExtensionSecretPermissionViewModel> _extensionSecretPermissions;
+    private readonly IReadOnlyList<ObjectMetadataTarget> _secretMetadataTargets;
+    private ObjectMetadataEditorViewModel _metadataEditor = null!;
+    private MetadataObjectType _selectedMetadataObjectType = MetadataObjectType.Secret;
     private readonly IReadOnlyList<CommandPackSettingsViewModel> _commandPacks;
     private readonly IReadOnlyList<CommandPackSettingsViewModel> _ungroupedCommandPacks;
     private readonly IReadOnlyList<CommandPackGroupSettingsViewModel> _commandPackGroups;
@@ -49,6 +53,29 @@ public partial class SettingsViewModel : ViewModelBase
     public IReadOnlyList<SettingsNavigationItem> NavigationItems { get; }
     public IReadOnlyList<SettingEditorViewModel> Settings { get; private set; } = [];
     public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
+    public ObjectMetadataEditorViewModel MetadataEditor => _metadataEditor;
+    public IReadOnlyList<MetadataObjectType> MetadataObjectTypes { get; } = [MetadataObjectType.Secret, MetadataObjectType.Snippet, MetadataObjectType.Macro, MetadataObjectType.Shortcut, MetadataObjectType.Command, MetadataObjectType.Function, MetadataObjectType.List, MetadataObjectType.Variable];
+    public MetadataObjectType SelectedMetadataObjectType
+    {
+        get => _selectedMetadataObjectType;
+        set
+        {
+            if (SetProperty(ref _selectedMetadataObjectType, value))
+            {
+                RefreshMetadataEditor();
+            }
+        }
+    }
+
+    private void RefreshMetadataEditor()
+    {
+        var targets = _secretMetadataTargets
+            .Where(target => target.ObjectType == SelectedMetadataObjectType)
+            .ToArray();
+        _metadataEditor = new ObjectMetadataEditorViewModel(_settingsStore, SelectedMetadataObjectType, targets);
+        OnPropertyChanged(nameof(MetadataEditor));
+    }
+
     public IReadOnlyList<CommandPackSettingsViewModel> CommandPacks => _commandPacks;
     public IReadOnlyList<CommandPackSettingsViewModel> UngroupedCommandPacks => _ungroupedCommandPacks;
     public IReadOnlyList<CommandPackGroupSettingsViewModel> CommandPackGroups => _commandPackGroups;
@@ -131,6 +158,7 @@ public partial class SettingsViewModel : ViewModelBase
     public bool IsThemeSelected => SelectedNavigationItem?.Category == "theme";
     public bool IsCommandsSelected => SelectedNavigationItem?.Category == "commands";
     public bool IsListsSelected => SelectedNavigationItem?.Category == "lists";
+    public bool IsMetadataSelected => SelectedNavigationItem?.Category == "metadata";
     public bool IsApplicationSelected => SelectedNavigationItem?.Category == "application";
     public bool IsMediaExtensionSelected => SelectedNavigationItem is { Category: "extension" } selected
         && string.Equals(selected.Namespace, MediaShortcutSettings.Namespace, StringComparison.OrdinalIgnoreCase);
@@ -150,8 +178,7 @@ public partial class SettingsViewModel : ViewModelBase
         get => _globalActivationHotkeyStatus;
         private set => SetProperty(ref _globalActivationHotkeyStatus, value);
     }
-    public bool IsSecretsSelected => false;
-    public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsSecretsSelected && !IsCommandsSelected && !IsListsSelected;
+    public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsMetadataSelected && !IsCommandsSelected && !IsListsSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
     public string NewThemeName
     {
@@ -209,7 +236,12 @@ public partial class SettingsViewModel : ViewModelBase
         IReadOnlyDictionary<string, string>? commandPackSources = null,
         Func<string?, CommandDefinition, CommandDefinition, bool>? saveOwnedCommand = null,
         IReadOnlyList<LoadedCommandPackInfo>? commandPacks = null,
-        IReadOnlyList<CommandListDefinition>? listDefaults = null)
+        IReadOnlyList<CommandListDefinition>? listDefaults = null,
+        IReadOnlyList<string>? availableSecretNamesForMetadata = null,
+        IReadOnlyList<SnippetDefinition>? availableSnippetsForMetadata = null,
+        IReadOnlyList<MacroDefinition>? availableMacrosForMetadata = null,
+        IReadOnlyList<CommandFunctionDefinition>? availableFunctionsForMetadata = null,
+        IReadOnlyList<CommandVariableDefinition>? availableVariablesForMetadata = null)
     {
         _settingsStore = settingsStore;
         ActivationHotkey = GlobalActivationHotkey.TryParse(
@@ -223,6 +255,23 @@ public partial class SettingsViewModel : ViewModelBase
         _applicationSettings = applicationSettings;
         _extensionStateStore = extensionStateStore;
         _themeChanged = themeChanged;
+        _secretMetadataTargets = (availableSecretNamesForMetadata ?? [])
+            .Select(name => new ObjectMetadataTarget(MetadataObjectType.Secret, name, name))
+            .Concat((availableSnippetsForMetadata ?? []).Select(snippet =>
+                new ObjectMetadataTarget(MetadataObjectType.Snippet, snippet.Metadata.Id, snippet.Metadata.Name)))
+            .Concat((availableMacrosForMetadata ?? []).Select(macro =>
+                new ObjectMetadataTarget(MetadataObjectType.Macro, macro.Metadata.Id, macro.Metadata.QualifiedName)))
+            .Concat((commands ?? []).Where(command => !string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase))
+                .Select(command => new ObjectMetadataTarget(MetadataObjectType.Command, command.QualifiedName, command.QualifiedName)))
+            .Concat((commands ?? []).Where(command => string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase))
+                .Select(command => new ObjectMetadataTarget(MetadataObjectType.Shortcut, command.QualifiedName, command.QualifiedName)))
+            .Concat((lists ?? []).Select(list => new ObjectMetadataTarget(MetadataObjectType.List, list.QualifiedName, list.QualifiedName)))
+            .Concat((availableFunctionsForMetadata ?? extensions.Schema.Functions).Select(function =>
+                new ObjectMetadataTarget(MetadataObjectType.Function, function.QualifiedName, function.QualifiedName)))
+            .Concat((availableVariablesForMetadata ?? extensions.Schema.Variables).Select(variable =>
+                new ObjectMetadataTarget(MetadataObjectType.Variable, variable.QualifiedName, variable.QualifiedName)))
+            .ToArray();
+        RefreshMetadataEditor();
         var packInfos = (commandPacks ?? [])
             .OrderBy(pack => pack.Id, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -368,6 +417,7 @@ public partial class SettingsViewModel : ViewModelBase
             new("Commands", "commands", ""),
             new("Packs", "packs", ""),
             new("Lists", "lists", ""),
+            new("Metadata", "metadata", ""),
             new("Theme", "theme", ""),
             new("Extensions", "extensions", "")
         };
@@ -566,6 +616,11 @@ public partial class SettingsViewModel : ViewModelBase
             Settings = [];
             SelectedEnumListEditor = _enumListEditors.FirstOrDefault();
         }
+        else if (value.Category == "metadata")
+        {
+            Subheader = "Define metadata fields and values for supported object types.";
+            Settings = [];
+        }
         else
         {
             Subheader = string.Empty;
@@ -581,10 +636,12 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsPacksSelected));
         OnPropertyChanged(nameof(IsThemeSelected));
         OnPropertyChanged(nameof(IsSettingsListVisible));
-        OnPropertyChanged(nameof(IsSecretsSelected));
+        OnPropertyChanged(nameof(IsMetadataSelected));
         OnPropertyChanged(nameof(IsCommandsSelected));
         OnPropertyChanged(nameof(IsListsSelected));
+        OnPropertyChanged(nameof(IsApplicationSelected));
         OnPropertyChanged(nameof(IsExtensionSelected));
+        OnPropertyChanged(nameof(IsMetadataSelected));
         OnPropertyChanged(nameof(ExtensionSecretPermissions));
         OnPropertyChanged(nameof(SelectedExtensionSecretPermissions));
         OnPropertyChanged(nameof(HasSelectedExtensionSecretPermissions));

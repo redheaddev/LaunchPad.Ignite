@@ -215,7 +215,8 @@ public partial class MainViewModel : ViewModelBase
             new AvaloniaSecretEntryDialogService(),
             new AvaloniaClipboardService(GetSystemClipboard),
             _terminalLauncher,
-            extensionSecretAccessPolicy);
+            extensionSecretAccessPolicy,
+            _profileSettingsStore);
         var extensionIds = extensions.Extensions.Select(extension => extension.Id).ToArray();
         _commandPackLoader = new CommandPackLoader(_extensionStateStore);
         var commandPacks = _commandPackLoader
@@ -232,7 +233,7 @@ public partial class MainViewModel : ViewModelBase
         };
         var commandSources = extensions.CommandSources;
         var commandPackSources = commandPacks.CommandSources;
-        _commandSchemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames);
+        _commandSchemaLoader = new CommandSchemaLoader(appSchema, commandPacks.PackedCommandNames, _profileSettingsStore);
         var schema = commandPacks.FilterDisabledCommands(_commandSchemaLoader.Load());
         schema = schema with
         {
@@ -293,8 +294,12 @@ public partial class MainViewModel : ViewModelBase
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
         var shortcutResolver = new ShortcutResolver(schema.Commands);
         var extensionPackageManager = new ExtensionPackageManager();
-        _snippetStore = new SnippetStore();
-        _macroStore = new MacroStore();
+        _snippetStore = new SnippetStore(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LaunchPad.Ignite", "snippets"),
+            _profileSettingsStore);
+        _macroStore = new MacroStore(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LaunchPad.Ignite", "macros"),
+            _profileSettingsStore);
         var valueProvider = new CommandSchemaValueProvider(
             schema,
             new CompositeArgumentValueProvider(
@@ -478,7 +483,12 @@ public partial class MainViewModel : ViewModelBase
             _commandPackSources,
             SaveOwnedCommandDefinition,
             _commandPacks,
-            _commandListDefaults);
+            _commandListDefaults,
+            _secretStore.GetNames(),
+            _snippetStore.GetAll(),
+            _macroStore.GetAll(),
+            _catalog.Schema.Functions,
+            _catalog.Schema.Variables);
     }
 
     private bool SaveOwnedCommandDefinition(string? packId, CommandDefinition command, CommandDefinition original)

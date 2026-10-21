@@ -34,6 +34,28 @@ public sealed class MacroSupportTests
     }
 
     [Fact]
+    public void StoreRemovalDeletesMetadataByStableMacroId()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var store = new MacroStore(Path.Combine(directory.Path, "macros"), settings);
+        var macro = store.Save(CreateMacro("deploy", "ops", [], "url https://example.test"));
+        settings.SetMetadataSchema(new ObjectMetadataSchema(
+            MetadataObjectType.Macro,
+            [new MetadataFieldDefinition("owner", "Owner", MetadataFieldType.Text)]));
+        settings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Macro,
+            macro.Metadata.Id,
+            new Dictionary<string, string> { ["owner"] = "Operations" }));
+
+        Assert.Equal("Operations", settings.GetObjectMetadata(MetadataObjectType.Macro, macro.Metadata.Id).Values["owner"]);
+        Assert.True(store.Remove(macro.Metadata.QualifiedName));
+
+        Assert.Empty(settings.GetObjectMetadata(MetadataObjectType.Macro, macro.Metadata.Id).Values);
+        Assert.DoesNotContain(macro.Metadata.Id, File.ReadAllText(Path.Combine(directory.Path, "metadata.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StoreRejectsInvalidMacroDefinitions()
     {
         using var directory = new TemporaryDirectory();

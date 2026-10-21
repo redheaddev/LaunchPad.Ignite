@@ -27,6 +27,30 @@ public partial class SettingsWindow : Window
         ColorThemeService.ThemeChanged += RefreshThemeResources;
     }
 
+    private void AddMetadataField_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel viewModel)
+        {
+            viewModel.MetadataEditor.AddField();
+        }
+    }
+
+    private void SaveMetadataField_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel viewModel)
+        {
+            viewModel.MetadataEditor.SaveField();
+        }
+    }
+
+    private void DeleteMetadataField_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel viewModel)
+        {
+            viewModel.MetadataEditor.DeleteField();
+        }
+    }
+
     private void CaptureMediaShortcut_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { Tag: MediaShortcutEditorViewModel editor })

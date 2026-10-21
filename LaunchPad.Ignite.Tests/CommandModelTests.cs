@@ -80,6 +80,60 @@ public class CommandModelTests
     }
 
     [Fact]
+    public void LoaderRenamesAndRemovesMetadataForUserShortcuts()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var profileSettings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath, Path.Combine(directory.Path, "defaults.json"), [], profileSettings);
+        var shortcut = new CommandDefinition("deploy", "shortcut", "Deploy", [
+            new CommandActionDefinition("default", "", "", "deploy-command ", [])
+        ], Handler: "shortcut");
+        loader.AddUserCommand(shortcut);
+        profileSettings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Shortcut,
+            shortcut.QualifiedName,
+            new Dictionary<string, string> { ["owner"] = "Operations" }));
+
+        var renamed = loader.UpdateUserCommand(shortcut with { Name = "release" }, shortcut.QualifiedName);
+
+        Assert.Contains(renamed.Commands, command => command.QualifiedName == "release");
+        Assert.Equal("Operations", profileSettings.GetObjectMetadata(MetadataObjectType.Shortcut, "release").Values["owner"]);
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Shortcut, "deploy").Values);
+
+        loader.RemoveUserCommand("release");
+
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Shortcut, "release").Values);
+    }
+
+    [Fact]
+    public void LoaderRenamesAndRemovesMetadataForUserCommands()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var profileSettings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath, Path.Combine(directory.Path, "defaults.json"), [], profileSettings);
+        var command = new CommandDefinition("build", "shell", "Build", [
+            new CommandActionDefinition("default", "", "", "build-command", [])
+        ]);
+        loader.AddUserCommand(command);
+        profileSettings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Command,
+            command.QualifiedName,
+            new Dictionary<string, string> { ["owner"] = "Engineering" }));
+
+        var renamed = loader.UpdateUserCommand(command with { Name = "compile" }, command.QualifiedName);
+
+        Assert.Contains(renamed.Commands, item => item.QualifiedName == "compile");
+        Assert.Equal("Engineering", profileSettings.GetObjectMetadata(MetadataObjectType.Command, "compile").Values["owner"]);
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Command, "build").Values);
+
+        loader.RemoveUserCommand("compile");
+
+        Assert.Empty(profileSettings.GetObjectMetadata(MetadataObjectType.Command, "compile").Values);
+    }
+
+    [Fact]
     public void LoaderMigratesBundledCommandsIntoUserSchemaOnlyOnce()
     {
         using var directory = new TemporaryDirectory();
@@ -378,6 +432,32 @@ public class CommandModelTests
         Assert.Contains(updatedSchema.Variables, variable =>
             variable.QualifiedName == "ado:orgUrl" && variable.Value == "https://dev.azure.com/example");
         Assert.Contains(updatedSchema.Variables, variable => variable.QualifiedName == "team" && variable.Value == "alpha");
+    }
+
+    [Fact]
+    public void LoaderRemovesMetadataWhenUserListOrVariableIsRemoved()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath, Path.Combine(directory.Path, "defaults.json"), [], settings);
+        var list = new CommandListDefinition("enum", "environment", ["dev", "prod"], "dev", "ops");
+        loader.AddUserList(list);
+        loader.SetVariable("ops:region", "west");
+        settings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.List,
+            list.QualifiedName,
+            new Dictionary<string, string> { ["owner"] = "Operations" }));
+        settings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Variable,
+            "ops:region",
+            new Dictionary<string, string> { ["owner"] = "Operations" }));
+
+        loader.RemoveUserList(list.QualifiedName);
+        Assert.Empty(settings.GetObjectMetadata(MetadataObjectType.List, list.QualifiedName).Values);
+
+        Assert.True(loader.RemoveVariable("ops:region", out _));
+        Assert.Empty(settings.GetObjectMetadata(MetadataObjectType.Variable, "ops:region").Values);
     }
 
     private static CommandLineParser CreateVariableParser()

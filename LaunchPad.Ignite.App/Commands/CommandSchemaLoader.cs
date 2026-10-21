@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LaunchPad.Ignite.App.Models;
+using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.Commands;
@@ -23,6 +25,7 @@ public sealed class CommandSchemaLoader
     private readonly string _defaultUserCommandsPath;
     private readonly string _migrationMarkerPath;
     private readonly HashSet<string> _packedCommandNames;
+    private readonly ProfileSettingsStore? _profileSettingsStore;
 
     public IReadOnlySet<string> UserCommandNames { get; private set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -48,6 +51,22 @@ public sealed class CommandSchemaLoader
     {
     }
 
+    public CommandSchemaLoader(
+        CommandSchema appSchema,
+        IEnumerable<string> packedCommandNames,
+        ProfileSettingsStore profileSettingsStore)
+        : this(
+            appSchema,
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LaunchPad.Ignite",
+                "user-commands.json"),
+            Path.Combine(AppContext.BaseDirectory, "defaults", "user-commands.json"),
+            packedCommandNames,
+            profileSettingsStore)
+    {
+    }
+
     public CommandSchemaLoader(CommandSchema appSchema, string userCommandsPath)
         : this(
             appSchema,
@@ -65,13 +84,15 @@ public sealed class CommandSchemaLoader
         CommandSchema appSchema,
         string userCommandsPath,
         string defaultUserCommandsPath,
-        IEnumerable<string> packedCommandNames)
+        IEnumerable<string> packedCommandNames,
+        ProfileSettingsStore? profileSettingsStore = null)
     {
         _appSchema = appSchema;
         _userCommandsPath = userCommandsPath;
         _defaultUserCommandsPath = defaultUserCommandsPath;
         _migrationMarkerPath = userCommandsPath + ".legacy-migrated";
         _packedCommandNames = packedCommandNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _profileSettingsStore = profileSettingsStore;
     }
 
     public CommandSchema Load()
@@ -137,6 +158,8 @@ public sealed class CommandSchemaLoader
         EnsureUserCommandsFileExists();
         var qualifiedName = ParseQualifiedName(name);
         var userSchema = ReadSchema(_userCommandsPath);
+        var removedCommand = userSchema.Commands.FirstOrDefault(command =>
+            string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase));
         var commands = userSchema.Commands
             .Where(command => !string.Equals(command.QualifiedName, qualifiedName, StringComparison.OrdinalIgnoreCase))
             .ToArray();
@@ -147,6 +170,15 @@ public sealed class CommandSchemaLoader
 
         var updatedUserSchema = userSchema with { Commands = commands };
         ValidateAndWrite(updatedUserSchema);
+        if (IsShortcut(removedCommand))
+        {
+            _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Shortcut, qualifiedName);
+        }
+        else
+        {
+            _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Command, qualifiedName);
+        }
+
         return Load();
     }
 
@@ -205,6 +237,7 @@ public sealed class CommandSchemaLoader
             Lists = userSchema.Lists.Where(candidate => !string.Equals(GetListKey(candidate), GetListKey(list), StringComparison.OrdinalIgnoreCase)).ToArray()
         };
         ValidateAndWrite(updatedUserSchema);
+        _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.List, list.QualifiedName);
         return Load();
     }
 
@@ -332,6 +365,7 @@ public sealed class CommandSchemaLoader
         }
 
         var commands = userSchema.Commands.ToArray();
+        var originalCommand = commands[commandIndex];
         commands[commandIndex] = updatedCommand with
         {
             Kind = commands[commandIndex].Kind,
@@ -351,8 +385,37 @@ public sealed class CommandSchemaLoader
         }
 
         WriteSchema(updatedUserSchema);
+        var wasShortcut = IsShortcut(originalCommand);
+        var isShortcut = IsShortcut(updatedCommand);
+        var wasRenamed = !string.Equals(originalCommand.QualifiedName, updatedCommand.QualifiedName, StringComparison.OrdinalIgnoreCase);
+        if (wasShortcut && isShortcut && wasRenamed)
+        {
+            _profileSettingsStore?.RenameObjectMetadata(
+                MetadataObjectType.Shortcut,
+                originalCommand.QualifiedName,
+                updatedCommand.QualifiedName);
+        }
+        else if (wasShortcut && !isShortcut)
+        {
+            _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Shortcut, originalCommand.QualifiedName);
+        }
+        else if (!wasShortcut && isShortcut)
+        {
+            _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Command, originalCommand.QualifiedName);
+        }
+        else if (wasRenamed)
+        {
+            _profileSettingsStore?.RenameObjectMetadata(
+                MetadataObjectType.Command,
+                originalCommand.QualifiedName,
+                updatedCommand.QualifiedName);
+        }
+
         return Load();
     }
+
+    private static bool IsShortcut(CommandDefinition? command)
+        => string.Equals(command?.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase);
 
     public bool ContainsVariable(string name)
     {
@@ -376,6 +439,7 @@ public sealed class CommandSchemaLoader
         }
 
         WriteSchema(userSchema with { Variables = variables });
+        _profileSettingsStore?.RemoveObjectMetadata(MetadataObjectType.Variable, variable.QualifiedName);
         schema = Load();
         return true;
     }

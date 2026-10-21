@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.Services;
@@ -14,6 +15,7 @@ public sealed class ProfileSettingsStore
     private const string CustomThemePrefix = "app:customTheme:";
     private const string LegacyThemeMigrationKey = "app:themes:legacyCharcoalMigrated";
     private const string ThemeMigrationMetadataKey = "legacyCharcoalMigrated";
+    private const string MetadataSettingsKey = "metadata";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -22,9 +24,13 @@ public sealed class ProfileSettingsStore
     };
 
     private readonly string _settingsPath;
+    private readonly string _metadataPath;
     private readonly Dictionary<string, string> _values;
     private readonly Dictionary<string, ProfileThemeSettings> _themes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<MetadataObjectType, ObjectMetadataSchema> _metadataSchemas = new();
+    private readonly Dictionary<(MetadataObjectType ObjectType, string ObjectId), ObjectMetadataRecord> _metadataRecords = new();
     private bool _legacyCharcoalMigrated;
+    private bool _hasEmbeddedMetadata;
 
     public ProfileSettingsStore()
         : this(Path.Combine(
@@ -37,11 +43,24 @@ public sealed class ProfileSettingsStore
     public ProfileSettingsStore(string settingsPath)
     {
         _settingsPath = settingsPath;
+        _metadataPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settingsPath))!, "metadata.json");
         _values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (File.Exists(settingsPath))
         {
             Load(File.ReadAllText(settingsPath));
         }
+
+        if (File.Exists(_metadataPath))
+        {
+            LoadMetadata(File.ReadAllText(_metadataPath));
+        }
+        else if (_hasEmbeddedMetadata)
+        {
+            SaveMetadata();
+            Save();
+        }
+
+        EnsureDefaultMetadataSchemas();
     }
 
     public string GetValue(CommandSettingDefinition setting)
@@ -68,6 +87,84 @@ public sealed class ProfileSettingsStore
         {
             Colors = new Dictionary<string, string>(theme.Colors, StringComparer.OrdinalIgnoreCase)
         }).ToArray();
+
+    public IReadOnlyList<ObjectMetadataSchema> GetMetadataSchemas()
+        => _metadataSchemas.Values.ToArray();
+
+    public ObjectMetadataSchema GetMetadataSchema(MetadataObjectType objectType)
+        => _metadataSchemas.TryGetValue(objectType, out var schema)
+            ? schema
+            : new ObjectMetadataSchema(objectType, []);
+
+    public void SetMetadataSchema(ObjectMetadataSchema schema)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        _metadataSchemas[schema.ObjectType] = schema with { Fields = schema.Fields.ToArray() };
+        SaveMetadata();
+    }
+
+    public ObjectMetadataRecord GetObjectMetadata(MetadataObjectType objectType, string objectId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectId);
+        return _metadataRecords.TryGetValue((objectType, objectId), out var record)
+            ? record with { Values = new Dictionary<string, string>(record.Values, StringComparer.OrdinalIgnoreCase) }
+            : new ObjectMetadataRecord(objectType, objectId, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    public void SetObjectMetadata(ObjectMetadataRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentException.ThrowIfNullOrWhiteSpace(record.ObjectId);
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in record.Values)
+        {
+            if (value is not null)
+            {
+                values[key] = value;
+            }
+        }
+
+        var recordKey = (record.ObjectType, record.ObjectId);
+        if (values.Count == 0)
+        {
+            _metadataRecords.Remove(recordKey);
+        }
+        else
+        {
+            _metadataRecords[recordKey] = record with { Values = values };
+        }
+
+        SaveMetadata();
+    }
+
+    public void RenameObjectMetadata(MetadataObjectType objectType, string oldObjectId, string newObjectId, bool overwrite)
+    {
+        if (!_metadataRecords.Remove((objectType, oldObjectId), out var record))
+        {
+            return;
+        }
+
+        var newKey = (objectType, newObjectId);
+        if (!overwrite && _metadataRecords.ContainsKey(newKey))
+        {
+            _metadataRecords[(objectType, oldObjectId)] = record;
+            return;
+        }
+
+        _metadataRecords[newKey] = record with { ObjectId = newObjectId };
+        SaveMetadata();
+    }
+
+    public void RenameObjectMetadata(MetadataObjectType objectType, string oldObjectId, string newObjectId)
+        => RenameObjectMetadata(objectType, oldObjectId, newObjectId, overwrite: true);
+
+    public void RemoveObjectMetadata(MetadataObjectType objectType, string objectId)
+    {
+        if (_metadataRecords.Remove((objectType, objectId)))
+        {
+            SaveMetadata();
+        }
+    }
 
     public bool IsLegacyCharcoalMigrated => _legacyCharcoalMigrated;
 
@@ -219,6 +316,45 @@ public sealed class ProfileSettingsStore
         }
     }
 
+    private void SaveMetadata()
+    {
+        var directory = Path.GetDirectoryName(_metadataPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var temporaryPath = _metadataPath + ".tmp";
+        try
+        {
+            var data = new MetadataSettingsData(_metadataSchemas.Values.ToArray(), _metadataRecords.Values.ToArray());
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(data, JsonOptions));
+            File.Move(temporaryPath, _metadataPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private void EnsureDefaultMetadataSchemas()
+    {
+        if (_metadataSchemas.ContainsKey(MetadataObjectType.Secret))
+        {
+            return;
+        }
+
+        _metadataSchemas[MetadataObjectType.Secret] = new ObjectMetadataSchema(MetadataObjectType.Secret,
+        [
+            new MetadataFieldDefinition("expiresOn", "Expiration date", MetadataFieldType.Date),
+            new MetadataFieldDefinition("notes", "Notes", MetadataFieldType.Text)
+        ]);
+        SaveMetadata();
+    }
+
     private void Load(string json)
     {
         var root = JsonNode.Parse(json)?.AsObject();
@@ -242,6 +378,27 @@ public sealed class ProfileSettingsStore
                     }
                 }
 
+                if (!File.Exists(_metadataPath))
+                {
+                    var metadata = node?[MetadataSettingsKey]?.Deserialize<MetadataSettingsData>(JsonOptions);
+                    if (metadata is not null)
+                    {
+                        _hasEmbeddedMetadata = true;
+                        foreach (var schema in metadata.Schemas ?? [])
+                        {
+                            _metadataSchemas[schema.ObjectType] = schema with { Fields = schema.Fields ?? [] };
+                        }
+
+                        foreach (var record in metadata.Records ?? [])
+                        {
+                            _metadataRecords[(record.ObjectType, record.ObjectId)] = record with
+                            {
+                                Values = new Dictionary<string, string>(record.Values ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)
+                            };
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -262,6 +419,30 @@ public sealed class ProfileSettingsStore
         if (removeLegacyMigrationMarker && _legacyCharcoalMigrated)
         {
             Save();
+        }
+    }
+
+    private void LoadMetadata(string json)
+    {
+        var metadata = JsonSerializer.Deserialize<MetadataSettingsData>(json, JsonOptions);
+        if (metadata is null)
+        {
+            return;
+        }
+
+        _metadataSchemas.Clear();
+        _metadataRecords.Clear();
+        foreach (var schema in metadata.Schemas ?? [])
+        {
+            _metadataSchemas[schema.ObjectType] = schema with { Fields = schema.Fields ?? [] };
+        }
+
+        foreach (var record in metadata.Records ?? [])
+        {
+            _metadataRecords[(record.ObjectType, record.ObjectId)] = record with
+            {
+                Values = new Dictionary<string, string>(record.Values ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)
+            };
         }
     }
 
@@ -355,5 +536,7 @@ public sealed class ProfileSettingsStore
     }
 
 }
+
+internal sealed record MetadataSettingsData(IReadOnlyList<ObjectMetadataSchema>? Schemas, IReadOnlyList<ObjectMetadataRecord>? Records);
 
 public sealed record ProfileThemeSettings(string Id, string Name, Dictionary<string, string> Colors, string? Url = null);

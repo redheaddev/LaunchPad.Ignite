@@ -40,6 +40,24 @@ public sealed class SnippetSupportTests
     }
 
     [Fact]
+    public void StoreRemovalDeletesMetadataByStableSnippetId()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var store = new SnippetStore(Path.Combine(directory.Path, "snippets"), settings);
+        var snippet = store.Save("deploy", "powershell", [], [], "Write-Output 'ok'");
+        settings.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Snippet,
+            snippet.Metadata.Id,
+            new Dictionary<string, string> { ["notes"] = "owned by team" }));
+
+        Assert.True(store.Rename("deploy", "release"));
+        Assert.Equal("owned by team", settings.GetObjectMetadata(MetadataObjectType.Snippet, snippet.Metadata.Id).Values["notes"]);
+        Assert.True(store.Remove("release"));
+        Assert.Empty(settings.GetObjectMetadata(MetadataObjectType.Snippet, snippet.Metadata.Id).Values);
+    }
+
+    [Fact]
     public void StoreMigratesLegacyIdDirectoryToSnippetName()
     {
         using var directory = new TemporaryDirectory();
