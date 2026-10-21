@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private readonly Cursor _verticalResizeCursor;
     private readonly Cursor _diagonalResizeCursor;
     private readonly Cursor _pointerCursor;
+    private readonly HashSet<Window> _independentWindows = [];
 
     private const double ResizeGripSize = 24;
     private const double MainDefaultWidth = 760;
@@ -269,25 +270,18 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OpenCommandEditor(string? commandName)
+    private void OpenCommandEditor(string? commandName)
     {
         if (DataContext is not MainViewModel viewModel)
         {
             return;
         }
 
-        _secretDialogIsOpen = true;
-        try
-        {
-            var settingsViewModel = viewModel.CreateSettingsViewModel();
-            settingsViewModel.OpenCommandEditor(commandName);
-            await new SettingsWindow(settingsViewModel).ShowDialog(this);
-        }
-        finally
-        {
-            _secretDialogIsOpen = false;
-            RefreshWindowsActivationHotkey();
-        }
+        var settingsViewModel = viewModel.CreateSettingsViewModel();
+        settingsViewModel.OpenCommandEditor(commandName);
+        var window = new SettingsWindow(settingsViewModel);
+        window.Closed += (_, _) => RefreshWindowsActivationHotkey();
+        ShowIndependentWindow(window);
     }
 
     internal async Task<IReadOnlyDictionary<string, string>?> ShowSnippetArgumentsAsync(SnippetArgumentsWindow dialog)
@@ -979,54 +973,54 @@ public partial class MainWindow : Window
             _ => Task.CompletedTask
         };
 
-    private async void ImportExportButton_Click(object? sender, RoutedEventArgs e)
-        => await OpenImportExportAsync();
+    private void ShowIndependentWindow(Window window)
+    {
+        _independentWindows.Add(window);
+        window.Closed += (_, _) => _independentWindows.Remove(window);
+        window.Topmost = false;
+        window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        window.Show();
+    }
 
-    private async Task OpenImportExportAsync()
+    private void ImportExportButton_Click(object? sender, RoutedEventArgs e)
+        => _ = OpenImportExportAsync();
+
+    private Task OpenImportExportAsync()
     {
         if (DataContext is not MainViewModel viewModel)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        _secretDialogIsOpen = true;
-        try
+        var dialogViewModel = viewModel.CreateImportExportViewModel(() => { });
+        var window = new ImportExportWindow(dialogViewModel);
+        window.Closed += (_, _) =>
         {
-            var dialogViewModel = viewModel.CreateImportExportViewModel(() => { });
-            await new ImportExportWindow(dialogViewModel).ShowDialog(this);
             _commandBox.Text = viewModel.CommandInputText;
             _commandBox.CaretIndex = viewModel.CommandInputText.Length;
-        }
-        finally
-        {
-            _secretDialogIsOpen = false;
-        }
+        };
+        ShowIndependentWindow(window);
+        return Task.CompletedTask;
     }
 
-    private async void SettingsButton_Click(object? sender, RoutedEventArgs e)
-        => await OpenSettingsAsync();
+    private void SettingsButton_Click(object? sender, RoutedEventArgs e)
+        => _ = OpenSettingsAsync();
 
-    private async Task OpenSettingsAsync()
+    private Task OpenSettingsAsync()
     {
         if (DataContext is not MainViewModel viewModel)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        _secretDialogIsOpen = true;
-        try
-        {
-            await new SettingsWindow(viewModel.CreateSettingsViewModel()).ShowDialog(this);
-        }
-        finally
-        {
-            _secretDialogIsOpen = false;
-            RefreshWindowsActivationHotkey();
-        }
+        var window = new SettingsWindow(viewModel.CreateSettingsViewModel());
+        window.Closed += (_, _) => RefreshWindowsActivationHotkey();
+        ShowIndependentWindow(window);
+        return Task.CompletedTask;
     }
 
-    private async void HelpButton_Click(object? sender, RoutedEventArgs e)
-        => await OpenHelpAsync();
+    private void HelpButton_Click(object? sender, RoutedEventArgs e)
+        => _ = OpenHelpAsync();
 
     private async void SecretLockButton_Click(object? sender, RoutedEventArgs e)
     {
@@ -1036,22 +1030,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task OpenHelpAsync()
+    private Task OpenHelpAsync()
     {
         if (DataContext is not MainViewModel viewModel)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        _secretDialogIsOpen = true;
-        try
-        {
-            await new HelpWindow(viewModel.CreateHelpViewModel()).ShowDialog(this);
-        }
-        finally
-        {
-            _secretDialogIsOpen = false;
-        }
+        ShowIndependentWindow(new HelpWindow(viewModel.CreateHelpViewModel()));
+        return Task.CompletedTask;
     }
 
     private static Button CreateDialogButton(string label, bool result)
@@ -1250,7 +1237,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Deactivated(object? sender, EventArgs e)
     {
-        if (_secretDialogIsOpen || DataContext is MainViewModel { KeepWindowOpen: true })
+        if (_secretDialogIsOpen || _independentWindows.Count > 0 || DataContext is MainViewModel { KeepWindowOpen: true })
         {
             return;
         }
@@ -1774,7 +1761,7 @@ public partial class MainWindow : Window
 
     private void ActivateFromHotkey()
     {
-        if (DataContext is MainViewModel { KeepWindowOpen: true })
+        if (_independentWindows.Count > 0 || DataContext is MainViewModel { KeepWindowOpen: true })
         {
             ShowAndActivate();
             return;

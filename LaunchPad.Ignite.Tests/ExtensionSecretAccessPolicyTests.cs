@@ -1,3 +1,4 @@
+using System;
 using LaunchPad.Ignite.App.Services;
 
 namespace LaunchPad.Ignite.Tests;
@@ -69,6 +70,28 @@ public sealed class ExtensionSecretAccessPolicyTests
         Assert.True(result.Found);
         Assert.Equal("sensitive", result.Value);
         Assert.Equal(["pat"], store.ReadNames);
+    }
+
+    [Fact]
+    public void SuccessfulExtensionSecretReadRecordsLastAccessed()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        settings.SetValue(ExtensionSecretAccessPolicy.GetSettingName("ado"), "[\"pat\"]");
+        var trackedStore = new SecretActivityTrackingStore(
+            new TrackingSecretStore(("pat", "sensitive")),
+            settings);
+        var policy = new ExtensionSecretAccessPolicy(settings, trackedStore);
+
+        var found = policy.TryGetSecret("ado", "pat");
+        var missing = trackedStore.TryGet("missing", out _);
+
+        Assert.True(found.Found);
+        Assert.False(missing);
+        Assert.True(DateTimeOffset.TryParse(
+            settings.GetObjectMetadata(LaunchPad.Ignite.App.Models.MetadataObjectType.Secret, "pat").Values["lastAccessed"],
+            out _));
+        Assert.Empty(settings.GetObjectMetadata(LaunchPad.Ignite.App.Models.MetadataObjectType.Secret, "missing").Values);
     }
 
     private sealed class TrackingSecretStore(params (string Name, string Value)[] secrets) : ISecretStore

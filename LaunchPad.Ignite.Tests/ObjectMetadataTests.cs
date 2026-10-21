@@ -51,7 +51,29 @@ public class ObjectMetadataTests
         Assert.True(File.Exists(Path.Combine(directory.Path, "metadata.json")));
         Assert.Equal("preserved", store.GetObjectMetadata(MetadataObjectType.Secret, "apiToken").Values["custom"]);
         Assert.Contains(store.GetMetadataSchema(MetadataObjectType.Secret).Fields, field => field.Id == "custom");
+        Assert.Contains(store.GetMetadataSchema(MetadataObjectType.Secret).Fields, field => field.Id == "lastUpdated");
+        Assert.Contains(store.GetMetadataSchema(MetadataObjectType.Secret).Fields, field => field.Id == "lastAccessed");
         Assert.DoesNotContain("metadata", File.ReadAllText(settingsPath), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ProfileSettingsStoreRecordsSecretActivityWithoutReplacingOtherMetadata()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        store.SetObjectMetadata(new ObjectMetadataRecord(
+            MetadataObjectType.Secret,
+            "apiToken",
+            new Dictionary<string, string> { ["notes"] = "rotate annually" }));
+        var timestamp = DateTimeOffset.Parse("2025-01-02T03:04:05+02:00");
+
+        Assert.True(store.TryRecordSecretLastUpdated("apiToken", timestamp));
+        Assert.True(store.TryRecordSecretLastAccessed("apiToken", timestamp.AddMinutes(1)));
+
+        var values = store.GetObjectMetadata(MetadataObjectType.Secret, "apiToken").Values;
+        Assert.Equal("rotate annually", values["notes"]);
+        Assert.Equal(timestamp.ToUniversalTime().ToString("O"), values["lastUpdated"]);
+        Assert.Equal(timestamp.AddMinutes(1).ToUniversalTime().ToString("O"), values["lastAccessed"]);
     }
 
     [Fact]

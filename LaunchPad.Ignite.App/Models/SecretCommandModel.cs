@@ -145,6 +145,7 @@ public sealed class SecretCommandModel
         }
 
         _secretStore.Set(name, value);
+        _profileSettingsStore?.TryRecordSecretLastUpdated(name, DateTimeOffset.UtcNow);
         return new CommandExecutionResult(true, $"Secret '{name}' saved.");
     }
 

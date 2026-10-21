@@ -129,8 +129,8 @@ public partial class MainViewModel : ViewModelBase
         _commandLogger.StartSession();
         _historyCommands = _commandLogger.ReadHistoryEntries();
         _extensionStateStore = new ExtensionStateStore();
-        _secretStore = PlatformSecretStore.Create();
         _profileSettingsStore = new ProfileSettingsStore();
+        _secretStore = new SecretActivityTrackingStore(PlatformSecretStore.Create(), _profileSettingsStore);
         _launcherWindowStateStore = new LauncherWindowStateStore(_profileSettingsStore);
         _isMiniMode = _launcherWindowStateStore.Mode == LauncherWindowMode.Mini;
         ColorThemeService.MigrateLegacyThemes(_profileSettingsStore);

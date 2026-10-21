@@ -174,7 +174,29 @@ public sealed class ProfileCommandLogger
 
         if (succeeded && !MathExpressionParser.TryParse(commandText, out _))
         {
-            TryAppend("history.txt", $"{timestamp:O} {entry}");
+            RecordUniqueHistoryEntry(timestamp, entry);
+        }
+    }
+
+    private void RecordUniqueHistoryEntry(DateTimeOffset timestamp, string commandText)
+    {
+        try
+        {
+            Directory.CreateDirectory(_profileDirectory);
+            var historyPath = Path.Combine(_profileDirectory, "history.txt");
+            var updatedLines = (File.Exists(historyPath) ? File.ReadAllLines(historyPath) : [])
+                .Where(line => !string.Equals(
+                    ParseHistoryLine(line).CommandText,
+                    commandText,
+                    StringComparison.OrdinalIgnoreCase))
+                .Append($"{timestamp:O} {commandText}");
+            File.WriteAllLines(historyPath, updatedLines);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 

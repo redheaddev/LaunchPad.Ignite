@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -102,6 +103,12 @@ public sealed class ProfileSettingsStore
         _metadataSchemas[schema.ObjectType] = schema with { Fields = schema.Fields.ToArray() };
         SaveMetadata();
     }
+
+    public bool TryRecordSecretLastUpdated(string secretName, DateTimeOffset timestamp)
+        => TryRecordSecretTimestamp(secretName, "lastUpdated", timestamp);
+
+    public bool TryRecordSecretLastAccessed(string secretName, DateTimeOffset timestamp)
+        => TryRecordSecretTimestamp(secretName, "lastAccessed", timestamp);
 
     public ObjectMetadataRecord GetObjectMetadata(MetadataObjectType objectType, string objectId)
     {
@@ -342,17 +349,60 @@ public sealed class ProfileSettingsStore
 
     private void EnsureDefaultMetadataSchemas()
     {
-        if (_metadataSchemas.ContainsKey(MetadataObjectType.Secret))
+        var fields = _metadataSchemas.TryGetValue(MetadataObjectType.Secret, out var schema)
+            ? schema.Fields.ToList()
+            :
+            [
+                new MetadataFieldDefinition("expiresOn", "Expiration date", MetadataFieldType.Date),
+                new MetadataFieldDefinition("notes", "Notes", MetadataFieldType.Text)
+            ];
+        var changed = schema is null;
+        foreach (var field in new[]
         {
-            return;
+            new MetadataFieldDefinition("lastUpdated", "Last updated", MetadataFieldType.Text),
+            new MetadataFieldDefinition("lastAccessed", "Last accessed", MetadataFieldType.Text)
+        })
+        {
+            var index = fields.FindIndex(existing => string.Equals(existing.Id, field.Id, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+            {
+                fields.Add(field);
+                changed = true;
+            }
+            else if (fields[index] != field)
+            {
+                fields[index] = field;
+                changed = true;
+            }
         }
 
-        _metadataSchemas[MetadataObjectType.Secret] = new ObjectMetadataSchema(MetadataObjectType.Secret,
-        [
-            new MetadataFieldDefinition("expiresOn", "Expiration date", MetadataFieldType.Date),
-            new MetadataFieldDefinition("notes", "Notes", MetadataFieldType.Text)
-        ]);
-        SaveMetadata();
+        if (changed)
+        {
+            _metadataSchemas[MetadataObjectType.Secret] = new ObjectMetadataSchema(MetadataObjectType.Secret, fields);
+            SaveMetadata();
+        }
+    }
+
+    private bool TryRecordSecretTimestamp(string secretName, string fieldId, DateTimeOffset timestamp)
+    {
+        try
+        {
+            var record = GetObjectMetadata(MetadataObjectType.Secret, secretName);
+            var values = new Dictionary<string, string>(record.Values, StringComparer.OrdinalIgnoreCase)
+            {
+                [fieldId] = timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+            };
+            SetObjectMetadata(record with { Values = values });
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void Load(string json)

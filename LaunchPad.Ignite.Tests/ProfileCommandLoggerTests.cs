@@ -43,6 +43,24 @@ public class ProfileCommandLoggerTests
     }
 
     [Fact]
+    public void RecordingHistoryEntryReplacesPreviousMatchingEntries()
+    {
+        using var directory = new TemporaryDirectory();
+        var logger = new ProfileCommandLogger(directory.Path);
+        var catalog = CreateCatalog();
+        logger.RecordCommand("alpha old", succeeded: true, catalog, DateTimeOffset.Parse("2025-01-01T00:00:00+00:00"));
+        logger.RecordCommand("beta retained", succeeded: true, catalog, DateTimeOffset.Parse("2025-01-02T00:00:00+00:00"));
+        logger.RecordCommand("ALPHA OLD", succeeded: true, catalog, DateTimeOffset.Parse("2025-01-03T00:00:00+00:00"));
+
+        Assert.Equal(
+            [
+                "2025-01-02T00:00:00.0000000+00:00 beta retained",
+                "2025-01-03T00:00:00.0000000+00:00 ALPHA OLD"
+            ],
+            File.ReadAllLines(Path.Combine(directory.Path, "history.txt")));
+    }
+
+    [Fact]
     public void MasksSensitiveArgumentsInLogAndHistory()
     {
         using var directory = new TemporaryDirectory();

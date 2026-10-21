@@ -36,6 +36,40 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task SetRecordsLastUpdatedMetadata()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var model = CreateModel(
+            store: new FakeSecretStore(),
+            dialog: new FakeDialogService("value"),
+            profileSettings: settings);
+
+        var result = await ExecuteAsync(model, "secret set apiToken");
+
+        Assert.True(result.Succeeded);
+        Assert.True(DateTimeOffset.TryParse(
+            settings.GetObjectMetadata(MetadataObjectType.Secret, "apiToken").Values["lastUpdated"],
+            out _));
+    }
+
+    [Fact]
+    public async Task CancelledSetDoesNotRecordLastUpdatedMetadata()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var model = CreateModel(
+            store: new FakeSecretStore(),
+            dialog: new FakeDialogService(null),
+            profileSettings: settings);
+
+        var result = await ExecuteAsync(model, "secret set apiToken");
+
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("lastUpdated", settings.GetObjectMetadata(MetadataObjectType.Secret, "apiToken").Values.Keys);
+    }
+
+    [Fact]
     public async Task RenameMovesSecretMetadataAndRemoveDeletesIt()
     {
         using var directory = new TemporaryDirectory();
@@ -72,6 +106,28 @@ public class SecretCommandModelTests
         Assert.True(result.Succeeded);
         Assert.Equal(secretValue, dialog.DisplayedSecret);
         Assert.DoesNotContain(secretValue, result.Message);
+    }
+
+    [Fact]
+    public async Task ShowRecordsLastAccessedMetadata()
+    {
+        using var directory = new TemporaryDirectory();
+        var settings = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var trackedStore = new SecretActivityTrackingStore(new FakeSecretStore(("token", "sensitive")), settings);
+        var model = new SecretCommandModel(
+            trackedStore,
+            new FakeSecretAccessGate(),
+            new FakeDialogService("unused"),
+            new FakeClipboardService(),
+            new FakeTerminalLauncher(),
+            profileSettingsStore: settings);
+
+        var result = await ExecuteAsync(model, "secret show token");
+
+        Assert.True(result.Succeeded);
+        Assert.True(DateTimeOffset.TryParse(
+            settings.GetObjectMetadata(MetadataObjectType.Secret, "token").Values["lastAccessed"],
+            out _));
     }
 
     [Fact]
