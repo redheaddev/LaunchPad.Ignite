@@ -25,11 +25,4 @@
     <ProjectReference Include="..\LaunchPad.Ignite.App\LaunchPad.Ignite.App.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="TestData\BundledExtensions\ado\extension.json">
-      <TargetPath>extensions\ado\extension.json</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
 </Project>

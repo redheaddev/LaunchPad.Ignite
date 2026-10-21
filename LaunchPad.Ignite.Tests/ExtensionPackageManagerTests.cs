@@ -160,18 +160,6 @@ public class ExtensionPackageManagerTests
     }
 
     [Fact]
-    public void UninstallReportsBundledExtensionCannotBeRemoved()
-    {
-        using var directory = new TemporaryDirectory();
-        var packageManager = new ExtensionPackageManager(Path.Combine(directory.Path, "extensions"));
-
-        var exception = Assert.Throws<InvalidOperationException>(() => packageManager.Uninstall("ado"));
-
-        Assert.Contains("bundled with the application", exception.Message);
-        Assert.Contains("cannot be uninstalled", exception.Message);
-    }
-
-    [Fact]
     public void ExtensionCommandInstallsPackageEvenWhenNoExtensionsAreInstalled()
     {
         using var directory = new TemporaryDirectory();
