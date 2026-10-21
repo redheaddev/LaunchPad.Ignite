@@ -23,10 +23,13 @@
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
     <ProjectReference Include="..\LaunchPad.Ignite.App\LaunchPad.Ignite.App.csproj" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Weather\LaunchPad.Ignite.Extensions.Weather.csproj" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Ado\LaunchPad.Ignite.Extensions.Ado.csproj" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.Media\LaunchPad.Ignite.Extensions.Media.csproj" />
-    <ProjectReference Include="..\LaunchPad.Ignite.Extensions.VsCode\LaunchPad.Ignite.Extensions.VsCode.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="TestData\BundledExtensions\ado\extension.json">
+      <TargetPath>extensions\ado\extension.json</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

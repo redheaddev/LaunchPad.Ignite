@@ -234,11 +234,12 @@ public sealed class ExtensionCommandModel : ICommandModel
                 sourcePath,
                 _existingCommandNames?.Invoke(id) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 replaceExisting,
-                overwriteExistingCommands);
+                overwriteExistingCommands,
+                replacePackContents: replaceExisting);
             _stateChanged?.Invoke();
             var skippedMessage = importResult.SkippedCommands.Count == 0
                 ? string.Empty
-                : $" Skipped existing command(s): {string.Join(", ", importResult.SkippedCommands)}.";
+                : $" Skipped duplicate command(s): {string.Join(", ", importResult.SkippedCommands)}.";
             var overwrittenMessage = overwriteExistingCommands && replaceExisting
                 ? " Existing commands in this pack were overwritten."
                 : string.Empty;

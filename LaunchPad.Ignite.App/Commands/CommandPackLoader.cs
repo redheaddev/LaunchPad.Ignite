@@ -304,7 +304,8 @@ public sealed class CommandPackLoader
         string sourcePath,
         IEnumerable<string> existingCommandNames,
         bool replaceExisting,
-        bool overwriteExistingCommands = false)
+        bool overwriteExistingCommands = false,
+        bool replacePackContents = false)
     {
         ValidateManifestFile(sourcePath);
         var manifest = ReadManifest(sourcePath, requireMatchingFileId: false);
@@ -313,9 +314,11 @@ public sealed class CommandPackLoader
         var installedManifest = File.Exists(installedPath)
             ? ReadManifest(installedPath, requireMatchingFileId: true)
             : null;
-        var keptCommands = installedManifest?.Schema.Commands
+        var keptCommands = !replacePackContents
+            ? installedManifest?.Schema.Commands
             .Select(command => command with { Namespace = command.Namespace ?? installedManifest.Namespace })
-            .ToList() ?? [];
+            .ToList() ?? []
+            : [];
         var keptNames = keptCommands
             .Select(command => (command with { Namespace = command.Namespace ?? installedManifest?.Namespace }).NormalizeLegacyHandler().QualifiedName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);

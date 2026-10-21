@@ -263,6 +263,54 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task ClipboardExpiryCanBeExtendedAndClearsCopiedTextAtExtendedDeadline()
+    {
+        var clipboard = new FakeClipboardAccess();
+        var service = new AvaloniaClipboardService(() => clipboard);
+
+        await service.CopyWithExpiryAsync("secret value", TimeSpan.FromMilliseconds(100));
+
+        var originalExpiration = service.ExpirationTime;
+        Assert.True(service.ExtendExpiry(TimeSpan.FromMilliseconds(300)));
+        Assert.Equal(originalExpiration!.Value.AddMilliseconds(300), service.ExpirationTime);
+        Assert.Equal(TimeSpan.FromMilliseconds(400), service.ExpirationDuration);
+
+        await Task.Delay(150);
+        Assert.Equal("secret value", clipboard.Value);
+
+        await WaitUntilAsync(() => clipboard.Value is null);
+
+        Assert.Null(service.ExpirationTime);
+        Assert.Equal(TimeSpan.Zero, service.ExpirationDuration);
+    }
+
+    [Fact]
+    public async Task ClipboardExpiryDoesNotClearTextThatHasChanged()
+    {
+        var clipboard = new FakeClipboardAccess();
+        var service = new AvaloniaClipboardService(() => clipboard);
+
+        await service.CopyWithExpiryAsync("secret value", TimeSpan.FromMilliseconds(50));
+        clipboard.Value = "different value";
+        await WaitUntilAsync(() => service.ExpirationTime is null);
+
+        Assert.Equal("different value", clipboard.Value);
+    }
+
+    [Fact]
+    public async Task ClipboardExpiryCannotBeExtendedAfterItExpires()
+    {
+        var clipboard = new FakeClipboardAccess();
+        var service = new AvaloniaClipboardService(() => clipboard);
+
+        await service.CopyWithExpiryAsync("secret value", TimeSpan.FromMilliseconds(50));
+        await Task.Delay(100);
+
+        Assert.False(service.ExtendExpiry(TimeSpan.FromSeconds(30)));
+        await WaitUntilAsync(() => clipboard.Value is null);
+    }
+
+    [Fact]
     public async Task SecretManagementActionsRemainAvailableWhileLocked()
     {
         var store = new FakeSecretStore(("oldName", "old-value"));
@@ -709,6 +757,10 @@ public class SecretCommandModelTests
 
     private sealed class FakeClipboardService : IClipboardService
     {
+        public DateTimeOffset? ExpirationTime { get; private set; }
+
+        public TimeSpan ExpirationDuration { get; private set; }
+
         public string? Value { get; private set; }
 
         public TimeSpan Expiry { get; private set; }
@@ -717,8 +769,44 @@ public class SecretCommandModelTests
         {
             Value = value;
             Expiry = expiry;
+            ExpirationDuration = expiry;
             return Task.CompletedTask;
         }
+
+        public bool ExtendExpiry(TimeSpan extension)
+        {
+            return false;
+        }
+    }
+
+    private sealed class FakeClipboardAccess : IClipboardAccess
+    {
+        public string? Value { get; set; }
+
+        public Task SetTextAsync(string text)
+        {
+            Value = text;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetTextAsync() => Task.FromResult(Value);
+
+        public Task ClearAsync()
+        {
+            Value = null;
+            return Task.CompletedTask;
+        }
+
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 100 && !condition(); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition());
     }
 
     private sealed class FakeTerminalLauncher : ISecretTerminalLauncher

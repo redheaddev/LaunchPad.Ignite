@@ -70,6 +70,12 @@
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
+        <Style Selector="Button.clipboard-expiry-action">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
         <Style Selector="Border.completion-item">
             <Setter Property="Background" Value="Transparent" />
         </Style>
@@ -221,16 +227,37 @@
                                      SelectionForegroundBrush="{DynamicResource ThemeTextSelectionForeground}"
                                      PointerPressed="ResultTextBox_PointerPressed" />
                         </Grid>
+                        <Button Classes="clipboard-expiry-action" IsVisible="{Binding IsClipboardExpiryActive}"
+                                ToolTip.Tip="{Binding ClipboardExpiryTooltip}" Click="ClipboardExpiryButton_Click">
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="{Binding ClipboardExpiryStatus}"
+                                           Foreground="{DynamicResource ThemeAccent}" FontSize="12" />
+                                <ProgressBar Height="6" Minimum="0" Maximum="100"
+                                             Value="{Binding ClipboardExpiryProgress}"
+                                             Foreground="{DynamicResource ThemeAccent}" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
                 </Grid>
             </Grid>
 
-            <TextBlock Grid.Row="2" Text="{Binding MiniUsageStatusText}"
-                       IsVisible="{Binding IsMiniMode}" Margin="4,4,4,0"
-                       Foreground="{DynamicResource ThemeSecondaryText}"
-                       FontFamily="Cascadia Mono, Consolas" FontSize="12"
-                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                       VerticalAlignment="Center" />
+            <StackPanel Grid.Row="2" IsVisible="{Binding IsMiniMode}" Spacing="3">
+                <TextBlock Text="{Binding MiniUsageStatusText}" Margin="4,4,4,0"
+                           Foreground="{DynamicResource ThemeSecondaryText}"
+                           FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" />
+                <Button Classes="clipboard-expiry-action" IsVisible="{Binding IsClipboardExpiryActive}"
+                        ToolTip.Tip="{Binding ClipboardExpiryTooltip}" Click="ClipboardExpiryButton_Click">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding ClipboardExpiryStatus}"
+                                   Foreground="{DynamicResource ThemeAccent}" FontSize="11" />
+                        <ProgressBar Height="4" Minimum="0" Maximum="100"
+                                     Value="{Binding ClipboardExpiryProgress}"
+                                     Foreground="{DynamicResource ThemeAccent}" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
 
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0"
                         IsVisible="{Binding IsMainMode}">

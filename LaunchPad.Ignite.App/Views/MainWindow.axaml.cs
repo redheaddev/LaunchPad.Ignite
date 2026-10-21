@@ -74,7 +74,7 @@ public partial class MainWindow : Window
     private const double MainDefaultWidth = 760;
     private const double MainDefaultHeight = 360;
     private const double MiniDefaultWidth = 640;
-    private const double MiniDefaultHeight = 80;
+    private const double MiniDefaultHeight = 104;
 
     public MainWindow(bool startMinimized = false)
     {
@@ -1027,6 +1027,14 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel viewModel)
         {
             await viewModel.ToggleSecretAccessAsync();
+        }
+    }
+
+    private void ClipboardExpiryButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.ExtendClipboardExpiry();
         }
     }
 

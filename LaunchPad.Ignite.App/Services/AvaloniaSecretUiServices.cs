@@ -49,15 +49,65 @@ public sealed class AvaloniaSecretEntryDialogService : ISecretEntryDialogService
 
 public sealed class AvaloniaClipboardService : IClipboardService
 {
-    private readonly Func<IClipboard?> _getClipboard;
+    private readonly Func<IClipboardAccess?> _getClipboard;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
+    private readonly object _expirationStateLock = new();
     private CancellationTokenSource? _expirationCancellation;
+    private DateTimeOffset? _expirationTime;
+    private TimeSpan _expirationDuration;
 
     public AvaloniaClipboardService(Func<IClipboard?> getClipboard, TimeProvider? timeProvider = null)
+        : this(() => getClipboard() is { } clipboard ? new AvaloniaClipboardAccess(clipboard) : null, timeProvider)
+    {
+    }
+
+    public AvaloniaClipboardService(Func<IClipboardAccess?> getClipboard, TimeProvider? timeProvider = null)
     {
         _getClipboard = getClipboard;
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public TimeSpan ExpirationDuration
+    {
+        get
+        {
+            lock (_expirationStateLock)
+            {
+                return _expirationDuration;
+            }
+        }
+    }
+
+    public DateTimeOffset? ExpirationTime
+    {
+        get
+        {
+            lock (_expirationStateLock)
+            {
+                return _expirationTime;
+            }
+        }
+    }
+
+    public bool ExtendExpiry(TimeSpan extension)
+    {
+        if (extension <= TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        lock (_expirationStateLock)
+        {
+            if (_expirationTime is not { } expirationTime || expirationTime <= _timeProvider.GetUtcNow())
+            {
+                return false;
+            }
+
+            _expirationTime = expirationTime + extension;
+            _expirationDuration += extension;
+            return true;
+        }
     }
 
     public async Task CopyWithExpiryAsync(string value, TimeSpan expiry)
@@ -70,8 +120,14 @@ public sealed class AvaloniaClipboardService : IClipboardService
             _expirationCancellation?.Cancel();
             await clipboard.SetTextAsync(value);
             var cancellation = new CancellationTokenSource();
-            _expirationCancellation = cancellation;
-            _ = ExpireAsync(clipboard, value, expiry, cancellation);
+            lock (_expirationStateLock)
+            {
+                _expirationCancellation = cancellation;
+                _expirationTime = _timeProvider.GetUtcNow() + expiry;
+                _expirationDuration = expiry;
+            }
+
+            _ = ExpireAsync(clipboard, value, cancellation);
         }
         finally
         {
@@ -80,43 +136,58 @@ public sealed class AvaloniaClipboardService : IClipboardService
     }
 
     private async Task ExpireAsync(
-        IClipboard clipboard,
+        IClipboardAccess clipboard,
         string copiedValue,
-        TimeSpan expiry,
         CancellationTokenSource cancellation)
     {
         try
         {
-            await Task.Delay(expiry, _timeProvider, cancellation.Token);
-            await _operationLock.WaitAsync(cancellation.Token);
-            try
+            while (true)
             {
-                var transfer = await clipboard.TryGetDataAsync();
-                string? currentText;
-                if (transfer is null)
+                DateTimeOffset expirationTime;
+                lock (_expirationStateLock)
                 {
-                    currentText = null;
-                }
-                else
-                {
-                    try
-                    {
-                        currentText = await transfer.TryGetTextAsync();
-                    }
-                    finally
-                    {
-                        transfer.Dispose();
-                    }
+                    expirationTime = _expirationTime ?? _timeProvider.GetUtcNow();
                 }
 
-                if (string.Equals(currentText, copiedValue, StringComparison.Ordinal))
+                var remaining = expirationTime - _timeProvider.GetUtcNow();
+                if (remaining > TimeSpan.Zero)
                 {
-                    await clipboard.ClearAsync();
+                    await Task.Delay(remaining, _timeProvider, cancellation.Token);
                 }
-            }
-            finally
-            {
-                _operationLock.Release();
+
+                await _operationLock.WaitAsync(cancellation.Token);
+                try
+                {
+                    lock (_expirationStateLock)
+                    {
+                        if (_expirationTime is { } updatedExpirationTime
+                            && updatedExpirationTime > _timeProvider.GetUtcNow())
+                        {
+                            continue;
+                        }
+
+                        if (ReferenceEquals(_expirationCancellation, cancellation))
+                        {
+                            _expirationTime = null;
+                            _expirationDuration = TimeSpan.Zero;
+                            _expirationCancellation = null;
+                        }
+                    }
+
+                    var currentText = await clipboard.GetTextAsync();
+
+                    if (string.Equals(currentText, copiedValue, StringComparison.Ordinal))
+                    {
+                        await clipboard.ClearAsync();
+                    }
+
+                    return;
+                }
+                finally
+                {
+                    _operationLock.Release();
+                }
             }
         }
         catch (OperationCanceledException)
@@ -131,4 +202,29 @@ public sealed class AvaloniaClipboardService : IClipboardService
             cancellation.Dispose();
         }
     }
+}
+
+public interface IClipboardAccess
+{
+    Task SetTextAsync(string value);
+
+    Task<string?> GetTextAsync();
+
+    Task ClearAsync();
+}
+
+internal sealed class AvaloniaClipboardAccess : IClipboardAccess
+{
+    private readonly IClipboard _clipboard;
+
+    public AvaloniaClipboardAccess(IClipboard clipboard)
+    {
+        _clipboard = clipboard;
+    }
+
+    public Task SetTextAsync(string value) => _clipboard.SetTextAsync(value);
+
+    public Task<string?> GetTextAsync() => _clipboard.TryGetTextAsync();
+
+    public Task ClearAsync() => _clipboard.ClearAsync();
 }

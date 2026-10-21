@@ -59,6 +59,7 @@ public partial class MainViewModel : ViewModelBase
     private SecretCommandModel _secretCommandModel = null!;
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
+    private AvaloniaClipboardService? _clipboardService;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
     private readonly HistorySuggestionCycler _historySuggestionCycler = new();
@@ -145,7 +146,11 @@ public partial class MainViewModel : ViewModelBase
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
         InitializeCommandRuntime();
         _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _secretAccessStateTimer.Tick += (_, _) => RefreshSecretAccessState();
+        _secretAccessStateTimer.Tick += (_, _) =>
+        {
+            RefreshSecretAccessState();
+            RefreshClipboardExpiry();
+        };
         _secretAccessStateTimer.Start();
         RefreshSecretAccessState();
     }
@@ -209,11 +214,12 @@ public partial class MainViewModel : ViewModelBase
             var result = await _secretCommandModel.ResolveExtensionSecretsAsync(extensionId, names);
             return result;
         };
+        _clipboardService = new AvaloniaClipboardService(GetSystemClipboard);
         _secretCommandModel = new SecretCommandModel(
             _secretStore,
             _secretAccessGate,
             new AvaloniaSecretEntryDialogService(),
-            new AvaloniaClipboardService(GetSystemClipboard),
+            _clipboardService,
             _terminalLauncher,
             extensionSecretAccessPolicy,
             _profileSettingsStore);
@@ -669,6 +675,22 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
     private string _statusMessage = "Start typing to see commands";
+
+    public double ClipboardExpiryProgress { get; private set; }
+
+    public bool IsClipboardExpiryActive { get; private set; }
+
+    public string ClipboardExpiryTooltip { get; private set; } = string.Empty;
+
+    public string ClipboardExpiryStatus { get; private set; } = string.Empty;
+
+    public void ExtendClipboardExpiry()
+    {
+        if (_clipboardService?.ExtendExpiry(TimeSpan.FromSeconds(30)) == true)
+        {
+            RefreshClipboardExpiry();
+        }
+    }
 
     private bool _isValueOutput;
 
@@ -2736,6 +2758,51 @@ public sealed record CompletionOptionViewModel(
     {
         IsValueOutput = isValueOutput;
         StatusMessage = message;
+        RefreshClipboardExpiry();
+    }
+
+    private void RefreshClipboardExpiry()
+    {
+        var expirationTime = _clipboardService?.ExpirationTime;
+        var duration = _clipboardService?.ExpirationDuration ?? TimeSpan.Zero;
+        var remaining = expirationTime is { } expiration
+            ? expiration - DateTimeOffset.UtcNow
+            : TimeSpan.Zero;
+        var isActive = remaining > TimeSpan.Zero && duration > TimeSpan.Zero;
+        var progress = isActive
+            ? Math.Clamp(remaining.TotalMilliseconds / duration.TotalMilliseconds * 100, 0, 100)
+            : 0;
+        var remainingSeconds = (int)Math.Ceiling(remaining.TotalSeconds);
+        var tooltip = isActive
+            ? $"Clipboard clears in {remainingSeconds} seconds. Click to add 30 seconds."
+            : "No copied secret is awaiting expiration.";
+
+        if (IsClipboardExpiryActive != isActive)
+        {
+            IsClipboardExpiryActive = isActive;
+            OnPropertyChanged(nameof(IsClipboardExpiryActive));
+        }
+
+        if (Math.Abs(ClipboardExpiryProgress - progress) >= 0.1)
+        {
+            ClipboardExpiryProgress = progress;
+            OnPropertyChanged(nameof(ClipboardExpiryProgress));
+        }
+
+        if (!string.Equals(ClipboardExpiryTooltip, tooltip, StringComparison.Ordinal))
+        {
+            ClipboardExpiryTooltip = tooltip;
+            OnPropertyChanged(nameof(ClipboardExpiryTooltip));
+        }
+
+        var status = isActive
+            ? $"Secret clears in {remainingSeconds}s — click to add 30s"
+            : string.Empty;
+        if (!string.Equals(ClipboardExpiryStatus, status, StringComparison.Ordinal))
+        {
+            ClipboardExpiryStatus = status;
+            OnPropertyChanged(nameof(ClipboardExpiryStatus));
+        }
     }
 
     private static void ShutdownApplication()
