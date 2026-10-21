@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     private int? _pendingCaretIndex;
     private LauncherWindowMode? _appliedWindowMode;
     private bool _windowStateInitialized;
+    private PixelPoint? _miniPositionBeforeClipboardExpiry;
     private IPointer? _resizePointer;
     private Point _resizeStartPoint;
     private double _resizeStartWidth;
@@ -74,7 +75,8 @@ public partial class MainWindow : Window
     private const double MainDefaultWidth = 760;
     private const double MainDefaultHeight = 360;
     private const double MiniDefaultWidth = 640;
-    private const double MiniDefaultHeight = 104;
+    private const double MiniDefaultHeight = 80;
+    private const double MiniClipboardExpiryHeight = 104;
 
     public MainWindow(bool startMinimized = false)
     {
@@ -122,6 +124,12 @@ public partial class MainWindow : Window
                         && DataContext is MainViewModel currentViewModel)
                     {
                         ApplyWindowMode(currentViewModel);
+                    }
+
+                    if (args.PropertyName == nameof(MainViewModel.IsClipboardExpiryActive)
+                        && DataContext is MainViewModel expiryViewModel)
+                    {
+                        ApplyClipboardExpiryHeight(expiryViewModel);
                     }
 
                     if (args.PropertyName is nameof(MainViewModel.UsageText) or nameof(MainViewModel.UsageCommandText))
@@ -473,6 +481,7 @@ public partial class MainWindow : Window
     private void ApplyWindowMode(MainViewModel viewModel)
     {
         var mode = viewModel.CurrentWindowMode;
+        var hasPreviousMode = _appliedWindowMode.HasValue;
         if (_appliedWindowMode is { } previousMode && previousMode != mode)
         {
             _windowStateSaveTimer.Stop();
@@ -485,9 +494,11 @@ public partial class MainWindow : Window
 
         var defaultWidth = mode == LauncherWindowMode.Mini ? MiniDefaultWidth : MainDefaultWidth;
         var defaultHeight = mode == LauncherWindowMode.Mini ? MiniDefaultHeight : MainDefaultHeight;
+        var width = defaultWidth;
         if (viewModel.TryGetWindowSize(mode, out var size))
         {
-            Width = Math.Max(MinWidth, size.Width);
+            width = Math.Max(MinWidth, size.Width);
+            Width = width;
             Height = mode == LauncherWindowMode.Mini
                 ? defaultHeight
                 : Math.Max(MinHeight, size.Height);
@@ -498,9 +509,47 @@ public partial class MainWindow : Window
             Height = defaultHeight;
         }
 
+        if (mode == LauncherWindowMode.Mini)
+        {
+            viewModel.SaveWindowSize(mode, new LauncherWindowSize((int)Math.Round(width), (int)defaultHeight));
+        }
+
         if (IsLoaded && viewModel.TryGetWindowPosition(mode, out var position))
         {
             Position = ClampToVisibleScreen(new PixelPoint(position.X, position.Y));
+        }
+
+        if (hasPreviousMode)
+        {
+            ApplyClipboardExpiryHeight(viewModel);
+        }
+    }
+
+    private void ApplyClipboardExpiryHeight(MainViewModel viewModel)
+    {
+        if (viewModel.CurrentWindowMode != LauncherWindowMode.Mini)
+        {
+            return;
+        }
+
+        if (viewModel.IsClipboardExpiryActive)
+        {
+            _miniPositionBeforeClipboardExpiry ??= Position;
+            Height = MiniClipboardExpiryHeight;
+            Position = _miniPositionBeforeClipboardExpiry.Value;
+            return;
+        }
+
+        if (_miniPositionBeforeClipboardExpiry is { } originalPosition)
+        {
+            Height = MiniDefaultHeight;
+            Position = originalPosition;
+            _miniPositionBeforeClipboardExpiry = null;
+            _windowStateSaveTimer.Stop();
+        }
+        else
+        {
+            Height = MiniDefaultHeight;
         }
     }
 
@@ -561,7 +610,10 @@ public partial class MainWindow : Window
 
     private void SaveWindowState(MainViewModel viewModel, LauncherWindowMode mode)
     {
-        viewModel.SaveWindowPosition(mode, new LauncherWindowPosition(Position.X, Position.Y));
+        var position = mode == LauncherWindowMode.Mini && _miniPositionBeforeClipboardExpiry is { } originalPosition
+            ? originalPosition
+            : Position;
+        viewModel.SaveWindowPosition(mode, new LauncherWindowPosition(position.X, position.Y));
         var width = (int)Math.Round(Width);
         var height = mode == LauncherWindowMode.Mini
             ? (int)MiniDefaultHeight
@@ -1068,6 +1120,13 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel viewModel)
         {
             RestoreWindowState(viewModel);
+            if (viewModel.CurrentWindowMode == LauncherWindowMode.Mini)
+            {
+                Height = MiniDefaultHeight;
+                viewModel.SaveWindowSize(
+                    LauncherWindowMode.Mini,
+                    new LauncherWindowSize((int)Math.Round(Width), (int)MiniDefaultHeight));
+            }
         }
 
         if (_startMinimized)
