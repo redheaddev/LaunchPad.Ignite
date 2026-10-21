@@ -30,9 +30,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="CommandPacks\bricot.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <Content Include="Defaults\app-settings.json" />
     <Content Include="Defaults\user-commands.json" />
     <Content Include="Defaults\app-settings.json">
