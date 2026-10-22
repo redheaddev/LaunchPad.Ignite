@@ -70,6 +70,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            var shouldShutdown = false;
             try
             {
                 await using var server = new NamedPipeServerStream(
@@ -84,8 +85,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
                 if (bytesRead == 1 && request[0] == 1)
                 {
                     await server.WriteAsync(new byte[] { 1 }, cancellationToken).ConfigureAwait(false);
-                    shutdownRequested();
-                    return;
+                    shouldShutdown = true;
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -94,6 +94,12 @@ internal sealed class SingleInstanceCoordinator : IDisposable
             }
             catch (IOException) when (!cancellationToken.IsCancellationRequested)
             {
+            }
+
+            if (shouldShutdown)
+            {
+                shutdownRequested();
+                return;
             }
         }
     }

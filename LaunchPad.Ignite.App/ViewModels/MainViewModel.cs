@@ -1699,11 +1699,13 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateCommandMetadataFilterValueSuggestions(CommandMetadataFilterInput filterInput)
     {
+        _commandMetadataFilterValueSuggestions = CommandMetadataFilterSuggestionResolver.Resolve(
+            _catalog.Schema,
+            _commandPackSources,
+            _commandSources,
+            filterInput);
         if (filterInput.IsEditingFieldName)
         {
-            _commandMetadataFilterValueSuggestions = new[] { "kind", "pack", "extension" }
-                .Where(field => field.StartsWith(filterInput.FieldPrefix, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
             _highlightedCompletionIndex = _commandMetadataFilterValueSuggestions.Count == 0
                 ? -1
                 : Math.Clamp(_highlightedCompletionIndex, 0, _commandMetadataFilterValueSuggestions.Count - 1);
@@ -1722,37 +1724,6 @@ public partial class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(UsageCommandText));
             return;
         }
-
-        var filteredCommands = _catalog.Commands
-            .Select(command =>
-            {
-                var packId = _commandPackSources.TryGetValue(command.QualifiedName, out var sourcePackId)
-                    ? sourcePackId
-                    : null;
-                var extensionId = _commandSources.TryGetValue(command.QualifiedName, out var sourceExtensionId)
-                    ? sourceExtensionId
-                    : null;
-                return (Command: command, PackId: packId, ExtensionId: extensionId);
-            })
-            .Where(candidate => filterInput.CompletedFilter?.Matches(candidate.Command, candidate.PackId, candidate.ExtensionId) != false)
-            .ToArray();
-
-        IEnumerable<string> values = filterInput.EditingField switch
-        {
-            "pack" => filteredCommands
-                .Where(candidate => candidate.PackId is not null)
-                .Select(candidate => candidate.PackId!),
-            "kind" => filteredCommands.Select(candidate => candidate.Command.Kind),
-            "extension" => filteredCommands
-                .Where(candidate => candidate.ExtensionId is not null)
-                .Select(candidate => candidate.ExtensionId!),
-            _ => Array.Empty<string>()
-        };
-
-        _commandMetadataFilterValueSuggestions = values
-            .Where(value => value.StartsWith(filterInput.ValuePrefix, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
         _highlightedCompletionIndex = _commandMetadataFilterValueSuggestions.Count == 0
             ? -1
             : Math.Clamp(_highlightedCompletionIndex, 0, _commandMetadataFilterValueSuggestions.Count - 1);

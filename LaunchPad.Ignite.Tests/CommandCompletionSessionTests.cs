@@ -222,26 +222,26 @@ public class CommandCompletionSessionTests
     }
 
     [Fact]
-    public void PackFilterSuggestionsAppearAtColonAndTabOrSpaceAcceptsTheSelectedPack()
+    public void KindFilterSuggestionsAppearAtColonAndTabOrSpaceAcceptsTheSelectedKind()
     {
         var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
-        viewModel.CommandInputText = ">pack:";
+        viewModel.CommandInputText = ">kind:";
 
         Assert.NotEmpty(viewModel.CompletionItems);
         Assert.Single(viewModel.CompletionItems.Where(item => item.IsHighlighted));
-        var packId = viewModel.CompletionItems.Single(item => item.IsHighlighted).DisplayText;
+        var kind = viewModel.CompletionItems.Single(item => item.IsHighlighted).DisplayText;
 
-        viewModel.CommandInputText = $">pack:{packId}";
+        viewModel.CommandInputText = $">kind:{kind}";
         viewModel.HandleInputKeyAsync(CommandInputKey.Tab).GetAwaiter().GetResult();
 
-        Assert.Equal($">pack:{packId} ", viewModel.CommandInputText);
+        Assert.Equal($">kind:{kind} ", viewModel.CommandInputText);
         Assert.Equal(string.Empty, viewModel.CommandText);
         Assert.NotEmpty(viewModel.CompletionGhostText);
 
-        viewModel.CommandInputText = $">pack:{packId}";
+        viewModel.CommandInputText = $">kind:{kind}";
         viewModel.HandleInputKeyAsync(CommandInputKey.Space).GetAwaiter().GetResult();
 
-        Assert.Equal($">pack:{packId} ", viewModel.CommandInputText);
+        Assert.Equal($">kind:{kind} ", viewModel.CommandInputText);
         Assert.Equal(string.Empty, viewModel.CommandText);
         Assert.NotEmpty(viewModel.CompletionGhostText);
     }
@@ -263,7 +263,7 @@ public class CommandCompletionSessionTests
         viewModel.HandleInputKeyAsync(CommandInputKey.Right).GetAwaiter().GetResult();
         Assert.Equal(">pack:", viewModel.CommandInputText);
 
-        viewModel.CommandInputText = ">extension:";
+        viewModel.CommandInputText = ">kind:";
         Assert.NotEmpty(viewModel.CompletionItems);
     }
 
@@ -285,12 +285,12 @@ public class CommandCompletionSessionTests
     public void RightAcceptsMetadataFilterValueGhostText()
     {
         var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
-        viewModel.CommandInputText = ">kind:ur";
+        viewModel.CommandInputText = ">kind:sy";
 
-        Assert.Equal("l", viewModel.CompletionGhostText);
+        Assert.Equal("stem", viewModel.CompletionGhostText);
         viewModel.HandleInputKeyAsync(CommandInputKey.Right).GetAwaiter().GetResult();
 
-        Assert.Equal(">kind:url ", viewModel.CommandInputText);
+        Assert.Equal(">kind:system ", viewModel.CommandInputText);
         Assert.Equal(string.Empty, viewModel.CommandText);
         Assert.NotEmpty(viewModel.CompletionGhostText);
     }

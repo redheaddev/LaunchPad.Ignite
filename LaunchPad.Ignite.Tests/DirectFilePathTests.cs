@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.DirectFiles.Linux;
 using LaunchPad.Ignite.App.Services.Platform.DirectFiles.Windows;
 using LaunchPad.Ignite.App.Services.Platform.Terminals;
 using LaunchPad.Ignite.Core.Completion;
@@ -241,6 +242,7 @@ public class DirectFilePathTests
         var starter = new RecordingProcessStarter();
         var handler = new DirectFilePathHandler(
             starter,
+            new WindowsDirectFilePathPlatform(),
             fileExists: path => path == @"C:\work\file.txt",
             directoryExists: _ => false);
 
@@ -258,6 +260,7 @@ public class DirectFilePathTests
         var expectedPath = @"\\server\shared folder\file.txt";
         var handler = new DirectFilePathHandler(
             starter,
+            new WindowsDirectFilePathPlatform(),
             fileExists: path => path == expectedPath,
             directoryExists: _ => false);
 
@@ -274,6 +277,7 @@ public class DirectFilePathTests
         var starter = new RecordingProcessStarter();
         var handler = new DirectFilePathHandler(
             starter,
+            new WindowsDirectFilePathPlatform(),
             fileExists: _ => false,
             directoryExists: _ => false);
 
@@ -289,17 +293,22 @@ public class DirectFilePathTests
     public void TryOpenInTerminalOpensContainingFolderForFile()
     {
         var terminal = new RecordingTerminalLauncher();
+        var path = Path.DirectorySeparatorChar == '\\' ? @"C:\work\file.txt" : "/work/file.txt";
+        var expectedDirectory = Path.DirectorySeparatorChar == '\\' ? @"C:\work" : "/work";
         var handler = new DirectFilePathHandler(
             new RecordingProcessStarter(),
-            fileExists: path => path == @"C:\work\file.txt",
+            Path.DirectorySeparatorChar == '\\'
+                ? new WindowsDirectFilePathPlatform()
+                : new LinuxDirectFilePathPlatform(),
+            fileExists: candidate => candidate == path,
             directoryExists: _ => false,
             terminalLauncher: terminal);
 
-        var handled = handler.TryOpenInTerminal(@"C:\work\file.txt", out var result);
+        var handled = handler.TryOpenInTerminal(path, out var result);
 
         Assert.True(handled);
         Assert.True(result.Succeeded);
-        Assert.Equal(@"C:\work", terminal.WorkingDirectory);
+        Assert.Equal(expectedDirectory, terminal.WorkingDirectory);
         Assert.Equal("Opened folder in terminal.", result.Message);
     }
 
@@ -307,30 +316,38 @@ public class DirectFilePathTests
     public void TryOpenInTerminalOpensDirectoryPath()
     {
         var terminal = new RecordingTerminalLauncher();
+        var path = Path.DirectorySeparatorChar == '\\' ? @"C:\work" : "/work";
         var handler = new DirectFilePathHandler(
             new RecordingProcessStarter(),
+            Path.DirectorySeparatorChar == '\\'
+                ? new WindowsDirectFilePathPlatform()
+                : new LinuxDirectFilePathPlatform(),
             fileExists: _ => false,
-            directoryExists: path => path == @"C:\work",
+            directoryExists: candidate => candidate == path,
             terminalLauncher: terminal);
 
-        var handled = handler.TryOpenInTerminal(@"C:\work", out var result);
+        var handled = handler.TryOpenInTerminal(path, out var result);
 
         Assert.True(handled);
         Assert.True(result.Succeeded);
-        Assert.Equal(@"C:\work", terminal.WorkingDirectory);
+        Assert.Equal(path, terminal.WorkingDirectory);
     }
 
     [Fact]
     public void TryOpenInTerminalReportsMissingPath()
     {
         var terminal = new RecordingTerminalLauncher();
+        var path = Path.DirectorySeparatorChar == '\\' ? @"C:\missing" : "/missing";
         var handler = new DirectFilePathHandler(
             new RecordingProcessStarter(),
+            Path.DirectorySeparatorChar == '\\'
+                ? new WindowsDirectFilePathPlatform()
+                : new LinuxDirectFilePathPlatform(),
             fileExists: _ => false,
             directoryExists: _ => false,
             terminalLauncher: terminal);
 
-        var handled = handler.TryOpenInTerminal(@"C:\missing", out var result);
+        var handled = handler.TryOpenInTerminal(path, out var result);
 
         Assert.True(handled);
         Assert.False(result.Succeeded);
@@ -413,7 +430,9 @@ public class DirectFilePathTests
     }
 
     private static CommandArgumentPathCompletion CreateArgumentPathCompletion()
-        => new(new DirectFilePathHandler(new RecordingProcessStarter()));
+        => new(new DirectFilePathHandler(
+            new RecordingProcessStarter(),
+            new WindowsDirectFilePathPlatform()));
 
     private static CommandCatalog CreatePathCommandCatalog()
     {

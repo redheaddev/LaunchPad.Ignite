@@ -131,6 +131,46 @@ public sealed class CommandMetadataFilterTests
         Assert.Equal(["np11:artifacts"], state.Items.Select(item => item.Value));
     }
 
+    [Theory]
+    [InlineData(">kind:ur", "url")]
+    [InlineData(">kind:", "url")]
+    public void SuggestsKindsFromProvidedSchema(string inputText, string expected)
+    {
+        var schema = new CommandSchema([], [CreateCommand("pipeline", "url", "np11")]);
+        var input = CommandMetadataFilter.ParseInput(inputText);
+
+        var suggestions = CommandMetadataFilterSuggestionResolver.Resolve(
+            schema,
+            new Dictionary<string, string>(),
+            new Dictionary<string, string>(),
+            input);
+
+        Assert.Contains(expected, suggestions);
+    }
+
+    [Fact]
+    public void SuggestsPackAndExtensionIdsFromProvidedOriginMaps()
+    {
+        var command = CreateCommand("pipeline", "url", "np11");
+        var schema = new CommandSchema([], [command]);
+        var packSources = new Dictionary<string, string> { [command.QualifiedName] = "np11" };
+        var extensionSources = new Dictionary<string, string> { [command.QualifiedName] = "ado" };
+
+        var packSuggestions = CommandMetadataFilterSuggestionResolver.Resolve(
+            schema,
+            packSources,
+            new Dictionary<string, string>(),
+            CommandMetadataFilter.ParseInput(">pack:"));
+        var extensionSuggestions = CommandMetadataFilterSuggestionResolver.Resolve(
+            schema,
+            new Dictionary<string, string>(),
+            extensionSources,
+            CommandMetadataFilter.ParseInput(">extension:"));
+
+        Assert.Equal(["np11"], packSuggestions);
+        Assert.Equal(["ado"], extensionSuggestions);
+    }
+
     private static CommandDefinition CreateCommand(string name, string kind, string packId)
         => new(
             name,
