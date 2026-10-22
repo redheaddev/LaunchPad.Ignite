@@ -17,6 +17,8 @@ internal sealed class SingleInstanceCoordinator : IDisposable
     private Task? _listenerTask;
     private int _disposed;
 
+    internal Task? ListenerTask => _listenerTask;
+
     private SingleInstanceCoordinator(FileStream ownershipLock, string pipeName)
     {
         _ownershipLock = ownershipLock;
