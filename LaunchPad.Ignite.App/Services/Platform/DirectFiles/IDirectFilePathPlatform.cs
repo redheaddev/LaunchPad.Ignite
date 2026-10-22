@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.DirectFiles;
 
 public interface IDirectFilePathPlatform
 {

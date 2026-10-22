@@ -103,6 +103,7 @@ public sealed record CommandActionDefinition(
     CommandExecutionDefinition? Execution = null)
 {
     public IReadOnlyList<string> ArgumentTemplates { get; init; } = [];
+    public string? WorkingDirectoryTemplate { get; init; }
     public string? KeyboardShortcut { get; init; }
     public bool ExecuteOnKeyboardShortcut { get; init; }
     public bool AllowAdditionalNamedArguments { get; init; }

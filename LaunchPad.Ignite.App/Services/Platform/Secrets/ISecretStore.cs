@@ -4,6 +4,10 @@ namespace LaunchPad.Ignite.App.Services;
 
 public interface ISecretStore
 {
+    bool IsAvailable => true;
+
+    string? UnavailableReason => null;
+
     IReadOnlyList<string> GetNames();
 
     bool TryGet(string name, out string value);

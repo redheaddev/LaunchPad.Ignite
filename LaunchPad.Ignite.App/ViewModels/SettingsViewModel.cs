@@ -1787,6 +1787,7 @@ public sealed partial class CommandActionEditorViewModel : ViewModelBase
     public string Description { get => _definition.Description; set => UpdateAction(_definition with { Description = value }); }
     public string Usage { get => _definition.Usage; set => UpdateAction(_definition with { Usage = value }); }
     public string TargetTemplate { get => _definition.TargetTemplate; set => UpdateAction(_definition with { TargetTemplate = value }); }
+    public string? WorkingDirectoryTemplate { get => _definition.WorkingDirectoryTemplate; set => UpdateAction(_definition with { WorkingDirectoryTemplate = value }); }
     public string ArgumentTemplates
     {
         get => string.Join(Environment.NewLine, _definition.ArgumentTemplates);

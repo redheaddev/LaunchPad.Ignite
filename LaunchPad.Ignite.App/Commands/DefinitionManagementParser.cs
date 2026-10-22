@@ -32,7 +32,9 @@ public sealed record DefinitionManagementRequest(
     bool HasDefault = false,
     string? KeyboardShortcut = null,
     bool HasKeyboardShortcut = false,
-    bool ClearKeyboardShortcut = false);
+    bool ClearKeyboardShortcut = false,
+    string? WorkingDirectory = null,
+    bool HasWorkingDirectory = false);
 
 public sealed record DefinitionManagementParseResult(
     DefinitionManagementStatus Status,
@@ -120,7 +122,7 @@ public sealed class DefinitionManagementParser
             }
 
             var usage = kind == "shell"
-                ? "Usage: launchpad command add shell <name> --target <executable> [--target-arg <template>] [--arg <name:required|optional[:options]>] [--description <text>]"
+                ? "Usage: launchpad command add shell <name> --target <executable> [--working-directory <path>] [--target-arg <template>] [--arg <name:required|optional[:options]>] [--description <text>]"
                 : "Usage: launchpad command add url <name> --target <url> [--arg <name:required|optional[:options]>] [--description <text>]";
             return new DefinitionManagementHelp(usage,
                 "Example: launchpad command add url weather --target \"https://example.test/{city}\" --arg city:required",
@@ -130,7 +132,7 @@ public sealed class DefinitionManagementParser
         if (operation == "edit" && entity == "command")
         {
             return new DefinitionManagementHelp(
-                "Usage: launchpad command edit <name> [--target <target>] [--arg <spec>] [--target-arg <template>] [--description <text>] [--key <chord>|--clear-key]",
+                "Usage: launchpad command edit <name> [--target <target>] [--working-directory <path>] [--arg <spec>] [--target-arg <template>] [--description <text>] [--key <chord>|--clear-key]",
                 "Example: launchpad command edit wx --key ctrl+alt+w",
                 suggestions);
         }
@@ -212,7 +214,7 @@ public sealed class DefinitionManagementParser
             if (entity == "command" && operation == "add"
                 && tokens.Count == 5 && (tokens[3] is "url" or "shell"))
             {
-                candidates.AddRange(new[] { "--target", "--arg", "--description", "--target-arg" }
+                candidates.AddRange(new[] { "--target", "--working-directory", "--arg", "--description", "--target-arg" }
                     .Select(option => $"{trimmedInput} {option} "));
             }
             else if (entity == "command" && operation == "add"
@@ -223,7 +225,7 @@ public sealed class DefinitionManagementParser
             }
             else if (entity == "command" && operation == "edit" && tokens.Count >= 4)
             {
-                candidates.AddRange(new[] { "--target", "--arg", "--description", "--target-arg", "--key", "--clear-key" }
+                candidates.AddRange(new[] { "--target", "--working-directory", "--arg", "--description", "--target-arg", "--key", "--clear-key" }
                     .Select(option => $"{trimmedInput} {option} "));
             }
             else if (entity == "list" && operation == "add" && tokens.Count >= 5)
@@ -326,12 +328,14 @@ public sealed class DefinitionManagementParser
         }
 
         string? target = null;
+        string? workingDirectory = null;
         string? description = null;
         string? defaultValue = null;
         var arguments = new List<CommandArgumentDefinition>();
         var targetArguments = new List<string>();
         var values = new List<string>();
         var hasTarget = false;
+        var hasWorkingDirectory = false;
         var hasDescription = false;
         var hasArguments = false;
         var hasTargetArguments = false;
@@ -356,6 +360,10 @@ public sealed class DefinitionManagementParser
                     case "--target":
                         if (!TryReadValue(tokens, ref index, out target)) return Missing(option);
                         hasTarget = true;
+                        break;
+                    case "--working-directory":
+                        if (!TryReadValue(tokens, ref index, out workingDirectory)) return Missing(option);
+                        hasWorkingDirectory = true;
                         break;
                     case "--description":
                         if (!TryReadValue(tokens, ref index, out description)) return Missing(option);
@@ -424,7 +432,7 @@ public sealed class DefinitionManagementParser
         {
             return Invalid("List add requires --values.");
         }
-        if (operation == "edit" && !(hasTarget || hasDescription || hasArguments || hasTargetArguments || hasValues || hasDefault || values.Count > 0 || hasKeyboardShortcut || clearKeyboardShortcut))
+        if (operation == "edit" && !(hasTarget || hasWorkingDirectory || hasDescription || hasArguments || hasTargetArguments || hasValues || hasDefault || values.Count > 0 || hasKeyboardShortcut || clearKeyboardShortcut))
         {
             return Invalid("Edit requires at least one property option.");
         }
@@ -443,6 +451,11 @@ public sealed class DefinitionManagementParser
         if (entity == "command" && operation == "add" && hasTargetArguments && !string.Equals(kind, "shell", StringComparison.OrdinalIgnoreCase))
         {
             return Invalid("--target-arg is supported only for shell commands.");
+        }
+        if (entity == "command" && operation == "add" && hasWorkingDirectory
+            && !string.Equals(kind, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            return Invalid("--working-directory is supported only for shell commands.");
         }
         if (entity == "command" && operation == "add" && string.Equals(kind, "shortcut", StringComparison.OrdinalIgnoreCase)
             && (hasArguments || hasTargetArguments))
@@ -464,7 +477,7 @@ public sealed class DefinitionManagementParser
             new DefinitionManagementRequest(entity, operation, name, kind, target, description, arguments,
                 targetArguments, values, defaultValue, hasTarget, hasDescription, hasArguments,
                 hasTargetArguments, hasValues, hasDefault, keyboardShortcut, hasKeyboardShortcut,
-                clearKeyboardShortcut));
+                clearKeyboardShortcut, workingDirectory, hasWorkingDirectory));
     }
 
     private static bool IsCommandKind(string value)

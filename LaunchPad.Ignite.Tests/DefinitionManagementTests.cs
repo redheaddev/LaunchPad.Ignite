@@ -36,14 +36,34 @@ public sealed class DefinitionManagementTests
     public void ParserReadsShellTargetArgumentsAndEnumCsvValues()
     {
         var parser = new DefinitionManagementParser();
-        var command = parser.Parse("launchpad command add shell vscode --target \"Code.exe\" --target-arg \"{file}\" --arg file:optional");
+        var command = parser.Parse("launchpad command add shell vscode --target \"Code.exe\" --working-directory \"C:\\work area\" --target-arg \"{file}\" --arg file:optional");
         var list = parser.Parse("launchpad list add enum projects --values \"architecture,claims,saif\" --default architecture");
 
         Assert.Equal(DefinitionManagementStatus.Valid, command.Status);
+        Assert.Equal("C:\\work area", command.Request?.WorkingDirectory);
+        Assert.True(command.Request?.HasWorkingDirectory);
         Assert.Equal(["{file}"], command.Request?.TargetArguments);
         Assert.Equal(DefinitionManagementStatus.Valid, list.Status);
         Assert.Equal(["architecture", "claims", "saif"], list.Request?.Values);
         Assert.Equal("architecture", list.Request?.Default);
+    }
+
+    [Fact]
+    public void ModelAddsAndEditsShellCommandWorkingDirectory()
+    {
+        using var directory = new TemporaryDirectory();
+        var userPath = Path.Combine(directory.Path, "user-commands.json");
+        var loader = new CommandSchemaLoader(new CommandSchema([], []), userPath);
+        loader.Load();
+        var model = new DefinitionManagementCommandModel(loader, () => { });
+
+        var added = model.Execute("launchpad command add shell tool --target tool.exe --working-directory \"C:\\work area\"");
+        var edited = model.Execute("launchpad command edit tool --working-directory \"C:\\other\"");
+
+        Assert.True(added.Succeeded, added.Message);
+        Assert.True(edited.Succeeded, edited.Message);
+        var command = Assert.Single(loader.GetUserCommands());
+        Assert.Equal("C:\\other", command.Actions[0].WorkingDirectoryTemplate);
     }
 
     [Fact]

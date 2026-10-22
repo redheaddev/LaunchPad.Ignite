@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
-    <RuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64;linux-x64</RuntimeIdentifiers>
         <Version>1.0.30</Version>
         <AssemblyVersion>$(Version).0</AssemblyVersion>
         <FileVersion>$(Version).0</FileVersion>
@@ -18,21 +18,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaXaml Remove="artifacts\**" />
     <AvaloniaXaml Remove="Defaults\**" />
+    <Compile Remove="artifacts\**" />
     <Compile Remove="Defaults\**" />
+    <EmbeddedResource Remove="artifacts\**" />
     <EmbeddedResource Remove="Defaults\**" />
+    <None Remove="artifacts\**" />
     <None Remove="Defaults\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Remove="CommandPacks\**;Addons\**" />
-    <None Remove="CommandPacks\**;Addons\**" />
+    <Content Remove="Addons\**" />
+    <None Remove="Addons\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="CommandPacks\bricot.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <Content Include="Defaults\app-settings.json" />
     <Content Include="Defaults\user-commands.json" />
     <Content Include="Defaults\app-settings.json">

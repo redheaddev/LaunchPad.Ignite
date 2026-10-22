@@ -3,6 +3,7 @@
 ## Project Guidelines
 - Keep window/view code-behind logic minimal; put command parsing and completion behavior in a dedicated standalone parser/engine component, with UI forwarding input and rendering state.
 - Separate responsibilities into focused components; avoid monolithic classes or modules. Keep component and project boundaries proportional to distinct responsibilities rather than adding abstractions without a concrete need.
+- Organize OS-specific code consistently across the app, including Models and Views, while keeping cross-platform models in shared areas and isolating only genuine platform behavior behind platform-specific components.
 
 ## Command Structure
 - Declare an extension's command namespace once at the manifest root and apply it to every command in that extension.

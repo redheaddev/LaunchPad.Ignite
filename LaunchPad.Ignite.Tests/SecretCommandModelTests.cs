@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.Terminals;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
@@ -33,6 +34,60 @@ public class SecretCommandModelTests
         Assert.DoesNotContain("a'b", copyResult.Message);
         Assert.Equal("$env:apiToken='a''b'", clipboard.Value);
         Assert.Equal(TimeSpan.FromSeconds(15), clipboard.Expiry);
+    }
+
+    [Fact]
+    public async Task SecretCommandReportsWhenSecretStorageIsUnavailable()
+    {
+        var store = new FakeSecretStore
+        {
+            IsAvailable = false,
+            UnavailableReason = "Secret storage is not implemented on Linux yet; secret commands are unavailable."
+        };
+        var model = CreateModel(store: store);
+
+        var result = await ExecuteAsync(model, "secret set apiToken");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(store.UnavailableReason, result.Message);
+        Assert.Empty(store.LastTryGetNames);
+    }
+
+    [Fact]
+    public void SecretListCommandReportsWhenSecretStorageIsUnavailable()
+    {
+        var store = new FakeSecretStore
+        {
+            IsAvailable = false,
+            UnavailableReason = "Secret storage is not implemented on Linux yet; secret commands are unavailable."
+        };
+        var definition = SecretListCommandDefinition.Definition;
+        var model = new SecretListCommandModel(store);
+
+        var result = model.Execute(new ParsedCommand(
+            definition,
+            definition.Actions[0],
+            new Dictionary<string, string>()));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(store.UnavailableReason, result.Message);
+    }
+
+    [Fact]
+    public void SecretActivityTrackingStorePreservesUnavailableStatus()
+    {
+        using var directory = new TemporaryDirectory();
+        var innerStore = new FakeSecretStore
+        {
+            IsAvailable = false,
+            UnavailableReason = "Secret storage unavailable."
+        };
+        var store = new SecretActivityTrackingStore(
+            innerStore,
+            new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json")));
+
+        Assert.False(store.IsAvailable);
+        Assert.Equal(innerStore.UnavailableReason, store.UnavailableReason);
     }
 
     [Fact]
@@ -671,6 +726,10 @@ public class SecretCommandModelTests
         private readonly Dictionary<string, string> _secrets = new(StringComparer.OrdinalIgnoreCase);
 
         public List<string> LastTryGetNames { get; } = [];
+
+        public bool IsAvailable { get; init; } = true;
+
+        public string? UnavailableReason { get; init; }
 
         public FakeSecretStore(params (string Name, string Value)[] secrets)
         {

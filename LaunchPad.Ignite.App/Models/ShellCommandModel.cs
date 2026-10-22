@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.ShellCommands;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 
@@ -14,10 +14,12 @@ public sealed class ShellCommandModel : ICommandModel
 {
     private static readonly Regex ArgumentTemplatePlaceholder = new("\\{([^{}]+)\\}", RegexOptions.Compiled);
     private readonly IProcessStarter _processStarter;
+    private readonly IPlatformShellCommandLauncher _platformLauncher;
 
     public ShellCommandModel(IProcessStarter processStarter)
     {
         _processStarter = processStarter;
+        _platformLauncher = PlatformShellCommandLauncherFactory.Create();
     }
 
     public string Kind => "shell";
@@ -37,7 +39,6 @@ public sealed class ShellCommandModel : ICommandModel
             return new CommandExecutionResult(false, "An executable target is required.");
         }
 
-        var startInfo = new ProcessStartInfo(Environment.ExpandEnvironmentVariables(command.Action.TargetTemplate));
         var arguments = new List<string>();
 
         if (command.Action.ArgumentTemplates.Count > 0)
@@ -73,25 +74,11 @@ public sealed class ShellCommandModel : ICommandModel
             }
         }
 
-        if (launchMode == CommandLaunchMode.Normal)
-        {
-            startInfo.UseShellExecute = false;
-            foreach (var argument in arguments)
-            {
-                startInfo.ArgumentList.Add(argument);
-            }
-        }
-        else
-        {
-            startInfo.UseShellExecute = true;
-            startInfo.Verb = launchMode switch
-            {
-                CommandLaunchMode.Elevated => "runas",
-                CommandLaunchMode.DifferentUser => "runasuser",
-                _ => throw new ArgumentOutOfRangeException(nameof(launchMode))
-            };
-            startInfo.Arguments = string.Join(" ", arguments.Select(QuoteArgument));
-        }
+        var target = Environment.ExpandEnvironmentVariables(command.Action.TargetTemplate);
+        var workingDirectory = string.IsNullOrWhiteSpace(command.Action.WorkingDirectoryTemplate)
+            ? null
+            : Environment.ExpandEnvironmentVariables(command.Action.WorkingDirectoryTemplate);
+        var startInfo = _platformLauncher.CreateStartInfo(target, workingDirectory, arguments, launchMode);
 
         try
         {
@@ -110,32 +97,4 @@ public sealed class ShellCommandModel : ICommandModel
         }
     }
 
-    private static string QuoteArgument(string argument)
-    {
-        var builder = new StringBuilder("\"");
-        var backslashCount = 0;
-        foreach (var character in argument)
-        {
-            if (character == '\\')
-            {
-                backslashCount++;
-            }
-            else if (character == '\"')
-            {
-                builder.Append('\\', backslashCount * 2 + 1);
-                builder.Append(character);
-                backslashCount = 0;
-            }
-            else
-            {
-                builder.Append('\\', backslashCount);
-                builder.Append(character);
-                backslashCount = 0;
-            }
-        }
-
-        builder.Append('\\', backslashCount * 2);
-        builder.Append('\"');
-        return builder.ToString();
-    }
 }

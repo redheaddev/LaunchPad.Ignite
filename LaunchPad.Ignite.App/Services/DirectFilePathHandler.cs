@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using LaunchPad.Ignite.Core.Execution;
+using LaunchPad.Ignite.App.Services.Platform.DirectFiles;
+using LaunchPad.Ignite.App.Services.Platform.Terminals;
 
 namespace LaunchPad.Ignite.App.Services;
 

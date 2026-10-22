@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.Terminals;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;

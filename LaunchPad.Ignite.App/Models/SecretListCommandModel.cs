@@ -24,6 +24,11 @@ public sealed class SecretListCommandModel : ICommandModel
             return new CommandExecutionResult(false, $"Command handler '{command.Definition.ExecutionHandler}' is not supported.");
         }
 
+        if (!_secretStore.IsAvailable)
+        {
+            return new CommandExecutionResult(false, _secretStore.UnavailableReason ?? "Secret storage is unavailable.");
+        }
+
         var names = _secretStore.GetNames().OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
         return new CommandExecutionResult(true, names.Length == 0
             ? "No saved secrets."

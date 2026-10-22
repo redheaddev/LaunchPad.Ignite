@@ -7,6 +7,10 @@ public sealed class SecretActivityTrackingStore(
     ISecretStore innerStore,
     ProfileSettingsStore settingsStore) : ISecretStore
 {
+    public bool IsAvailable => innerStore.IsAvailable;
+
+    public string? UnavailableReason => innerStore.UnavailableReason;
+
     public IReadOnlyList<string> GetNames()
         => innerStore.GetNames();
 

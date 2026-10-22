@@ -14,6 +14,7 @@ using System.ComponentModel;
 using System.Collections.Generic;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.WindowBehavior;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Schema;
@@ -29,7 +30,8 @@ namespace LaunchPad.Ignite.App.Views;
 public partial class MainWindow : Window
 {
     private readonly SimpleGlobalHook _globalHook = new();
-    private WindowsRegisteredHotkey? _windowsActivationHotkey;
+    private readonly IWindowPlatformBehavior _windowPlatform = WindowPlatformBehaviorFactory.Create();
+    private IActivationHotkeyRegistration? _activationHotkey;
     private readonly TextBox _commandBox;
     private readonly Border _commandInputBorder;
     private readonly ItemsControl _completionList;
@@ -1155,7 +1157,7 @@ public partial class MainWindow : Window
             }, DispatcherPriority.Input);
         }
 
-        if (!OperatingSystem.IsWindows() || _hotKeyTask is not null)
+        if (!_windowPlatform.SupportsGlobalKeyboardHook || _hotKeyTask is not null)
         {
             return;
         }
@@ -1198,7 +1200,7 @@ public partial class MainWindow : Window
             && GlobalActivationHotkey.TryParse(mainViewModel.GlobalActivationHotkeyValue, out var activationHotkey)
             && activationHotkey.Matches(_controlPressed, _altPressed, _shiftPressed, _metaPressed, e.Data.KeyCode))
         {
-            if (_windowsActivationHotkey is not null)
+            if (_activationHotkey is not null)
             {
                 return;
             }
@@ -1309,11 +1311,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (OperatingSystem.IsWindows())
+        if (_windowPlatform.DeactivationAction == WindowDeactivationAction.Hide)
         {
             HideMainWindow();
         }
-        else if (OperatingSystem.IsMacOS())
+        else if (_windowPlatform.DeactivationAction == WindowDeactivationAction.Minimize)
         {
             WindowState = WindowState.Minimized;
         }
@@ -1326,19 +1328,14 @@ public partial class MainWindow : Window
 
     private void RefreshWindowsActivationHotkey()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        _windowsActivationHotkey?.Dispose();
-        _windowsActivationHotkey = null;
+        _activationHotkey?.Dispose();
+        _activationHotkey = null;
         if (_shortcutViewModel is not { } viewModel)
         {
             return;
         }
 
-        _windowsActivationHotkey = WindowsRegisteredHotkey.TryCreate(
+        _activationHotkey = _windowPlatform.TryRegisterActivationHotkey(
             viewModel.GlobalActivationHotkeyValue,
             () => Dispatcher.UIThread.Post(() =>
             {
@@ -1349,7 +1346,7 @@ public partial class MainWindow : Window
             }),
             out var error);
 
-        if (_windowsActivationHotkey is null && error is not null)
+        if (_activationHotkey is null && error is not null)
         {
             Trace.TraceWarning($"{error} Using the keyboard-hook activation fallback.");
         }
@@ -1864,8 +1861,8 @@ public partial class MainWindow : Window
 
         _globalHook.KeyPressed -= GlobalHook_KeyPressed;
         _globalHook.KeyReleased -= GlobalHook_KeyReleased;
-        _windowsActivationHotkey?.Dispose();
-        _windowsActivationHotkey = null;
+        _activationHotkey?.Dispose();
+        _activationHotkey = null;
         ColorThemeService.ThemeChanged -= UpdateUsageText;
         ColorThemeService.ThemeChanged -= UpdateCommandInputBorder;
         try

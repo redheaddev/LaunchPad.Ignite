@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
+using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.UrlTargets;
 
 public sealed class SystemUrlTargetOpener : IUrlTargetOpener
 {

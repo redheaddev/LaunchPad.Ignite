@@ -85,7 +85,7 @@ public sealed class DefinitionManagementCommandModel
                 var command = _schemaLoader.FindUserCommand(request.Name)
                     ?? throw new InvalidOperationException($"Command '{request.Name}' was not found in the user schema.");
                 var action = command.Actions.FirstOrDefault();
-                return Value($"{command.QualifiedName} [{command.Kind}/{command.ExecutionHandler}]\n{command.Description}\n{action?.Usage}\nTarget: {action?.TargetTemplate}");
+                return Value($"{command.QualifiedName} [{command.Kind}/{command.ExecutionHandler}]\n{command.Description}\n{action?.Usage}\nTarget: {action?.TargetTemplate}\nWorking directory: {action?.WorkingDirectoryTemplate}");
             }
             case "remove":
                 _schemaLoader.RemoveUserCommand(request.Name);
@@ -97,7 +97,7 @@ public sealed class DefinitionManagementCommandModel
                 var handler = request.Kind!;
                 var kind = GetKindForHandler(handler);
                 var command = new CommandDefinition(name, kind, request.Description ?? string.Empty,
-                    [BuildAction(request.Kind!, request.Name, request.Target!, request.Arguments ?? [], request.TargetArguments ?? [])],
+                    [BuildAction(request.Kind!, request.Name, request.Target!, request.Arguments ?? [], request.TargetArguments ?? [], request.WorkingDirectory)],
                     commandNamespace,
                     KeyboardShortcut: request.KeyboardShortcut,
                     ExecuteOnKeyboardShortcut: request.HasKeyboardShortcut,
@@ -117,6 +117,11 @@ public sealed class DefinitionManagementCommandModel
     {
         var command = _schemaLoader.FindUserCommand(request.Name)
             ?? throw new InvalidOperationException($"Command '{request.Name}' was not found in the user schema.");
+        if (request.HasWorkingDirectory
+            && !string.Equals(command.ExecutionHandler, "shell", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("--working-directory is supported only for shell commands.");
+        }
         if ((request.HasKeyboardShortcut || request.ClearKeyboardShortcut)
             && !string.Equals(command.ExecutionHandler, "shortcut", StringComparison.OrdinalIgnoreCase))
         {
@@ -128,12 +133,14 @@ public sealed class DefinitionManagementCommandModel
         var updatedArguments = request.HasArguments ? request.Arguments! : currentAction.Arguments;
         var updatedTemplates = request.HasTargetArguments ? request.TargetArguments! : currentAction.ArgumentTemplates;
         var updatedTarget = request.HasTarget ? NormalizeTarget(command.ExecutionHandler, request.Target!) : currentAction.TargetTemplate;
+        var updatedWorkingDirectory = request.HasWorkingDirectory ? request.WorkingDirectory : currentAction.WorkingDirectoryTemplate;
         ValidateTargetArguments(command.ExecutionHandler, updatedTarget, updatedTemplates, updatedArguments);
         var updatedAction = currentAction with
         {
             TargetTemplate = updatedTarget,
             Arguments = updatedArguments,
             ArgumentTemplates = updatedTemplates,
+            WorkingDirectoryTemplate = updatedWorkingDirectory,
             Usage = request.HasArguments ? BuildUsage(command.QualifiedName, updatedArguments) : currentAction.Usage
         };
         var updated = command with
@@ -228,7 +235,8 @@ public sealed class DefinitionManagementCommandModel
         string commandName,
         string target,
         IReadOnlyList<CommandArgumentDefinition> arguments,
-        IReadOnlyList<string> targetArguments)
+        IReadOnlyList<string> targetArguments,
+        string? workingDirectory)
     {
         var normalizedTarget = NormalizeTarget(kind, target);
         var csvArguments = string.Equals(kind, "url", StringComparison.OrdinalIgnoreCase)
@@ -240,7 +248,8 @@ public sealed class DefinitionManagementCommandModel
             : null;
         return new CommandActionDefinition("default", string.Empty, BuildUsage(commandName, arguments), normalizedTarget, arguments, execution)
         {
-            ArgumentTemplates = targetArguments
+            ArgumentTemplates = targetArguments,
+            WorkingDirectoryTemplate = workingDirectory
         };
     }
 

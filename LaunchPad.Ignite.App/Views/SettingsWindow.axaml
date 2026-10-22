@@ -329,6 +329,8 @@
 												<TextBox Text="{Binding Usage, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
 																<TextBlock Text="Target template - program, URL, or path opened by this action." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 												<TextBox Text="{Binding TargetTemplate, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
+																<TextBlock Text="Working directory - optional directory to use when starting a shell command." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+												<TextBox Text="{Binding WorkingDirectoryTemplate, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" />
 																<TextBlock Text="Argument templates - one target argument per line; {name} inserts the supplied value." FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 												<TextBox Text="{Binding ArgumentTemplates, Mode=TwoWay}" IsEnabled="{Binding IsEditable}" AcceptsReturn="True" MinHeight="60" />
 																<Grid ColumnDefinitions="*,Auto">

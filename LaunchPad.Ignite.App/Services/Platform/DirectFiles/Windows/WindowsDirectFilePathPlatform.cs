@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using LaunchPad.Ignite.App.Services.Platform.DirectFiles;
 
-namespace LaunchPad.Ignite.App.Services.Platform.Windows;
+namespace LaunchPad.Ignite.App.Services.Platform.DirectFiles.Windows;
 
 public sealed class WindowsDirectFilePathPlatform : IDirectFilePathPlatform
 {

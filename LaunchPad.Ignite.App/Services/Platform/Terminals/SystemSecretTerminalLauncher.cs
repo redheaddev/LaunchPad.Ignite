@@ -6,8 +6,9 @@ using System.Linq;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
+using LaunchPad.Ignite.App.Services;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.Terminals;
 
 public sealed class SystemSecretTerminalLauncher : ISecretTerminalLauncher
 {

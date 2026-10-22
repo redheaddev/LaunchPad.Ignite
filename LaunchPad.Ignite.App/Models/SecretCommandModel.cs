@@ -101,6 +101,11 @@ public sealed class SecretCommandModel
 
     public async Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command)
     {
+        if (!_secretStore.IsAvailable)
+        {
+            return new CommandExecutionResult(false, _secretStore.UnavailableReason ?? "Secret storage is unavailable.");
+        }
+
         try
         {
             return command.Action.Name.ToLowerInvariant() switch

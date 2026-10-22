@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-namespace LaunchPad.Ignite.App.Services.Platform.Windows;
+namespace LaunchPad.Ignite.App.Services.Platform.DirectFiles.Windows;
 
 internal static class WindowsUncShareEnumerator
 {

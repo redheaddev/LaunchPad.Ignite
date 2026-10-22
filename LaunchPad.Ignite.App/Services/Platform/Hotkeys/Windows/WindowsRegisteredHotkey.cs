@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using SharpHook.Data;
 
-namespace LaunchPad.Ignite.App.Services;
+namespace LaunchPad.Ignite.App.Services.Platform.Hotkeys.Windows;
 
-internal sealed class WindowsRegisteredHotkey : IDisposable
+public sealed class WindowsRegisteredHotkey : IDisposable
 {
     private const int HotkeyId = 0x4C50;
     private const uint HotkeyMessage = 0x0312;

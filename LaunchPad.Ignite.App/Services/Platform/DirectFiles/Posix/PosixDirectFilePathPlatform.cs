@@ -4,16 +4,16 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
-namespace LaunchPad.Ignite.App.Services.Platform.MacOS;
+namespace LaunchPad.Ignite.App.Services.Platform.DirectFiles.Posix;
 
-public sealed class MacOSDirectFilePathPlatform : IDirectFilePathPlatform
+public abstract class PosixDirectFilePathPlatform : IDirectFilePathPlatform
 {
     public const int MaximumSuggestions = 50;
 
     private readonly Func<string, IEnumerable<string>> _enumerateEntries;
     private readonly Func<string, bool> _directoryExists;
 
-    public MacOSDirectFilePathPlatform(
+    protected PosixDirectFilePathPlatform(
         Func<string, IEnumerable<string>>? enumerateEntries = null,
         Func<string, bool>? directoryExists = null)
     {
@@ -50,12 +50,14 @@ public sealed class MacOSDirectFilePathPlatform : IDirectFilePathPlatform
         try
         {
             return _enumerateEntries(directory)
-                .Where(entry => GetName(entry).StartsWith(prefix, StringComparison.Ordinal))
+                .Where(entry => Path.GetFileName(entry).StartsWith(prefix, StringComparison.Ordinal))
                 .Select(entry => (Path: entry, IsDirectory: _directoryExists(entry)))
                 .OrderByDescending(entry => entry.IsDirectory)
-                .ThenBy(entry => GetName(entry.Path), StringComparer.Ordinal)
+                .ThenBy(entry => Path.GetFileName(entry.Path), StringComparer.Ordinal)
                 .Take(MaximumSuggestions)
-                .Select(entry => entry.IsDirectory ? EnsureTrailingSeparator(entry.Path) : entry.Path)
+                .Select(entry => entry.IsDirectory && entry.Path[^1] != '/'
+                    ? entry.Path + "/"
+                    : entry.Path)
                 .ToArray();
         }
         catch (IOException)
@@ -94,26 +96,8 @@ public sealed class MacOSDirectFilePathPlatform : IDirectFilePathPlatform
         return true;
     }
 
-    public ProcessStartInfo CreateOpenPathStartInfo(string path, bool isDirectory)
-    {
-        var startInfo = new ProcessStartInfo("/usr/bin/open")
-        {
-            UseShellExecute = false
-        };
-        if (!isDirectory)
-        {
-            startInfo.ArgumentList.Add("-R");
-        }
-
-        startInfo.ArgumentList.Add(path);
-        return startInfo;
-    }
+    public abstract ProcessStartInfo CreateOpenPathStartInfo(string path, bool isDirectory);
 
     public bool IsPathPrefix(string path, string prefix)
         => path.StartsWith(prefix, StringComparison.Ordinal);
-
-    private static string GetName(string path) => Path.GetFileName(path);
-
-    private static string EnsureTrailingSeparator(string path)
-        => path.EndsWith('/') ? path : path + '/';
 }

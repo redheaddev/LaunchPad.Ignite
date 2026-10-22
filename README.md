@@ -35,7 +35,13 @@ dotnet build LaunchPad.Ignite.sln
 dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj
 ```
 
-## Build installers
+## Package all platforms
+
+The `Package all platforms` GitHub Actions workflow builds version-matched packages on native runners for Windows x64 and ARM64, Linux x64, and macOS x64 and ARM64. Run it manually from the Actions tab, optionally entering the version in `LaunchPad.Ignite.App.csproj`. Pushing a `v<version>` tag also triggers packaging. In either case, the version must match the project version, so bump the app version before packaging. The workflow uploads downloadable build artifacts but does not publish a GitHub Release.
+
+The macOS artifact is a ZIP containing a versioned `.app` bundle. The Linux artifact is a portable x64 tarball. Windows artifacts are per-user Inno Setup installers.
+
+## Build platform packages locally
 
 On Windows, install Inno Setup 6 or 7 and run the repository script from the root directory:
 
@@ -47,9 +53,27 @@ The script publishes and builds installers for `win-x64` and `win-arm64`, placin
 
 The installer release process expects the app version to be bumped before building. See `.github/copilot-instructions.md` for repository-specific packaging requirements.
 
+## Build a Linux package
+
+On Linux, build the portable x64 tarball with the .NET 8 SDK:
+
+```bash
+bash ./scripts/package-linux-app.sh
+```
+
+The archive is written to `LaunchPad.Ignite.App/artifacts/linux`. Extract it, run `chmod +x ./LaunchPad.Ignite.App`, then launch `./LaunchPad.Ignite.App`. A graphical desktop session is required. Linux secret storage and global activation hotkeys are not supported yet; secret commands report that limitation and do not store values.
+
+On macOS, build a ZIP containing the app bundle for the host architecture, or specify an architecture explicitly:
+
+```bash
+bash ./scripts/package-macos-app.sh
+bash ./scripts/package-macos-app.sh 1.0.30 osx-arm64
+```
+
 ## Project layout
 
 - `LaunchPad.Ignite.App` — Avalonia desktop app and application services.
 - `LaunchPad.Ignite.Core` — command parsing, execution, and shared domain types.
 - `LaunchPad.Ignite.Tests` — automated tests.
 - `Installer` — Inno Setup script and installer build script.
+- `scripts` — platform-specific app packaging scripts.

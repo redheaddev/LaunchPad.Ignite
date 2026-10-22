@@ -71,6 +71,11 @@ public sealed class SnippetCommandModel : ICommandModel, IAsyncCommandExecutor
             return new CommandExecutionResult(false, $"Snippet '{name}' was not found.");
         }
 
+        if (snippet.Metadata.AllowedSecrets.Count > 0 && !_secretStore.IsAvailable)
+        {
+            return new CommandExecutionResult(false, _secretStore.UnavailableReason ?? "Secret storage is unavailable.");
+        }
+
         var declaredArguments = snippet.Metadata.Arguments;
         var argumentValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (argumentName, value) in suppliedArguments)

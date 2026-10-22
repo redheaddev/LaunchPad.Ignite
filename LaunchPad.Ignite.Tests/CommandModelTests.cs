@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Platform.UrlTargets;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Parsing;
@@ -629,6 +630,38 @@ public class CommandModelTests
         Assert.Equal(
             ["C:\\work area\\file.txt", "--name value & whoami"],
             starter.StartInfo.ArgumentList);
+    }
+
+    [Fact]
+    public void ShellCommandModelSetsWorkingDirectoryAndUsesWindowsShellForShortcutFiles()
+    {
+        var action = new CommandActionDefinition(
+            "default",
+            "",
+            "",
+            @"C:\tools\my tool.lnk",
+            [new CommandArgumentDefinition("value")])
+        {
+            WorkingDirectoryTemplate = @"C:\work area"
+        };
+        var command = new CommandDefinition("tool", "shell", "", [action]);
+        var starter = new RecordingProcessStarter();
+        var model = new ShellCommandModel(starter);
+
+        var result = model.Execute(new ParsedCommand(command, action, new Dictionary<string, string> { ["value"] = "hello world" }));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(@"C:\work area", starter.StartInfo!.WorkingDirectory);
+        Assert.Equal(OperatingSystem.IsWindows(), starter.StartInfo.UseShellExecute);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("\"hello world\"", starter.StartInfo.Arguments);
+            Assert.Empty(starter.StartInfo.ArgumentList);
+        }
+        else
+        {
+            Assert.Equal(["hello world"], starter.StartInfo.ArgumentList);
+        }
     }
 
     [Theory]

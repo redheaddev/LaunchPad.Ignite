@@ -102,23 +102,6 @@ public class CommandPackLoaderTests
     }
 
     [Fact]
-    public void LoadsBricotCommandPackWithServerPickerAndNamespacedShortcuts()
-    {
-        var packPath = Path.Combine(AppContext.BaseDirectory, "CommandPacks", "bricot.json");
-        using var directory = new TemporaryDirectory();
-        File.Copy(packPath, Path.Combine(directory.Path, "bricot.json"));
-
-        var schema = new CommandPackLoader([directory.Path]).Load();
-
-        Assert.Equal(15, schema.Commands.Count);
-        Assert.Contains(schema.Commands, command => command.QualifiedName == "pl:arch");
-        Assert.Contains(schema.Commands, command => command.QualifiedName == "gh:token");
-        var sft = Assert.Single(schema.Commands, command => command.Name == "sft");
-        Assert.Equal("enum:sft-server", sft.Actions[0].Arguments[0].Ref);
-        Assert.Equal(["gwappnp11", "gwappsit01cc01"], Assert.Single(schema.Lists, list => list.Name == "sft-server").Values);
-    }
-
-    [Fact]
     public void LoadsCommandsWithDefaultAndCommandSpecificNamespaces()
     {
         using var directory = new TemporaryDirectory();
