@@ -1,19 +1,18 @@
 name: Package all platforms
-run-name: Package all platforms
+run-name: Package all platforms.${{ inputs.version || github.ref_name }}
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: App version to package (defaults to the project version)
-        required: false
+        description: App version to package (must match the project version)
+        required: true
         type: string
   push:
     tags:
       - 'v*'
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
@@ -36,11 +35,6 @@ jobs:
           if ($version -ne $projectVersion) { throw "Package version $version must match project version $projectVersion. Bump the project version before packaging." }
           "version=$version" >> $env:GITHUB_OUTPUT
           "## Packaging version`n`nResolved project version: **$version**" >> $env:GITHUB_STEP_SUMMARY
-      - name: Rename workflow run with resolved version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh run edit ${{ github.run_id }} --name "Package all platforms.${{ steps.resolve.outputs.version }}"
 
   windows:
     needs: version
