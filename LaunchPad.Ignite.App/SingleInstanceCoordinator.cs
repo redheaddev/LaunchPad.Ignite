@@ -47,7 +47,7 @@ internal sealed class SingleInstanceCoordinator : IDisposable
             }
             catch (IOException)
             {
-                RequestExistingInstanceShutdown(pipeName);
+                RequestExistingInstanceShutdown(pipeName, deadline - DateTime.UtcNow);
                 Thread.Sleep(100);
             }
         }
@@ -104,12 +104,21 @@ internal sealed class SingleInstanceCoordinator : IDisposable
         }
     }
 
-    private static void RequestExistingInstanceShutdown(string pipeName)
+    private static void RequestExistingInstanceShutdown(string pipeName, TimeSpan remainingStartupTime)
     {
+        if (remainingStartupTime <= TimeSpan.Zero)
+        {
+            return;
+        }
+
         try
         {
             using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-            client.Connect(100);
+            var connectionTimeout = (int)Math.Clamp(
+                remainingStartupTime.TotalMilliseconds,
+                1,
+                TimeSpan.FromSeconds(1).TotalMilliseconds);
+            client.Connect(connectionTimeout);
             client.WriteByte(1);
             client.Flush();
             if (client.ReadByte() != 1)
