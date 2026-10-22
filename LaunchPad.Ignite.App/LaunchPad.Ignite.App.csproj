@@ -59,4 +59,5 @@
   <ItemGroup>
     <ProjectReference Include="..\LaunchPad.Ignite.Core\LaunchPad.Ignite.Core.csproj" />
   </ItemGroup>
+
 </Project>

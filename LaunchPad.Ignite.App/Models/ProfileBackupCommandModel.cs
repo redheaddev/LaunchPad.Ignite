@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 
 namespace LaunchPad.Ignite.App.ViewModels;
 

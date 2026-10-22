@@ -12,6 +12,10 @@ using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Hotkeys;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.Themes;
+using LaunchPad.Ignite.App.Services.Secrets;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.ViewModels;

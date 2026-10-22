@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia;
 using Avalonia.Input;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Themes;
 using LaunchPad.Ignite.App.ViewModels;
 using LaunchPad.Ignite.Core.Schema;
 using System;

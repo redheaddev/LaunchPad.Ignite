@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Completion;
+using LaunchPad.Ignite.App.Services.Profiles;
 
 namespace LaunchPad.Ignite.Tests;
 

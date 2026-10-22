@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.App.ViewModels;
 
 namespace LaunchPad.Ignite.Tests;

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Secrets;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 

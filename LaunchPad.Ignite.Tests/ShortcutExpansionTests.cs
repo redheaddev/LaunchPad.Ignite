@@ -1,5 +1,8 @@
 using LaunchPad.Ignite.Core.Schema;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Completion;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.Themes;
 
 namespace LaunchPad.Ignite.Tests;
 

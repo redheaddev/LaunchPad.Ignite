@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.DirectFiles;
 
 namespace LaunchPad.Ignite.Tests;
 

@@ -2,6 +2,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 using Xunit;
 
 namespace LaunchPad.Ignite.Tests;

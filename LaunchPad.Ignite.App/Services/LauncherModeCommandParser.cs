@@ -1,4 +1,5 @@
 using System;
+using LaunchPad.Ignite.App.Services.WindowBehavior;
 
 namespace LaunchPad.Ignite.App.Services;
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.Core.Schema;
 

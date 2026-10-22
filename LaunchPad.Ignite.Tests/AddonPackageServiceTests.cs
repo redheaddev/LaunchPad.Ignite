@@ -3,6 +3,8 @@ using System.Text.Json;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Macros;
+using LaunchPad.Ignite.App.Services.Snippets;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Tests;

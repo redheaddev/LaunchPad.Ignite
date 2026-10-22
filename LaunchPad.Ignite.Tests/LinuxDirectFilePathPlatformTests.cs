@@ -1,5 +1,5 @@
 using System;
-using LaunchPad.Ignite.App.Services.Platform.DirectFiles.Linux;
+using LaunchPad.Ignite.App.Services.DirectFiles.Linux;
 
 namespace LaunchPad.Ignite.Tests;
 

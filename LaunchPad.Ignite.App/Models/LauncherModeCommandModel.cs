@@ -1,5 +1,6 @@
 using System;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.WindowBehavior;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;

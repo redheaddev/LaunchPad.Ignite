@@ -1,5 +1,7 @@
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.WindowBehavior;
 using LaunchPad.Ignite.Core.Parsing;
 using System;
 using System.Collections.Generic;

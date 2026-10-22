@@ -1,6 +1,7 @@
 using System.IO;
 using System;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Tests;

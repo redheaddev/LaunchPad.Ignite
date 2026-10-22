@@ -4,7 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using LaunchPad.Ignite.App.Services;
-using LaunchPad.Ignite.App.Services.Platform.ShellCommands;
+using LaunchPad.Ignite.App.Services.ShellCommands;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 

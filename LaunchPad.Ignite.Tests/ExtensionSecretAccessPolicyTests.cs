@@ -1,5 +1,7 @@
 using System;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.Secrets;
 
 namespace LaunchPad.Ignite.Tests;
 

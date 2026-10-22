@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using LaunchPad.Ignite.App.Services;
-using LaunchPad.Ignite.App.Services.Platform.DirectFiles.MacOS;
+using LaunchPad.Ignite.App.Services.DirectFiles;
+using LaunchPad.Ignite.App.Services.DirectFiles.MacOS;
 
 namespace LaunchPad.Ignite.Tests;
 

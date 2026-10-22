@@ -4,6 +4,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Secrets;
+using LaunchPad.Ignite.App.Services.Snippets;
+using LaunchPad.Ignite.App.Services.Terminals;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 

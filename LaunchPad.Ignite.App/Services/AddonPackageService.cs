@@ -8,6 +8,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
+using LaunchPad.Ignite.App.Services.Macros;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.Snippets;
 
 namespace LaunchPad.Ignite.App.Services;
 

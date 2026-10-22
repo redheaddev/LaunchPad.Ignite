@@ -2,6 +2,9 @@ using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Schema;
 using LaunchPad.Ignite.App.Commands;
+using LaunchPad.Ignite.App.Services.Completion;
+using LaunchPad.Ignite.App.Services.Profiles;
+using LaunchPad.Ignite.App.Services.Themes;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -654,13 +657,13 @@ public class CommandCompletionSessionTests
     public void ThemeCommandProvidesSingleChoiceListOfSavedThemeNames()
     {
         using var directory = new TemporaryDirectory();
-        var store = new LaunchPad.Ignite.App.Services.ProfileSettingsStore(
+        var store = new LaunchPad.Ignite.App.Services.Profiles.ProfileSettingsStore(
             System.IO.Path.Combine(directory.Path, "settings.json"));
-        store.SetTheme(LaunchPad.Ignite.App.Services.ColorThemeService.ToProfileTheme(
-            LaunchPad.Ignite.App.Services.ColorTheme.Default with { Id = "custom-night", Name = "Night" }));
+        store.SetTheme(LaunchPad.Ignite.App.Services.Themes.ColorThemeService.ToProfileTheme(
+            LaunchPad.Ignite.App.Services.Themes.ColorTheme.Default with { Id = "custom-night", Name = "Night" }));
         var session = new CommandCompletionSession(
             new CommandCatalog(new CommandSchema([], [ThemeCommandDefinition.Definition]), ["theme"]),
-            new LaunchPad.Ignite.App.Services.ThemeNamesArgumentValueProvider(store));
+            new LaunchPad.Ignite.App.Services.Themes.ThemeNamesArgumentValueProvider(store));
 
         var state = session.UpdateInputText("theme ");
 
@@ -721,7 +724,7 @@ public class CommandCompletionSessionTests
             new CommandDefinition("build", "shell", "", [new CommandActionDefinition("default", "", "", "dotnet build", [])], "tools")
         };
         var schema = new CommandSchema([], commands.Append(EditCommandDefinition.Definition).ToArray());
-        var provider = new LaunchPad.Ignite.App.Services.CommandNamesArgumentValueProvider(() => commands);
+        var provider = new LaunchPad.Ignite.App.Services.Completion.CommandNamesArgumentValueProvider(() => commands);
         var session = new CommandCompletionSession(new CommandCatalog(schema, ["shell", "edit"]), new CommandSchemaValueProvider(
             schema,
             provider));
