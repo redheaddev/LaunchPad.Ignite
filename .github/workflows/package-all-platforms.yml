@@ -49,6 +49,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Run test suite on Windows
+        run: dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj --configuration Release --verbosity minimal
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build Windows installers
@@ -69,6 +71,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Run test suite on Linux
+        run: dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj --configuration Release --verbosity minimal
       - name: Build Linux package
         run: bash ./scripts/package-linux-app.sh '${{ needs.version.outputs.version }}'
       - uses: actions/upload-artifact@v4
@@ -94,6 +98,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - name: Run test suite on macOS
+        run: dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj --configuration Release --verbosity minimal
       - name: Build macOS package
         run: bash ./scripts/package-macos-app.sh '${{ needs.version.outputs.version }}' '${{ matrix.rid }}'
       - uses: actions/upload-artifact@v4
