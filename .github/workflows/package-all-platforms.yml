@@ -37,6 +37,11 @@ jobs:
   windows:
     needs: version
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    name: windows (${{ matrix.rid }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -46,11 +51,11 @@ jobs:
         run: choco install innosetup --no-progress -y
       - name: Build Windows installers
         shell: pwsh
-        run: ./Installer/build-installer.ps1 -Version '${{ needs.version.outputs.version }}' -RuntimeIdentifier both
+        run: ./Installer/build-installer.ps1 -Version '${{ needs.version.outputs.version }}' -RuntimeIdentifier '${{ matrix.rid }}'
       - uses: actions/upload-artifact@v4
         with:
-          name: LaunchPad.Ignite-Windows-${{ needs.version.outputs.version }}
-          path: Installer/artifacts/LaunchPad.Ignite-Setup_${{ needs.version.outputs.version }}_win-*.exe
+          name: LaunchPad.Ignite-${{ matrix.rid }}-${{ needs.version.outputs.version }}
+          path: Installer/artifacts/LaunchPad.Ignite-Setup_${{ needs.version.outputs.version }}_${{ matrix.rid }}.exe
           if-no-files-found: error
           retention-days: 30
 
