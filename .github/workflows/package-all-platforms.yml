@@ -1,4 +1,5 @@
 name: Package all platforms
+run-name: Package all platforms.${{ inputs.version || github.ref_name }}
 
 on:
   workflow_dispatch:
