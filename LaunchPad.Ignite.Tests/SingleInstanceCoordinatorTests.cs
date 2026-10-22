@@ -9,7 +9,7 @@ public sealed class SingleInstanceCoordinatorTests
     {
         var id = Guid.NewGuid().ToString("N");
         var lockPath = Path.Combine(Path.GetTempPath(), $"LaunchPad.Ignite.{id}.lock");
-        var pipeName = $"LaunchPad.Ignite.{id}";
+        var pipeName = $"LaunchPad.Ignite.{id[..24]}";
         var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = SingleInstanceCoordinator.AcquireOrReplaceExisting(lockPath, pipeName, TimeSpan.FromSeconds(5));
         Task<SingleInstanceCoordinator?>? secondTask = null;
