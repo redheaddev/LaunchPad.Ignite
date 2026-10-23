@@ -66,6 +66,11 @@ jobs:
   linux:
     needs: version
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [linux-x64, linux-arm64]
+    name: linux (${{ matrix.rid }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -74,11 +79,11 @@ jobs:
       - name: Run test suite on Linux
         run: dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj --configuration Release --verbosity minimal
       - name: Build Linux package
-        run: bash ./scripts/package-linux-app.sh '${{ needs.version.outputs.version }}'
+        run: bash ./scripts/package-linux-app.sh '${{ needs.version.outputs.version }}' '${{ matrix.rid }}'
       - uses: actions/upload-artifact@v4
         with:
-          name: LaunchPad.Ignite-Linux-${{ needs.version.outputs.version }}
-          path: LaunchPad.Ignite.App/artifacts/linux/LaunchPad.Ignite-${{ needs.version.outputs.version }}-linux-x64.tar.gz
+          name: LaunchPad.Ignite-${{ matrix.rid }}-${{ needs.version.outputs.version }}
+          path: LaunchPad.Ignite.App/artifacts/linux/LaunchPad.Ignite-${{ needs.version.outputs.version }}-${{ matrix.rid }}.tar.gz
           if-no-files-found: error
           retention-days: 30
 

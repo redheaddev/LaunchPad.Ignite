@@ -55,13 +55,19 @@ The installer release process expects the app version to be bumped before buildi
 
 ## Build a Linux package
 
-On Linux, build the portable x64 tarball with the .NET 8 SDK:
+On Linux, build the portable x64 tarball (the default) with the .NET 8 SDK:
 
 ```bash
 bash ./scripts/package-linux-app.sh
 ```
 
-The archive is written to `LaunchPad.Ignite.App/artifacts/linux`. Extract it, run `chmod +x ./LaunchPad.Ignite.App`, then launch `./LaunchPad.Ignite.App`. A graphical desktop session is required. Linux secret storage and global activation hotkeys are not supported yet; secret commands report that limitation and do not store values.
+To build the ARM64 tarball, pass the project version and `linux-arm64` runtime identifier:
+
+```bash
+bash ./scripts/package-linux-app.sh "$(dotnet msbuild LaunchPad.Ignite.App/LaunchPad.Ignite.App.csproj -getProperty:Version -nologo)" linux-arm64
+```
+
+The architecture-specific archive is written to `LaunchPad.Ignite.App/artifacts/linux`. Extract it, run `chmod +x ./LaunchPad.Ignite.App`, then launch `./LaunchPad.Ignite.App`. Use the package matching the machine's CPU architecture (`linux-x64` or `linux-arm64`). A graphical desktop session is required. Linux secret storage and global activation hotkeys are not supported yet; secret commands report that limitation and do not store values.
 
 On macOS, build a ZIP containing the app bundle for the host architecture, or specify an architecture explicitly:
 
