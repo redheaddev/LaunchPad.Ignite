@@ -1,6 +1,7 @@
 using LaunchPad.Ignite.App.Services.WindowBehavior;
 using LaunchPad.Ignite.App.Services.WindowBehavior.Linux;
 using LaunchPad.Ignite.App.Services.Hotkeys;
+using System.IO;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -59,6 +60,26 @@ public class LinuxWindowPlatformBehaviorTests
         Assert.Equal(
             "/org/freedesktop/portal/desktop/request/_1_42/request_launchpad_test",
             requestPath);
+    }
+
+    [Fact]
+    public void UsesXdgStateHomeForWaylandDiagnostics()
+    {
+        var stateHome = Path.Combine(Path.GetTempPath(), "launchpad-state");
+
+        var path = WaylandHotkeyDiagnostics.GetLogPath(stateHome, Path.GetTempPath());
+
+        Assert.Equal(Path.Combine(stateHome, "LaunchPad.Ignite", "activation-hotkey.log"), path);
+    }
+
+    [Fact]
+    public void DefaultsWaylandDiagnosticsToLocalStateDirectory()
+    {
+        var home = Path.Combine(Path.GetTempPath(), "launchpad-home");
+
+        var path = WaylandHotkeyDiagnostics.GetLogPath(null, home);
+
+        Assert.Equal(Path.Combine(home, ".local", "state", "LaunchPad.Ignite", "activation-hotkey.log"), path);
     }
 
     [Theory]

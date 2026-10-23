@@ -54,6 +54,8 @@ required by Avalonia and an X11 or Wayland session. Global activation hotkeys
 use a keyboard hook in X11 sessions and the desktop's GlobalShortcuts portal in
 Wayland sessions. Wayland availability depends on portal support and may require
 approving the shortcut.
+Wayland shortcut diagnostics are written to
+\${XDG_STATE_HOME:-\$HOME/.local/state}/LaunchPad.Ignite/activation-hotkey.log.
 
 Secret storage is not supported yet. Secret commands report that limitation
 and do not store values.

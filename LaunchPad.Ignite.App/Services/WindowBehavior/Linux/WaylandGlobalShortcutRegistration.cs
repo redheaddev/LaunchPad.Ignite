@@ -23,17 +23,21 @@ internal sealed class WaylandGlobalShortcutRegistration : IActivationHotkeyRegis
         {
             if (!GlobalActivationHotkey.TryParse(settingValue, out var hotkey))
             {
+                WaylandHotkeyDiagnostics.Write($"Registration skipped because '{settingValue}' is not a valid global shortcut.");
                 Trace.TraceWarning($"Unable to register invalid Wayland activation hotkey '{settingValue}'.");
                 return;
             }
 
+            WaylandHotkeyDiagnostics.Write($"Starting registration for {hotkey.DisplayName}.");
             await WaylandGlobalShortcutsPortal.RunAsync(hotkey, activationRequested, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            WaylandHotkeyDiagnostics.Write("Registration was canceled because the setting changed or the app is closing.");
         }
         catch (Exception exception)
         {
+            WaylandHotkeyDiagnostics.Write("Wayland activation shortcut registration failed.", exception);
             Trace.TraceWarning($"Unable to register the Wayland activation hotkey: {exception.Message}");
         }
     }
