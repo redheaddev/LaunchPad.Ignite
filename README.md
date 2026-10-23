@@ -37,7 +37,7 @@ dotnet test LaunchPad.Ignite.Tests/LaunchPad.Ignite.Tests.csproj
 
 ## Package all platforms
 
-The `Package all platforms` GitHub Actions workflow builds version-matched packages on native runners for Windows x64 and ARM64, Linux x64, and macOS x64 and ARM64. Run it manually from the Actions tab, optionally entering the version in `LaunchPad.Ignite.App.csproj`. Pushing a `v<version>` tag also triggers packaging. In either case, the version must match the project version, so bump the app version before packaging. The workflow uploads downloadable build artifacts but does not publish a GitHub Release.
+The `Package all platforms` GitHub Actions workflow builds packages on native runners for Windows x64 and ARM64, Linux x64, and macOS x64 and ARM64. Run it manually from the Actions tab and enter the numeric major.minor.patch version to package; this value overrides the version in `LaunchPad.Ignite.App.csproj` for that build. Pushing a `v<version>` tag also triggers packaging and uses the tag's version. The workflow uploads downloadable build artifacts but does not publish a GitHub Release.
 
 The macOS artifact is a ZIP containing a versioned `.app` bundle. The Linux artifact is a portable x64 tarball. Windows artifacts are per-user Inno Setup installers.
 

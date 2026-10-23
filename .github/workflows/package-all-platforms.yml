@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: App version to package (must match the project version)
+        description: Numeric major.minor.patch version to package
         required: true
         type: string
       target_os:
@@ -51,9 +51,8 @@ jobs:
           $projectVersion = $project.Project.PropertyGroup.Version | Select-Object -First 1
           $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG -replace '^v', '' } elseif ($env:REQUESTED_VERSION) { $env:REQUESTED_VERSION } else { $projectVersion }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version: $version" }
-          if ($version -ne $projectVersion) { throw "Package version $version must match project version $projectVersion. Bump the project version before packaging." }
           "version=$version" >> $env:GITHUB_OUTPUT
-          "## Packaging version`n`nResolved project version: **$version**" >> $env:GITHUB_STEP_SUMMARY
+          "## Packaging version`n`nResolved package version: **$version**" >> $env:GITHUB_STEP_SUMMARY
 
   windows:
     needs: version
