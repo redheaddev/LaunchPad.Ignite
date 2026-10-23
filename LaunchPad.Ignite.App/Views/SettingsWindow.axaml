@@ -494,6 +494,9 @@
 						<StackPanel Spacing="8">
 							<TextBlock Text="LaunchPad hotkey" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource ThemeText}" />
 							<TextBlock Text="Activate LaunchPad with this key chord. At least one modifier is required." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="X11 sessions use a global keyboard hook for activation." IsVisible="{Binding IsLinuxX11Session}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Wayland sessions use the desktop Global Shortcuts portal. Your desktop may ask you to approve the shortcut; availability depends on portal support." IsVisible="{Binding IsLinuxWaylandSession}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
+							<TextBlock Text="Linux global activation needs an X11 session or a supported Wayland Global Shortcuts portal." IsVisible="{Binding IsLinuxSessionTypeUnknown}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource ThemeSecondaryText}" />
 							<StackPanel Orientation="Horizontal" Spacing="10">
 								<TextBlock Text="{Binding GlobalActivationHotkeyDisplay}" Foreground="{DynamicResource ThemeAccent}" VerticalAlignment="Center" />
 								<Button Content="Change hotkey" Click="ChangeHotkey_Click" />

@@ -50,10 +50,13 @@ Run ./LaunchPad.Ignite.App from a graphical desktop session.
 If the executable bit was not preserved by the archive tool, run
 chmod +x ./LaunchPad.Ignite.App first.
 A .NET runtime is included. The Linux desktop still needs the native libraries
-required by Avalonia and an X11 or Wayland session.
+required by Avalonia and an X11 or Wayland session. Global activation hotkeys
+use a keyboard hook in X11 sessions and the desktop's GlobalShortcuts portal in
+Wayland sessions. Wayland availability depends on portal support and may require
+approving the shortcut.
 
-Secret storage and global activation hotkeys are not supported yet. Secret
-commands report that limitation and do not store values.
+Secret storage is not supported yet. Secret commands report that limitation
+and do not store values.
 EOF
 
 tar -czf "$archive" -C "$artifact_dir" "$package_name"

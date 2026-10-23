@@ -16,6 +16,7 @@ using LaunchPad.Ignite.App.Services.Hotkeys;
 using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.App.Services.Themes;
 using LaunchPad.Ignite.App.Services.Secrets;
+using LaunchPad.Ignite.App.Services.WindowBehavior.Linux;
 using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.App.ViewModels;
@@ -172,6 +173,17 @@ public partial class SettingsViewModel : ViewModelBase
         private set => SetProperty(ref _activationHotkey, value);
     }
     public string GlobalActivationHotkeyDisplay => ActivationHotkey.DisplayName;
+    public bool IsLinuxX11Session => OperatingSystem.IsLinux()
+        && LinuxSessionDetector.IsX11Session(
+            Environment.GetEnvironmentVariable("XDG_SESSION_TYPE"),
+            Environment.GetEnvironmentVariable("DISPLAY"));
+    public bool IsLinuxWaylandSession => OperatingSystem.IsLinux()
+        && LinuxSessionDetector.IsWaylandSession(
+            Environment.GetEnvironmentVariable("XDG_SESSION_TYPE"),
+            Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"));
+    public bool IsLinuxSessionTypeUnknown => OperatingSystem.IsLinux()
+        && !IsLinuxX11Session
+        && !IsLinuxWaylandSession;
     public bool IsCapturingGlobalActivationHotkey
     {
         get => _isCapturingGlobalActivationHotkey;
