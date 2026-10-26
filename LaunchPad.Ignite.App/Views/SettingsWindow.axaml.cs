@@ -92,6 +92,14 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void SaveHotkey_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is SettingsViewModel viewModel)
+        {
+            viewModel.SaveGlobalActivationHotkey();
+        }
+    }
+
     private void CaptureGlobalActivationHotkey(object? sender, KeyEventArgs e)
     {
         if (DataContext is SettingsViewModel settingsViewModel)

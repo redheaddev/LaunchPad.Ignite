@@ -4,9 +4,16 @@ internal interface IWindowPlatformBehavior
 {
     bool SupportsGlobalKeyboardHook { get; }
 
+    bool SupportsSavedActivationHotkeyReset { get; }
+
     WindowDeactivationAction DeactivationAction { get; }
 
-    IActivationHotkeyRegistration? TryRegisterActivationHotkey(string settingValue, System.Action activationRequested, out string? error);
+    bool TryResetSavedActivationHotkey(out string? error);
+
+    IActivationHotkeyRegistration? TryRegisterActivationHotkey(
+        string settingValue,
+        System.Action activationRequested,
+        out string? error);
 }
 
 internal enum WindowDeactivationAction
@@ -18,4 +25,9 @@ internal enum WindowDeactivationAction
 
 internal interface IActivationHotkeyRegistration : System.IDisposable
 {
+}
+
+internal interface IConfigurableActivationHotkeyRegistration
+{
+    void RequestConfiguration();
 }

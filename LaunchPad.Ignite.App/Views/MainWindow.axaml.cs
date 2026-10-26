@@ -294,9 +294,7 @@ public partial class MainWindow : Window
 
         var settingsViewModel = viewModel.CreateSettingsViewModel();
         settingsViewModel.OpenCommandEditor(commandName);
-        var window = new SettingsWindow(settingsViewModel);
-        window.Closed += (_, _) => RefreshWindowsActivationHotkey();
-        ShowIndependentWindow(window);
+        ShowSettingsWindow(settingsViewModel);
     }
 
     internal async Task<IReadOnlyDictionary<string, string>?> ShowSnippetArgumentsAsync(SnippetArgumentsWindow dialog)
@@ -1072,10 +1070,47 @@ public partial class MainWindow : Window
             return Task.CompletedTask;
         }
 
-        var window = new SettingsWindow(viewModel.CreateSettingsViewModel());
-        window.Closed += (_, _) => RefreshWindowsActivationHotkey();
-        ShowIndependentWindow(window);
+        ShowSettingsWindow(viewModel.CreateSettingsViewModel());
         return Task.CompletedTask;
+    }
+
+    private void ShowSettingsWindow(SettingsViewModel settingsViewModel)
+    {
+        EventHandler hotkeyChanged = (_, _) =>
+        {
+            if (_windowPlatform.SupportsSavedActivationHotkeyReset)
+            {
+                if (_windowPlatform.TryResetSavedActivationHotkey(out var resetError))
+                {
+                    RefreshWindowsActivationHotkey();
+                }
+                else
+                {
+                    settingsViewModel.ReportGlobalActivationHotkeyStatus(
+                        $"Saved {settingsViewModel.ActivationHotkey.DisplayName}, but could not clear the GNOME shortcut: {resetError} Trying portal configuration instead.");
+                    if (_activationHotkey is IConfigurableActivationHotkeyRegistration configurableRegistration)
+                    {
+                        configurableRegistration.RequestConfiguration();
+                    }
+                    else
+                    {
+                        RefreshWindowsActivationHotkey();
+                    }
+                }
+            }
+            else if (_activationHotkey is IConfigurableActivationHotkeyRegistration configurableRegistration)
+            {
+                configurableRegistration.RequestConfiguration();
+            }
+            else
+            {
+                RefreshWindowsActivationHotkey();
+            }
+        };
+        settingsViewModel.GlobalActivationHotkeyChanged += hotkeyChanged;
+        var window = new SettingsWindow(settingsViewModel);
+        window.Closed += (_, _) => settingsViewModel.GlobalActivationHotkeyChanged -= hotkeyChanged;
+        ShowIndependentWindow(window);
     }
 
     private void HelpButton_Click(object? sender, RoutedEventArgs e)

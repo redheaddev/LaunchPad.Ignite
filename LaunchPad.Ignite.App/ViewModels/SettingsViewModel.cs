@@ -51,6 +51,7 @@ public partial class SettingsViewModel : ViewModelBase
     private CommandDetailsViewModel? _selectedCommandDetails;
     private EnumListEditorViewModel? _selectedEnumListEditor;
     private GlobalActivationHotkey _activationHotkey;
+    private GlobalActivationHotkey? _pendingActivationHotkey;
     private bool _isCapturingGlobalActivationHotkey;
     private string _globalActivationHotkeyStatus = string.Empty;
 
@@ -173,6 +174,10 @@ public partial class SettingsViewModel : ViewModelBase
         private set => SetProperty(ref _activationHotkey, value);
     }
     public string GlobalActivationHotkeyDisplay => ActivationHotkey.DisplayName;
+    public string PendingGlobalActivationHotkeyDisplay => _pendingActivationHotkey?.DisplayName ?? string.Empty;
+    public bool HasPendingGlobalActivationHotkey => _pendingActivationHotkey is not null;
+    public bool CanSaveGlobalActivationHotkey => _pendingActivationHotkey is not null
+        && _pendingActivationHotkey != ActivationHotkey;
     public bool IsLinuxX11Session => OperatingSystem.IsLinux()
         && LinuxSessionDetector.IsX11Session(
             Environment.GetEnvironmentVariable("XDG_SESSION_TYPE"),
@@ -194,6 +199,14 @@ public partial class SettingsViewModel : ViewModelBase
         get => _globalActivationHotkeyStatus;
         private set => SetProperty(ref _globalActivationHotkeyStatus, value);
     }
+
+    public event EventHandler? GlobalActivationHotkeyChanged;
+
+    public void ReportGlobalActivationHotkeyStatus(string status)
+    {
+        GlobalActivationHotkeyStatus = status;
+    }
+
     public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsMetadataSelected && !IsCommandsSelected && !IsListsSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
     public string NewThemeName
@@ -463,6 +476,10 @@ public partial class SettingsViewModel : ViewModelBase
     public void CancelGlobalActivationHotkeyCapture()
     {
         IsCapturingGlobalActivationHotkey = false;
+        _pendingActivationHotkey = null;
+        OnPropertyChanged(nameof(PendingGlobalActivationHotkeyDisplay));
+        OnPropertyChanged(nameof(HasPendingGlobalActivationHotkey));
+        OnPropertyChanged(nameof(CanSaveGlobalActivationHotkey));
         GlobalActivationHotkeyStatus = "Hotkey change canceled.";
     }
 
@@ -475,10 +492,38 @@ public partial class SettingsViewModel : ViewModelBase
             return false;
         }
 
+        _pendingActivationHotkey = hotkey;
+        OnPropertyChanged(nameof(PendingGlobalActivationHotkeyDisplay));
+        OnPropertyChanged(nameof(HasPendingGlobalActivationHotkey));
+        OnPropertyChanged(nameof(CanSaveGlobalActivationHotkey));
+        GlobalActivationHotkeyStatus = hotkey == ActivationHotkey
+            ? $"{hotkey.DisplayName} is already the active shortcut."
+            : $"Captured {hotkey.DisplayName}. Save to apply it.";
+        return true;
+    }
+
+    public bool SaveGlobalActivationHotkey()
+    {
+        if (_pendingActivationHotkey is not { } hotkey)
+        {
+            return false;
+        }
+
+        _pendingActivationHotkey = null;
+        OnPropertyChanged(nameof(PendingGlobalActivationHotkeyDisplay));
+        OnPropertyChanged(nameof(HasPendingGlobalActivationHotkey));
+        OnPropertyChanged(nameof(CanSaveGlobalActivationHotkey));
+        if (hotkey == ActivationHotkey)
+        {
+            GlobalActivationHotkeyStatus = $"{hotkey.DisplayName} is already the active shortcut.";
+            return false;
+        }
+
         ActivationHotkey = hotkey;
         _settingsStore.SetValue("app:globalActivationHotkey", hotkey.ToSettingValue());
         OnPropertyChanged(nameof(GlobalActivationHotkeyDisplay));
-        GlobalActivationHotkeyStatus = $"Saved {hotkey.DisplayName}.";
+        GlobalActivationHotkeyStatus = $"Saved {hotkey.DisplayName}. Updating the global shortcut...";
+        GlobalActivationHotkeyChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }
 

@@ -43,12 +43,16 @@ cp -R "$publish_dir/." "$package_dir/"
 find "$package_dir" -type d -exec chmod 755 {} +
 find "$package_dir" -type f -exec chmod 644 {} +
 chmod 755 "$package_dir/LaunchPad.Ignite.App"
+cp "$repo_root/scripts/install-linux-app.sh" "$package_dir/install-linux-app.sh"
+sed -i 's/\r$//' "$package_dir/install-linux-app.sh"
+chmod 755 "$package_dir/install-linux-app.sh"
 cat > "$package_dir/README-Linux.txt" <<EOF
 LaunchPad.Ignite Linux $architecture
 
-Run ./LaunchPad.Ignite.App from a graphical desktop session.
-If the executable bit was not preserved by the archive tool, run
-chmod +x ./LaunchPad.Ignite.App first.
+Keep this extracted directory in a permanent location. Run
+chmod +x ./LaunchPad.Ignite.App ./install-linux-app.sh, then run
+./install-linux-app.sh to add LaunchPad Ignite to the applications menu and
+launch it from there. This desktop entry lets Wayland portals identify the app.
 A .NET runtime is included. The Linux desktop still needs the native libraries
 required by Avalonia and an X11 or Wayland session. Global activation hotkeys
 use a keyboard hook in X11 sessions and the desktop's GlobalShortcuts portal in

@@ -2,6 +2,7 @@ using LaunchPad.Ignite.App.Services.WindowBehavior;
 using LaunchPad.Ignite.App.Services.WindowBehavior.Linux;
 using LaunchPad.Ignite.App.Services.Hotkeys;
 using System.IO;
+using Tmds.DBus.Protocol;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -30,16 +31,85 @@ public class LinuxWindowPlatformBehaviorTests
     public void WaylandUsesPortalRegistrationWithoutStartingKeyboardHook()
     {
         var expectedRegistration = new TestRegistration();
+        var configurationRequested = false;
         var platform = new LinuxWindowPlatformBehavior(
             "wayland",
             null,
-            (_, _) => expectedRegistration);
+            (_, _) =>
+            {
+                configurationRequested = true;
+                return expectedRegistration;
+            });
 
         var registration = platform.TryRegisterActivationHotkey("Alt+Space", () => { }, out var error);
 
         Assert.False(platform.SupportsGlobalKeyboardHook);
         Assert.Same(expectedRegistration, registration);
+        Assert.True(configurationRequested);
         Assert.Null(error);
+    }
+
+    [Fact]
+    public void ResetsSavedShortcutOnlyForWaylandSessions()
+    {
+        var resetCount = 0;
+        var wayland = new LinuxWindowPlatformBehavior(
+            "wayland",
+            null,
+            currentDesktop: "ubuntu:GNOME",
+            resetWaylandShortcut: () =>
+            {
+                resetCount++;
+                return null;
+            });
+        var x11 = new LinuxWindowPlatformBehavior(
+            "x11",
+            null,
+            resetWaylandShortcut: () =>
+            {
+                resetCount++;
+                return null;
+            });
+
+        Assert.True(wayland.TryResetSavedActivationHotkey(out var waylandError));
+        Assert.Null(waylandError);
+        Assert.True(x11.TryResetSavedActivationHotkey(out var x11Error));
+        Assert.Null(x11Error);
+        Assert.Equal(1, resetCount);
+    }
+
+    [Fact]
+    public void ReportsSavedShortcutResetFailure()
+    {
+        const string expectedError = "gsettings schema unavailable";
+        var platform = new LinuxWindowPlatformBehavior(
+            "wayland",
+            null,
+            currentDesktop: "ubuntu:GNOME",
+            resetWaylandShortcut: () => expectedError);
+
+        Assert.False(platform.TryResetSavedActivationHotkey(out var error));
+        Assert.Equal(expectedError, error);
+    }
+
+    [Fact]
+    public void DoesNotAttemptGnomeShortcutResetOutsideGnomeWayland()
+    {
+        var resetCount = 0;
+        var platform = new LinuxWindowPlatformBehavior(
+            "wayland",
+            null,
+            currentDesktop: "KDE",
+            resetWaylandShortcut: () =>
+            {
+                resetCount++;
+                return null;
+            });
+
+        Assert.False(platform.SupportsSavedActivationHotkeyReset);
+        Assert.True(platform.TryResetSavedActivationHotkey(out var error));
+        Assert.Null(error);
+        Assert.Equal(0, resetCount);
     }
 
     [Theory]
@@ -58,8 +128,19 @@ public class LinuxWindowPlatformBehaviorTests
         var requestPath = WaylandGlobalShortcutsPortal.GetRequestPath(":1.42", "request_launchpad_test");
 
         Assert.Equal(
-            "/org/freedesktop/portal/desktop/request/_1_42/request_launchpad_test",
+            "/org/freedesktop/portal/desktop/request/1_42/request_launchpad_test",
             requestPath);
+    }
+
+    [Fact]
+    public void ReadsStringSessionHandleReturnedByPortal()
+    {
+        var sessionHandle = WaylandGlobalShortcutsPortal.GetSessionHandle(VariantValue.String(
+            "/org/freedesktop/portal/desktop/session/1_42/session_launchpad_test"));
+
+        Assert.Equal(
+            "/org/freedesktop/portal/desktop/session/1_42/session_launchpad_test",
+            sessionHandle);
     }
 
     [Fact]

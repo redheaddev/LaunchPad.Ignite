@@ -52,6 +52,34 @@ public sealed class SettingsAndListDefaultsTests
         Assert.Equal("Alt+Space", hotkey.DisplayName);
     }
 
+    [Fact]
+    public void ChangingGlobalActivationHotkeyIsSavedOnlyAfterExplicitSave()
+    {
+        using var directory = new TemporaryDirectory();
+        var store = new ProfileSettingsStore(Path.Combine(directory.Path, "settings.json"));
+        var viewModel = CreateSettingsViewModel(store, _ => { });
+        var changeCount = 0;
+        viewModel.GlobalActivationHotkeyChanged += (_, _) => changeCount++;
+
+        Assert.True(viewModel.TrySetGlobalActivationHotkey(
+            control: true,
+            alt: false,
+            shift: true,
+            meta: false,
+            keyName: "K"));
+
+        Assert.Equal(0, changeCount);
+        Assert.Equal(string.Empty, store.GetValue("app:globalActivationHotkey", string.Empty));
+        Assert.True(viewModel.HasPendingGlobalActivationHotkey);
+        Assert.True(viewModel.CanSaveGlobalActivationHotkey);
+
+        Assert.True(viewModel.SaveGlobalActivationHotkey());
+
+        Assert.Equal(1, changeCount);
+        Assert.Equal("Ctrl+Shift+VcK", store.GetValue("app:globalActivationHotkey", string.Empty));
+        Assert.False(viewModel.HasPendingGlobalActivationHotkey);
+    }
+
     [Theory]
     [InlineData("Ctrl+VcMinus", "Ctrl+-")]
     [InlineData("Alt+VcNumPad1", "Alt+NumPad 1")]

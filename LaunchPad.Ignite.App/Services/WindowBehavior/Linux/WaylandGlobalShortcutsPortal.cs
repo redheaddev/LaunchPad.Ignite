@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using LaunchPad.Ignite.App.Services.Hotkeys;
 using Tmds.DBus.Protocol;
@@ -13,15 +14,25 @@ internal static class WaylandGlobalShortcutsPortal
     private const string ObjectPath = "/org/freedesktop/portal/desktop";
     private const string GlobalShortcutsInterface = "org.freedesktop.portal.GlobalShortcuts";
     private const string RequestInterface = "org.freedesktop.portal.Request";
+    private const string PropertiesInterface = "org.freedesktop.DBus.Properties";
     private const string ShortcutId = "launchpad-activate";
 
     public static async Task RunAsync(
         GlobalActivationHotkey hotkey,
         Action activationRequested,
+        ChannelReader<bool> configurationRequests,
         CancellationToken cancellationToken)
     {
         WaylandHotkeyDiagnostics.Write("Connecting to the desktop session bus.");
-        var connection = new DBusConnection(DBusAddress.Session);
+        var sessionBusAddress = DBusAddress.Session
+            ?? throw new InvalidOperationException("The desktop session bus address is unavailable.");
+        var connectionOptions = new DBusConnectionOptions(sessionBusAddress)
+        {
+            OnException = context => WaylandHotkeyDiagnostics.Write(
+                $"D-Bus connection reported an exception from {context.Source}.",
+                context.Exception)
+        };
+        var connection = new DBusConnection(connectionOptions);
 
         string? sessionHandle = null;
         var sessionHandleLock = new object();
@@ -60,6 +71,7 @@ internal static class WaylandGlobalShortcutsPortal
                 ObserverFlags.None,
                 emitOnCapturedContext: false);
 
+            await VerifySessionBusMethodCallsAsync(connection);
             var createdSessionHandle = await CreateSessionAsync(connection, cancellationToken);
             lock (sessionHandleLock)
             {
@@ -69,7 +81,11 @@ internal static class WaylandGlobalShortcutsPortal
             WaylandHotkeyDiagnostics.Write("Desktop portal session created.");
             var bindResponse = await BindShortcutAsync(connection, createdSessionHandle, hotkey, cancellationToken);
             WaylandHotkeyDiagnostics.Write($"Desktop portal accepted shortcut binding (response code {bindResponse.Code}).");
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            await ProcessConfigurationRequestsAsync(
+                connection,
+                createdSessionHandle,
+                configurationRequests,
+                cancellationToken);
         }
         finally
         {
@@ -98,6 +114,7 @@ internal static class WaylandGlobalShortcutsPortal
             connection,
             "CreateSession",
             requestToken,
+            "a{sv}",
             (ref MessageWriter writer) => writer.WriteDictionary(new Dictionary<string, VariantValue>
             {
                 ["handle_token"] = VariantValue.String(requestToken),
@@ -110,7 +127,7 @@ internal static class WaylandGlobalShortcutsPortal
             throw new InvalidOperationException("The desktop portal did not return a session handle.");
         }
 
-        return handle.GetObjectPathAsString();
+        return GetSessionHandle(handle);
     }
 
     private static Task<PortalResponse> BindShortcutAsync(
@@ -130,6 +147,7 @@ internal static class WaylandGlobalShortcutsPortal
             connection,
             "BindShortcuts",
             requestToken,
+            "oa(sa{sv})sa{sv}",
             (ref MessageWriter writer) =>
             {
                 writer.WriteObjectPath(sessionHandle);
@@ -155,13 +173,16 @@ internal static class WaylandGlobalShortcutsPortal
         DBusConnection connection,
         string method,
         string requestToken,
+        string signature,
         MessageBodyWriter writeBody,
         CancellationToken cancellationToken)
     {
         var responseCompletion = new TaskCompletionSource<PortalResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var uniqueBusName = connection.UniqueName
+            ?? throw new InvalidOperationException("The session bus did not assign a unique connection name.");
         using var responseWatch = await connection.WatchSignalAsync<PortalResponse>(
             Destination,
-            GetRequestPath(connection.UniqueName, requestToken),
+            GetRequestPath(uniqueBusName, requestToken),
             RequestInterface,
             "Response",
             ReadResponse,
@@ -177,9 +198,20 @@ internal static class WaylandGlobalShortcutsPortal
             ObserverFlags.None,
             emitOnCapturedContext: false);
 
-        var message = CreateMethodCall(connection, ObjectPath, GlobalShortcutsInterface, method, writeBody);
-        WaylandHotkeyDiagnostics.Write($"Sent desktop portal {method} request.");
-        _ = await connection.CallMethodAsync<string>(message, ReadObjectPath);
+        var message = CreateMethodCall(connection, Destination, ObjectPath, GlobalShortcutsInterface, method, signature, writeBody);
+        WaylandHotkeyDiagnostics.Write(
+            $"Calling desktop portal {Destination} {GlobalShortcutsInterface}.{method} with signature '{signature}' from {uniqueBusName}.");
+        string requestHandle;
+        try
+        {
+            requestHandle = await connection.CallMethodAsync<string>(message, ReadObjectPath);
+            WaylandHotkeyDiagnostics.Write($"Desktop portal {method} method returned request handle {requestHandle}.");
+        }
+        catch (Exception exception)
+        {
+            WaylandHotkeyDiagnostics.Write($"D-Bus method call {method} did not return a request handle.", exception);
+            throw;
+        }
 
         var response = await responseCompletion.Task.WaitAsync(cancellationToken);
         WaylandHotkeyDiagnostics.Write($"Desktop portal {method} response code: {response.Code}.");
@@ -197,7 +229,7 @@ internal static class WaylandGlobalShortcutsPortal
     {
         try
         {
-            var message = CreateMethodCall(connection, sessionHandle, "org.freedesktop.portal.Session", "Close");
+            var message = CreateMethodCall(connection, Destination, sessionHandle, "org.freedesktop.portal.Session", "Close", string.Empty);
             await connection.CallMethodAsync(message);
             WaylandHotkeyDiagnostics.Write("Desktop portal session closed.");
         }
@@ -207,17 +239,115 @@ internal static class WaylandGlobalShortcutsPortal
         }
     }
 
+    private static async Task ConfigureShortcutAsync(
+        DBusConnection connection,
+        string sessionHandle,
+        CancellationToken cancellationToken)
+    {
+        var version = await GetGlobalShortcutsVersionAsync(connection);
+        if (version < 2)
+        {
+            throw new NotSupportedException(
+                $"The desktop Global Shortcuts portal version {version} does not support shortcut configuration.");
+        }
+
+        var message = CreateMethodCall(
+            connection,
+            Destination,
+            ObjectPath,
+            GlobalShortcutsInterface,
+            "ConfigureShortcuts",
+            "osa{sv}",
+            (ref MessageWriter writer) =>
+            {
+                writer.WriteObjectPath(sessionHandle);
+                writer.WriteString(string.Empty);
+                writer.WriteDictionary(new Dictionary<string, VariantValue>());
+            });
+        WaylandHotkeyDiagnostics.Write("Opening the desktop portal shortcut configuration for the saved hotkey.");
+        await connection.CallMethodAsync(message);
+        cancellationToken.ThrowIfCancellationRequested();
+        WaylandHotkeyDiagnostics.Write("Desktop portal shortcut configuration was opened.");
+    }
+
+    private static async Task ProcessConfigurationRequestsAsync(
+        DBusConnection connection,
+        string sessionHandle,
+        ChannelReader<bool> configurationRequests,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var _ in configurationRequests.ReadAllAsync(cancellationToken))
+        {
+            try
+            {
+                await ConfigureShortcutAsync(connection, sessionHandle, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                WaylandHotkeyDiagnostics.Write("Unable to open desktop portal shortcut configuration.", exception);
+            }
+        }
+    }
+
+    private static async Task<uint> GetGlobalShortcutsVersionAsync(DBusConnection connection)
+    {
+        var message = CreateMethodCall(
+            connection,
+            Destination,
+            ObjectPath,
+            PropertiesInterface,
+            "Get",
+            "ss",
+            (ref MessageWriter writer) =>
+            {
+                writer.WriteString(GlobalShortcutsInterface);
+                writer.WriteString("version");
+            });
+        var version = await connection.CallMethodAsync<VariantValue>(message, ReadVariantValue);
+        return version.GetUInt32();
+    }
+
+    private static async Task VerifySessionBusMethodCallsAsync(DBusConnection connection)
+    {
+        var message = CreateMethodCall(
+            connection,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "GetNameOwner",
+            "s",
+            (ref MessageWriter writer) => writer.WriteString(Destination));
+
+        WaylandHotkeyDiagnostics.Write("Checking D-Bus method calls with org.freedesktop.DBus.GetNameOwner.");
+        try
+        {
+            var owner = await connection.CallMethodAsync<string>(message, ReadString);
+            WaylandHotkeyDiagnostics.Write($"D-Bus method-call check succeeded; portal owner is {owner}.");
+        }
+        catch (Exception exception)
+        {
+            WaylandHotkeyDiagnostics.Write("D-Bus method-call check failed.", exception);
+            throw;
+        }
+    }
+
     private static MessageBuffer CreateMethodCall(
         DBusConnection connection,
+        string destination,
         string path,
         string @interface,
         string method,
+        string signature,
         MessageBodyWriter? writeBody = null)
     {
         var writer = connection.GetMessageWriter();
         try
         {
-            writer.WriteMethodCallHeader(Destination, path, @interface, method);
+            writer.WriteMethodCallHeader(destination, path, @interface, method, signature, MessageFlags.None);
             writeBody?.Invoke(ref writer);
             return writer.CreateMessage();
         }
@@ -231,6 +361,18 @@ internal static class WaylandGlobalShortcutsPortal
     {
         var reader = message.GetBodyReader();
         return reader.ReadObjectPathAsString();
+    }
+
+    private static string ReadString(Message message, object? state)
+    {
+        var reader = message.GetBodyReader();
+        return reader.ReadString();
+    }
+
+    private static VariantValue ReadVariantValue(Message message, object? state)
+    {
+        var reader = message.GetBodyReader();
+        return reader.ReadVariantValue();
     }
 
     private static PortalResponse ReadResponse(Message message, object? state)
@@ -253,9 +395,17 @@ internal static class WaylandGlobalShortcutsPortal
 
     internal static string GetRequestPath(string uniqueBusName, string requestToken)
     {
-        var sanitizedBusName = uniqueBusName.Replace(':', '_').Replace('.', '_');
+        var sanitizedBusName = uniqueBusName.Replace(":", string.Empty, StringComparison.Ordinal).Replace('.', '_');
         return $"{ObjectPath}/request/{sanitizedBusName}/{requestToken}";
     }
+
+    internal static string GetSessionHandle(VariantValue handle) =>
+        handle.Type switch
+        {
+            VariantValueType.ObjectPath => handle.GetObjectPathAsString(),
+            VariantValueType.String => handle.GetString(),
+            _ => throw new InvalidOperationException($"The desktop portal returned a session handle with unexpected type '{handle.Type}'.")
+        };
 
     private delegate void MessageBodyWriter(ref MessageWriter writer);
 
