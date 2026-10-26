@@ -69,8 +69,9 @@ if (@(Invoke-Git -GitArguments @("ls-remote", "--tags", "origin", "refs/tags/$ta
 	throw "Tag '$tag' already exists on origin."
 }
 
-$versionRegex = [regex]::new($versionPattern)
-$updatedProjectContent = $versionRegex.Replace($projectContent, ('$1' + $Version + '$3'), 1)
+$updatedProjectContent = $projectContent.Substring(0, $versionMatch.Index) +
+	$versionMatch.Groups[1].Value + $Version + $versionMatch.Groups[3].Value +
+	$projectContent.Substring($versionMatch.Index + $versionMatch.Length)
 if ($PSCmdlet.ShouldProcess("origin/$branch and $tag", "Bump version to $Version, commit, tag, and push")) {
 	[System.IO.File]::WriteAllText($projectPath, $updatedProjectContent, [System.Text.UTF8Encoding]::new($false))
 	Invoke-Git -GitArguments @("add", "--", $projectRelativePath) | Out-Null
