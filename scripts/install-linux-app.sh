@@ -27,14 +27,29 @@ mkdir -p "$applications_dir"
 temporary_entry="$(mktemp "$applications_dir/.launchpad-ignite.XXXXXX")"
 trap 'rm -f "$temporary_entry"' EXIT
 escaped_executable="$(escape_desktop_exec_argument "$app_executable")"
+icon_name="io.github.redheaddev.launchpadignite"
+icon_sources=(
+  "$package_dir/$icon_name.png"
+  "$package_dir/share/icons/hicolor/256x256/apps/$icon_name.png"
+)
+icon_theme_dir="$HOME/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "$icon_theme_dir"
+for icon_source in "${icon_sources[@]}"; do
+  if [[ -f "$icon_source" ]]; then
+    cp "$icon_source" "$icon_theme_dir/$icon_name.png"
+    break
+  fi
+done
 
 cat > "$temporary_entry" <<EOF
 [Desktop Entry]
 Type=Application
 Name=LaunchPad Ignite
 Exec="$escaped_executable"
+Icon=$icon_name
 Terminal=false
 Categories=Utility;
+StartupWMClass=LaunchPad.Ignite.App
 EOF
 
 chmod 644 "$temporary_entry"

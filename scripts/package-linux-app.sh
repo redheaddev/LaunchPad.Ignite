@@ -40,6 +40,15 @@ fi
 
 mkdir -p "$package_dir"
 cp -R "$publish_dir/." "$package_dir/"
+icon_source="$repo_root/LaunchPad.Ignite.App/Assets/rocket.png"
+icon_name="io.github.redheaddev.launchpadignite.png"
+icon_target="$package_dir/$icon_name"
+icon_theme_dir="$package_dir/share/icons/hicolor/256x256/apps"
+mkdir -p "$icon_theme_dir"
+if [[ -f "$icon_source" ]]; then
+  cp "$icon_source" "$icon_target"
+  cp "$icon_source" "$icon_theme_dir/$icon_name"
+fi
 find "$package_dir" -type d -exec chmod 755 {} +
 find "$package_dir" -type f -exec chmod 644 {} +
 chmod 755 "$package_dir/LaunchPad.Ignite.App"
