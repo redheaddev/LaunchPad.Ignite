@@ -167,8 +167,7 @@ public sealed class CommandCompletionSession
                     _selectedValues.Add(selectedItem);
                 }
 
-                _preferredHighlightValue = GetVisibleListValues()
-                    .FirstOrDefault(value => !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase));
+                _preferredHighlightValue = selectedItem;
             }
 
             ReplaceCurrentArgument(string.Join(',', _selectedValues.Select(FormatListValue)));

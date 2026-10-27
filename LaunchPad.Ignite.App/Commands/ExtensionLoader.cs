@@ -664,8 +664,13 @@ public sealed class ExtensionLoader
 
                 var dependencyName = AssemblyName.GetAssemblyName(dependencyPath).Name!;
                 var dependency = AssemblyLoadContext.Default.Assemblies.FirstOrDefault(assembly =>
-                    string.Equals(assembly.GetName().Name, dependencyName, StringComparison.OrdinalIgnoreCase))
-                    ?? AssemblyLoadContext.Default.LoadFromAssemblyPath(dependencyPath);
+                    string.Equals(assembly.GetName().Name, dependencyName, StringComparison.OrdinalIgnoreCase));
+                if (dependency is null)
+                {
+                    using var dependencyStream = File.OpenRead(dependencyPath);
+                    dependency = AssemblyLoadContext.Default.LoadFromStream(dependencyStream);
+                }
+
                 _sharedAssemblies[dependencyName] = dependency;
             }
         }

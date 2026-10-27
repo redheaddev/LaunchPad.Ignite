@@ -592,19 +592,34 @@ public class CommandCompletionSessionTests
 
         var state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1", state.InputText);
-        Assert.Equal(",token2", state.GhostText);
         Assert.Contains(state.Items, item => item.Value == "token1" && item.IsSelected);
+        Assert.Contains(state.Items, item => item.Value == "token1" && item.IsHighlighted);
 
+        state = session.HandleKey(CommandInputKey.Down);
+        Assert.Contains(state.Items, item => item.Value == "token2" && item.IsHighlighted);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell token1,token2", state.InputText);
-        Assert.Equal(",token3", state.GhostText);
+        Assert.Contains(state.Items, item => item.Value == "token2" && item.IsHighlighted);
 
         session.HandleKey(CommandInputKey.Up);
         state = session.HandleKey(CommandInputKey.Tab);
-        Assert.Equal("secret shell token1", state.InputText);
-        Assert.Equal(",token2", state.GhostText);
-        state = session.HandleKey(CommandInputKey.Tab);
-        Assert.Equal("secret shell token1,token2", state.InputText);
+        Assert.Equal("secret shell token2", state.InputText);
+        Assert.Contains(state.Items, item => item.Value == "token1" && item.IsHighlighted);
+    }
+
+    [Fact]
+    public async Task HistorySuggestionsDoNotAppearWhileMultiSelectChecklistIsActive()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "secret shell ";
+
+        Assert.True(viewModel.IsChecklistActive);
+        Assert.DoesNotContain(viewModel.CompletionItems, item => item.DisplayText.StartsWith("↶ ", StringComparison.Ordinal));
+
+        await viewModel.HandleInputKeyAsync(CommandInputKey.Tab);
+
+        Assert.True(viewModel.IsChecklistActive);
+        Assert.DoesNotContain(viewModel.CompletionItems, item => item.DisplayText.StartsWith("↶ ", StringComparison.Ordinal));
     }
 
     [Fact]

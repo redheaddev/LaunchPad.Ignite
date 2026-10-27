@@ -239,7 +239,7 @@ public partial class MainViewModel : ViewModelBase
         _secretCommandModel = new SecretCommandModel(
             _secretStore,
             _secretAccessGate,
-            new AvaloniaSecretEntryDialogService(),
+            new AvaloniaSecretEntryDialogService(_clipboardService),
             _clipboardService,
             _terminalLauncher,
             extensionSecretAccessPolicy,
@@ -2036,7 +2036,7 @@ public partial class MainViewModel : ViewModelBase
 
     private IReadOnlyList<CommandHistoryEntry> GetHistorySuggestions(string inputText)
     {
-        if (IsCommandMetadataFilterMode)
+        if (IsCommandMetadataFilterMode || ActiveCompletionState.IsChecklistActive)
         {
             return Array.Empty<CommandHistoryEntry>();
         }

@@ -6,25 +6,16 @@ namespace LaunchPad.Ignite.App.Views;
 public partial class SecretEntryWindow : Window
 {
     private readonly bool _requireConfirmation;
-    private readonly bool _displayOnly;
 
-    public SecretEntryWindow(string title, bool requireConfirmation, string? displayedValue = null)
+    public SecretEntryWindow(string title, bool requireConfirmation)
     {
         InitializeComponent();
         EscapeToClose.Attach(this);
         Title = title;
         _requireConfirmation = requireConfirmation;
-        _displayOnly = displayedValue is not null;
         ConfirmationBox.IsVisible = requireConfirmation;
         ConfirmationBox.IsEnabled = requireConfirmation;
         Opened += (_, _) => EntryBox.Focus();
-        if (_displayOnly)
-        {
-            EntryBox.Text = displayedValue;
-            EntryBox.IsReadOnly = true;
-            CancelButton.IsVisible = false;
-            ConfirmButton.Content = "Close";
-        }
 
         Closed += (_, _) =>
         {
@@ -50,7 +41,7 @@ public partial class SecretEntryWindow : Window
             return;
         }
 
-        Close(_displayOnly ? null : EntryBox.Text ?? string.Empty);
+        Close(EntryBox.Text ?? string.Empty);
     }
 
     private void Cancel_Click(object? sender, RoutedEventArgs e)
