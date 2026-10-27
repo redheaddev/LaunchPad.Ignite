@@ -17,6 +17,15 @@
       "defaultValue": "Off",
       "type": "select",
       "options": ["Off", "On"]
+    },
+    {
+      "name": "verboseLogging",
+      "namespace": "app",
+      "label": "Verbose logging",
+      "description": "Write detailed diagnostic errors to the app log.",
+      "defaultValue": "Off",
+      "type": "select",
+      "options": ["Off", "On"]
     }
   ]
 }

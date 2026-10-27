@@ -17,4 +17,17 @@ public sealed class KeepWindowOpenSettingTests
         Assert.Equal("select", setting.Type);
         Assert.Equal(["Off", "On"], setting.Options);
     }
+
+    [Fact]
+    public void VerboseLoggingIsAvailableAsAnOffByDefaultGeneralSetting()
+    {
+        var setting = new ApplicationSettingsLoader().Load()
+            .Single(candidate => candidate.QualifiedName == "app:verboseLogging");
+
+        Assert.Equal("Verbose logging", setting.Label);
+        Assert.Equal("Write detailed diagnostic errors to the app log.", setting.Description);
+        Assert.Equal("Off", setting.DefaultValue);
+        Assert.Equal("select", setting.Type);
+        Assert.Equal(["Off", "On"], setting.Options);
+    }
 }

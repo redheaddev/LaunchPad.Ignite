@@ -39,6 +39,7 @@ namespace LaunchPad.Ignite.App.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private const string HistoryIcon = "↶";
+    private const string VerboseLoggingSettingName = "app:verboseLogging";
 
     public event Action<string?>? CommandEditorRequested;
     public event Action<LauncherNavigationTarget>? NavigationRequested;
@@ -121,6 +122,11 @@ public partial class MainViewModel : ViewModelBase
         "On",
         StringComparison.OrdinalIgnoreCase);
 
+    public bool VerboseLoggingEnabled => string.Equals(
+        _profileSettingsStore.GetValue(VerboseLoggingSettingName, "Off"),
+        "On",
+        StringComparison.OrdinalIgnoreCase);
+
     public bool IsMiniMode
     {
         get => _isMiniMode;
@@ -144,6 +150,7 @@ public partial class MainViewModel : ViewModelBase
         _historyCommands = _commandLogger.ReadHistoryEntries();
         _extensionStateStore = new ExtensionStateStore();
         _profileSettingsStore = new ProfileSettingsStore();
+        VerboseLogging.Configure(VerboseLoggingEnabled);
         _secretStore = new SecretActivityTrackingStore(PlatformSecretStore.Create(), _profileSettingsStore);
         _launcherWindowStateStore = new LauncherWindowStateStore(_profileSettingsStore);
         _isMiniMode = _launcherWindowStateStore.Mode == LauncherWindowMode.Mini;
@@ -216,6 +223,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void InitializeCommandRuntime()
     {
+        VerboseLogging.Configure(VerboseLoggingEnabled);
         var previousExtensions = _extensions;
         var extensions = new ExtensionLoader(_extensionStateStore).Load();
         var profileSettings = _profileSettingsStore.GetValues();
@@ -463,7 +471,10 @@ public partial class MainViewModel : ViewModelBase
 
             foreach (var loadContext in previousExtensions.LoadContexts)
             {
-                loadContext.Unload();
+                if (loadContext.IsCollectible)
+                {
+                    loadContext.Unload();
+                }
             }
         }
     }

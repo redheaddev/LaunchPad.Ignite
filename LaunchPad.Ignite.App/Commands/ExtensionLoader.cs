@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -24,7 +25,10 @@ public sealed record LoadedExtensions(
     {
         foreach (var loadContext in LoadContexts)
         {
-            loadContext.Unload();
+            if (loadContext.IsCollectible)
+            {
+                loadContext.Unload();
+            }
         }
     }
 
@@ -118,6 +122,8 @@ public sealed record LoadedExtensionInfo(string Id, string Version, bool Enabled
 public sealed class ExtensionLoader
 {
     private const string ManifestFileName = "extension.json";
+    private static readonly object NonCollectibleLoadContextsLock = new();
+    private static readonly Dictionary<string, (ExtensionLoadContext Context, Assembly Assembly)> NonCollectibleLoadContexts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -386,14 +392,52 @@ public sealed class ExtensionLoader
     }
 
     private static string[] GetDefaultExtensionRoots()
-        =>
-        [
-            Path.Combine(AppContext.BaseDirectory, "extensions"),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LaunchPad.Ignite",
-                "extensions")
-        ];
+    {
+        var localExtensions = Path.Combine(AppContext.BaseDirectory, "extensions");
+        var userExtensions = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LaunchPad.Ignite",
+            "extensions");
+
+        if (!Debugger.IsAttached)
+        {
+            return [localExtensions, userExtensions];
+        }
+
+        var roots = new List<string> { userExtensions, localExtensions };
+        var configuration = typeof(ExtensionLoader).Assembly
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            var projectsRoot = Path.Combine(directory.FullName, "LaunchPad.Ignite.Extensions");
+            if (!Directory.Exists(projectsRoot))
+            {
+                continue;
+            }
+
+            foreach (var projectDirectory in Directory.EnumerateDirectories(projectsRoot)
+                .Where(path => !Path.GetFileName(path).EndsWith(".Tests", StringComparison.OrdinalIgnoreCase)))
+            {
+                var extensionRoot = Path.Combine(
+                    projectDirectory,
+                    "bin",
+                    configuration,
+                    "net8.0",
+                    "extensions");
+                if (Directory.Exists(extensionRoot))
+                {
+                    roots.Add(extensionRoot);
+                }
+            }
+
+            break;
+        }
+
+        return roots.ToArray();
+    }
 
     private static IEnumerable<object> ExecutorsForNamespace(
         string kind,
@@ -512,10 +556,29 @@ public sealed class ExtensionLoader
             throw new FileNotFoundException($"Assembly for extension '{manifest.Id}' was not found.", assemblyPath);
         }
 
-        var loadContext = new ExtensionLoadContext(assemblyPath);
+        ExtensionLoadContext loadContext;
+        Assembly assembly;
+        if (ExtensionLoadContext.RequiresNonCollectibleContext(assemblyPath))
+        {
+            lock (NonCollectibleLoadContextsLock)
+            {
+                if (!NonCollectibleLoadContexts.TryGetValue(assemblyPath, out var loaded))
+                {
+                    loadContext = new ExtensionLoadContext(assemblyPath);
+                    loaded = (loadContext, loadContext.LoadExtensionAssembly(assemblyPath));
+                    NonCollectibleLoadContexts.Add(assemblyPath, loaded);
+                }
+
+                (loadContext, assembly) = loaded;
+            }
+        }
+        else
+        {
+            loadContext = new ExtensionLoadContext(assemblyPath);
+            assembly = loadContext.LoadExtensionAssembly(assemblyPath);
+        }
+
         loadContexts.Add(loadContext);
-        using var assemblyStream = File.OpenRead(assemblyPath);
-        var assembly = loadContext.LoadFromStream(assemblyStream);
         var executorTypes = assembly.GetTypes()
             .Where(type => !type.IsAbstract
                 && !type.IsInterface
@@ -581,12 +644,50 @@ public sealed class ExtensionLoader
     private sealed class ExtensionLoadContext : AssemblyLoadContext
     {
         private readonly AssemblyDependencyResolver _resolver;
+        private readonly string _extensionDirectory;
         private readonly string _coreAssemblyName = typeof(ICommandExecutor).Assembly.GetName().Name!;
+        private readonly Dictionary<string, Assembly> _sharedAssemblies = new(StringComparer.OrdinalIgnoreCase);
 
         public ExtensionLoadContext(string assemblyPath)
-            : base(isCollectible: true)
+            : base(isCollectible: !RequiresNonCollectibleContext(assemblyPath))
         {
+            _extensionDirectory = Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!;
             _resolver = new AssemblyDependencyResolver(assemblyPath);
+
+            foreach (var fileName in new[] { "winrt.runtime.dll", "Microsoft.Windows.SDK.NET.dll" })
+            {
+                var dependencyPath = Path.Combine(_extensionDirectory, fileName);
+                if (!File.Exists(dependencyPath))
+                {
+                    continue;
+                }
+
+                var dependencyName = AssemblyName.GetAssemblyName(dependencyPath).Name!;
+                var dependency = AssemblyLoadContext.Default.Assemblies.FirstOrDefault(assembly =>
+                    string.Equals(assembly.GetName().Name, dependencyName, StringComparison.OrdinalIgnoreCase))
+                    ?? AssemblyLoadContext.Default.LoadFromAssemblyPath(dependencyPath);
+                _sharedAssemblies[dependencyName] = dependency;
+            }
+        }
+
+        public static bool RequiresNonCollectibleContext(string assemblyPath)
+        {
+            var extensionDirectory = Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!;
+            return File.Exists(Path.Combine(extensionDirectory, "Microsoft.Windows.SDK.NET.dll"))
+                || File.Exists(Path.Combine(extensionDirectory, "winrt.runtime.dll"));
+        }
+
+        public Assembly LoadExtensionAssembly(string assemblyPath)
+        {
+            using var assemblyStream = File.OpenRead(assemblyPath);
+            var symbolsPath = Path.ChangeExtension(assemblyPath, ".pdb");
+            if (File.Exists(symbolsPath))
+            {
+                using var symbolsStream = File.OpenRead(symbolsPath);
+                return LoadFromStream(assemblyStream, symbolsStream);
+            }
+
+            return LoadFromStream(assemblyStream);
         }
 
         protected override Assembly? Load(AssemblyName assemblyName)
@@ -596,10 +697,22 @@ public sealed class ExtensionLoader
                 return typeof(ICommandExecutor).Assembly;
             }
 
-            var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
-            if (assemblyPath is null)
+            if (assemblyName.Name is not null
+                && _sharedAssemblies.TryGetValue(assemblyName.Name, out var sharedAssembly))
             {
-                return null;
+                return sharedAssembly;
+            }
+
+            var assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
+            if (assemblyPath is null || !File.Exists(assemblyPath))
+            {
+                var adjacentAssemblyPath = Path.Combine(_extensionDirectory, $"{assemblyName.Name}.dll");
+                if (!File.Exists(adjacentAssemblyPath))
+                {
+                    return null;
+                }
+
+                assemblyPath = adjacentAssemblyPath;
             }
 
             using var assemblyStream = File.OpenRead(assemblyPath);

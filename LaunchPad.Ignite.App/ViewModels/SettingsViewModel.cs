@@ -1031,7 +1031,12 @@ public partial class SettingsViewModel : ViewModelBase
     private SettingEditorViewModel CreateEditor(CommandSettingDefinition definition)
     {
         var value = _settingsStore.GetValue(definition.QualifiedName, definition.DefaultValue);
-        return new SettingEditorViewModel(definition, value, _settingsStore, _settingsChanged);
+        return new SettingEditorViewModel(
+            definition,
+            value,
+            _settingsStore,
+            _settingsChanged,
+            saveImmediately: SelectedNavigationItem?.Category == "application");
     }
 
     [RelayCommand]
