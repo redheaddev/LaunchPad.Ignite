@@ -646,6 +646,7 @@ public class CommandCompletionSessionTests
 
         var state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("list \"team project\"", state.InputText);
+        state = session.HandleKey(CommandInputKey.Down);
         state = session.HandleKey(CommandInputKey.Tab);
 
         Assert.Equal("list \"team project\",\"other value\"", state.InputText);

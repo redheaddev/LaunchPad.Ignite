@@ -35,6 +35,7 @@ public class ExtensionPackageNamesArgumentValueProviderTests
         Assert.True(state.IsChecklistActive);
         Assert.Equal(["ado-1.0.1", "media-1.0.0"], state.Items.Select(item => item.Value));
         state = session.HandleKey(CommandInputKey.Tab);
+        state = session.HandleKey(CommandInputKey.Down);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("extension install ado-1.0.1,media-1.0.0", state.InputText);
         Assert.Equal(CommandParseStatus.Incomplete, parser.Parse("extension install").Status);
