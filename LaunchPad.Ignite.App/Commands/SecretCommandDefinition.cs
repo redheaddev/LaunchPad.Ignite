@@ -24,10 +24,14 @@ public static class SecretCommandDefinition
                 ]),
             new CommandActionDefinition(
                 "copy-env",
-                "Copy a secret as an environment assignment",
-                "secret copy-env <secretName>",
+                "Copy secrets as environment assignments",
+                "secret copy-env <list:secretNames>",
                 "secret",
-                [new CommandArgumentDefinition("secretName", Ref: "list:secrets", ListMode: ListSelectionMode.Single)]),
+                [new CommandArgumentDefinition(
+                    "secretNames",
+                    Ref: "list:secrets",
+                    InputType: "csv",
+                    ListMode: ListSelectionMode.Multiple)]),
             new CommandActionDefinition(
                 "copy-value",
                 "Copy a secret value",

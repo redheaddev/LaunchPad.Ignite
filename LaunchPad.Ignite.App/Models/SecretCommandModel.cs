@@ -123,7 +123,7 @@ public sealed class SecretCommandModel
                 "remove" => Remove(command.Arguments["secretName"]),
                 "rename" => Rename(command.Arguments["secretName"], command.Arguments["newName"]),
                 "copy-value" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: false),
-                "copy-env" => await CopyValueAsync(command.Arguments["secretName"], environmentAssignment: true),
+                "copy-env" => await CopyEnvironmentAssignmentsAsync(command.Arguments["secretNames"]),
                 "shell" => await OpenShellAsync(command.Arguments["secretNames"], command.Arguments.GetValueOrDefault("path")),
                 _ => new CommandExecutionResult(false, $"Unknown secret action '{command.Action.Name}'.")
             };
@@ -326,6 +326,40 @@ public sealed class SecretCommandModel
             : value;
         await _clipboardService.CopyWithExpiryAsync(clipboardText, ClipboardExpiry);
         return new CommandExecutionResult(true, "Secret copied to the clipboard. It will be cleared in 15 seconds if unchanged.");
+    }
+
+    private async Task<CommandExecutionResult> CopyEnvironmentAssignmentsAsync(string namesCsv)
+    {
+        var names = namesCsv.Split(',').Select(name => name.Trim()).ToArray();
+        if (names.Length == 0 || names.Any(name => !IsValidName(name)))
+        {
+            return InvalidName();
+        }
+
+        if (names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length)
+        {
+            return new CommandExecutionResult(false, "Secret names must not be repeated.");
+        }
+
+        var authorizationResult = await EnsureAuthorizedAsync();
+        if (authorizationResult is not null)
+        {
+            return authorizationResult;
+        }
+
+        var assignments = new List<string>(names.Length);
+        foreach (var name in names)
+        {
+            if (!_secretStore.TryGet(name, out var value))
+            {
+                return new CommandExecutionResult(false, $"Secret '{name}' was not found.");
+            }
+
+            assignments.Add($"$env:{name}='{value.Replace("'", "''", StringComparison.Ordinal)}'");
+        }
+
+        await _clipboardService.CopyWithExpiryAsync(string.Join(';', assignments), ClipboardExpiry);
+        return new CommandExecutionResult(true, "Secrets copied to the clipboard. It will be cleared in 15 seconds if unchanged.");
     }
 
     private async Task<CommandExecutionResult> OpenShellAsync(string namesCsv, string? workingDirectory)

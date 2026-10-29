@@ -78,6 +78,22 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public async Task CopyEnvCopiesMultiplePowerShellAssignmentsWithoutReturningSecretValues()
+    {
+        var store = new FakeSecretStore(("apiToken", "a'b"), ("dbPassword", "sensitive"));
+        var clipboard = new FakeClipboardService();
+        var model = CreateModel(store: store, clipboard: clipboard);
+
+        var result = await ExecuteAsync(model, "secret copy-env apiToken,dbPassword");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("$env:apiToken='a''b';$env:dbPassword='sensitive'", clipboard.Value);
+        Assert.DoesNotContain("a'b", result.Message);
+        Assert.DoesNotContain("sensitive", result.Message);
+        Assert.Equal(TimeSpan.FromSeconds(15), clipboard.Expiry);
+    }
+
+    [Fact]
     public async Task SecretCommandReportsWhenSecretStorageIsUnavailable()
     {
         var store = new FakeSecretStore
@@ -202,6 +218,9 @@ public class SecretCommandModelTests
         Assert.True(result.Succeeded);
         Assert.Equal(secretValue, dialog.DisplayedSecret);
         Assert.DoesNotContain(secretValue, result.Message);
+        Assert.Empty(dialog.Titles);
+        Assert.Empty(dialog.ConfirmationRequests);
+        Assert.Equal(["Secret 'token'"], dialog.SecretRevealTitles);
     }
 
     [Fact]
@@ -351,6 +370,8 @@ public class SecretCommandModelTests
         Assert.True(copyValueResult.Succeeded);
         Assert.True(shellResult.Succeeded);
         Assert.Equal("sensitive", dialog.DisplayedSecret);
+        Assert.Equal(["Unlock secrets", "Unlock secrets", "Unlock secrets", "Unlock secrets"], dialog.Titles);
+        Assert.Equal(["Secret 'token'"], dialog.SecretRevealTitles);
         Assert.Equal("sensitive", clipboard.Value);
         Assert.Equal("sensitive", terminal.Environment!["token"]);
         Assert.Equal(4, dialog.Titles.Count);
@@ -462,14 +483,13 @@ public class SecretCommandModelTests
 
         state = session.UpdateInputText("secret copy-env ");
         Assert.Contains(state.Items, item => item.Value == "existing");
-        Assert.False(state.IsChecklistActive);
+        Assert.True(state.IsChecklistActive);
         state = session.UpdateInputText("secret copy-env ex");
         Assert.Contains(state.Items, item => item.Value == "existing");
         Assert.DoesNotContain(state.Items, item => item.Value == "addedLater");
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret copy-env existing", state.InputText);
-        Assert.False(state.IsChecklistActive);
-        Assert.Empty(state.Items);
+        Assert.True(state.IsChecklistActive);
 
         state = session.UpdateInputText("secret copy-value ");
         Assert.Contains(state.Items, item => item.Value == "existing");
@@ -486,12 +506,14 @@ public class SecretCommandModelTests
         Assert.Equal(CommandParseStatus.Valid, parser.Parse("secret set brandNew").Status);
         Assert.Equal(CommandParseStatus.Valid, parser.Parse("secret rename existing brandNew").Status);
         Assert.Equal(CommandParseStatus.Invalid, parser.Parse("secret show brandNew").Status);
+        Assert.Equal(CommandParseStatus.Valid, parser.Parse("secret copy-env existing,addedLater").Status);
 
         state = session.UpdateInputText("secret shell ");
         Assert.True(state.IsChecklistActive);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell existing", state.InputText);
         Assert.Equal(",addedLater", state.GhostText);
+        state = session.HandleKey(CommandInputKey.Down);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("secret shell existing,addedLater", state.InputText);
 
@@ -841,6 +863,8 @@ public class SecretCommandModelTests
 
         public List<bool> ConfirmationRequests { get; } = [];
 
+        public List<string> SecretRevealTitles { get; } = [];
+
         public Task<string?> ShowAsync(string title, bool requireConfirmation)
         {
             Titles.Add(title);
@@ -850,6 +874,7 @@ public class SecretCommandModelTests
 
         public Task ShowSecretAsync(string title, string value)
         {
+            SecretRevealTitles.Add(title);
             DisplayedSecret = value;
             return Task.CompletedTask;
         }

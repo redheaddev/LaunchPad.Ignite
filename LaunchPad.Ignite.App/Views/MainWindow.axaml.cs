@@ -1445,6 +1445,19 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task ShowSecretRevealDialogAsync(SecretRevealWindow dialog)
+    {
+        _secretDialogIsOpen = true;
+        try
+        {
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     private async void MainWindow_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel)
