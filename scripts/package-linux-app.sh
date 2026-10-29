@@ -70,8 +70,10 @@ approving the shortcut.
 Wayland shortcut diagnostics are written to
 \${XDG_STATE_HOME:-\$HOME/.local/state}/LaunchPad.Ignite/activation-hotkey.log.
 
-Secret storage is not supported yet. Secret commands report that limitation
-and do not store values.
+Linux secret storage uses the desktop Secret Service (libsecret / the system
+keyring) when the \\`secret-tool\\` CLI is available. On headless or
+unsupported sessions, secret commands report that limitation and do not store
+values.
 EOF
 
 tar -czf "$archive" -C "$artifact_dir" "$package_name"

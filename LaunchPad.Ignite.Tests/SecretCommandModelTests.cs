@@ -10,6 +10,7 @@ using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.App.Services.Clipboard;
 using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.App.Services.Secrets;
+using LaunchPad.Ignite.App.Services.Secrets.Linux;
 using LaunchPad.Ignite.App.Services.Terminals;
 using LaunchPad.Ignite.App.Services.Themes;
 using LaunchPad.Ignite.App.Services.Secrets;
@@ -23,6 +24,41 @@ namespace LaunchPad.Ignite.Tests;
 
 public class SecretCommandModelTests
 {
+    [Fact]
+    public void LinuxSecretServiceStoreReportsUnavailableWhenSecretToolIsMissing()
+    {
+        var store = new LinuxSecretServiceStore(
+            isSecretToolAvailable: () => false);
+
+        Assert.False(store.IsAvailable);
+        Assert.Contains("secret service CLI", store.UnavailableReason);
+    }
+
+    [Fact]
+    public void LinuxSecretServiceStoreStripsCarriageReturnsFromSecretValues()
+    {
+        var normalized = LinuxSecretServiceStore.NormalizeSecretValue("abc\r\ndef\r");
+
+        Assert.Equal("abcdef", normalized);
+    }
+
+    [Fact]
+    public void LinuxSecretServiceStoreUsesSessionBusEnvironmentVariable()
+    {
+        var previous = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        try
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/dbus-test");
+            var store = new LinuxSecretServiceStore(isSecretToolAvailable: () => true);
+
+            Assert.True(store.IsAvailable);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", previous);
+        }
+    }
+
     [Fact]
     public async Task SetAndCopyEnvNeverReturnTheSecretInTheExecutionResult()
     {

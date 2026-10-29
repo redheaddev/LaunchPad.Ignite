@@ -45,11 +45,13 @@ cat > "$temporary_entry" <<EOF
 [Desktop Entry]
 Type=Application
 Name=LaunchPad Ignite
-Exec="$escaped_executable"
+Exec=/bin/bash -lc 'exec "$escaped_executable"'
 Icon=$icon_name
 Terminal=false
 Categories=Utility;
 StartupWMClass=LaunchPad.Ignite.App
+StartupNotify=true
+X-KDE-SubstituteUID=false
 EOF
 
 chmod 644 "$temporary_entry"

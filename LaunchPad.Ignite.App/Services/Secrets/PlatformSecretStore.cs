@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using LaunchPad.Ignite.App.Services.Secrets.Linux;
 using LaunchPad.Ignite.App.Services.Secrets.MacOS;
 using LaunchPad.Ignite.App.Services.Secrets.Windows;
 
@@ -21,7 +22,7 @@ public static class PlatformSecretStore
 
         if (OperatingSystem.IsLinux())
         {
-            return new UnavailableSecretStore("Secret storage is not implemented on Linux yet; secret commands are unavailable.");
+            return new LinuxSecretServiceStore();
         }
 
         return new UnavailableSecretStore("Secret storage is not supported on this platform.");
