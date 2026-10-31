@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using LaunchPad.Ignite.App.ViewModels;
 
@@ -10,6 +11,9 @@ namespace LaunchPad.Ignite.App.Views;
 public partial class ImportExportWindow : Window
 {
     private readonly ImportExportViewModel _viewModel;
+
+    private void InitializeComponent()
+        => AvaloniaXamlLoader.Load(this);
 
     public ImportExportWindow(ImportExportViewModel viewModel)
     {

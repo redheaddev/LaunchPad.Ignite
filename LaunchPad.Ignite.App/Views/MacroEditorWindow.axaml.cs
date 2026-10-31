@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.App.Services.Macros;
@@ -11,17 +12,38 @@ namespace LaunchPad.Ignite.App.Views;
 
 public partial class MacroEditorWindow : Window
 {
+    private TextBox NameBoxControl => this.FindControl<TextBox>(nameof(NameBox))
+        ?? throw new InvalidOperationException("The NameBox control was not found.");
+
+    private TextBox NamespaceBoxControl => this.FindControl<TextBox>(nameof(NamespaceBox))
+        ?? throw new InvalidOperationException("The NamespaceBox control was not found.");
+
+    private TextBox ArgumentsBoxControl => this.FindControl<TextBox>(nameof(ArgumentsBox))
+        ?? throw new InvalidOperationException("The ArgumentsBox control was not found.");
+
+    private ComboBox OnErrorBoxControl => this.FindControl<ComboBox>(nameof(OnErrorBox))
+        ?? throw new InvalidOperationException("The OnErrorBox control was not found.");
+
+    private TextBox ScriptBoxControl => this.FindControl<TextBox>(nameof(ScriptBox))
+        ?? throw new InvalidOperationException("The ScriptBox control was not found.");
+
+    private TextBlock ErrorTextControl => this.FindControl<TextBlock>(nameof(ErrorText))
+        ?? throw new InvalidOperationException("The ErrorText control was not found.");
+
+    private void InitializeComponent()
+        => AvaloniaXamlLoader.Load(this);
+
     public MacroEditorWindow(string qualifiedName, MacroDefinition? macro)
     {
         InitializeComponent();
         EscapeToClose.Attach(this);
         var (name, macroNamespace) = ParseQualifiedName(qualifiedName);
-        NameBox.Text = macro?.Metadata.Name ?? name;
-        NamespaceBox.Text = macro?.Metadata.Namespace ?? macroNamespace ?? string.Empty;
-        ArgumentsBox.Text = string.Join(Environment.NewLine,
+        NameBoxControl.Text = macro?.Metadata.Name ?? name;
+        NamespaceBoxControl.Text = macro?.Metadata.Namespace ?? macroNamespace ?? string.Empty;
+        ArgumentsBoxControl.Text = string.Join(Environment.NewLine,
             (macro?.Metadata.Arguments ?? []).Select(FormatArgument));
-        OnErrorBox.SelectedIndex = macro?.Metadata.OnError == MacroErrorBehavior.Continue ? 1 : 0;
-        ScriptBox.Text = macro?.Script ?? string.Empty;
+        OnErrorBoxControl.SelectedIndex = macro?.Metadata.OnError == MacroErrorBehavior.Continue ? 1 : 0;
+        ScriptBoxControl.Text = macro?.Script ?? string.Empty;
     }
 
     private void Cancel_Click(object? sender, RoutedEventArgs e)
@@ -32,18 +54,18 @@ public partial class MacroEditorWindow : Window
     private void Save_Click(object? sender, RoutedEventArgs e)
     {
         if (!MacroArgumentDefinitionParser.TryParse(
-            ArgumentsBox.Text ?? string.Empty,
+            ArgumentsBoxControl.Text ?? string.Empty,
             out var arguments,
             out var error))
         {
-            ErrorText.Text = error;
+            ErrorTextControl.Text = error;
             return;
         }
 
-        var behavior = OnErrorBox.SelectedIndex == 1
+        var behavior = OnErrorBoxControl.SelectedIndex == 1
             ? MacroErrorBehavior.Continue
             : MacroErrorBehavior.Break;
-        Close(new MacroEditorResult(arguments, behavior, ScriptBox.Text ?? string.Empty));
+        Close(new MacroEditorResult(arguments, behavior, ScriptBoxControl.Text ?? string.Empty));
     }
 
     private static string FormatArgument(MacroArgumentDefinition argument)

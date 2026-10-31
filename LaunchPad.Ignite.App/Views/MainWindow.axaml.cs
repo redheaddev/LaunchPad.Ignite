@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -34,6 +35,9 @@ namespace LaunchPad.Ignite.App.Views;
 
 public partial class MainWindow : Window
 {
+    private void InitializeComponent()
+        => AvaloniaXamlLoader.Load(this);
+
     private readonly SimpleGlobalHook _globalHook = new();
     private readonly IWindowPlatformBehavior _windowPlatform = WindowPlatformBehaviorFactory.Create();
     private IActivationHotkeyRegistration? _activationHotkey;

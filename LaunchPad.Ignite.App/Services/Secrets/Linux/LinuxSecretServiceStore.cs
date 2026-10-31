@@ -49,9 +49,17 @@ internal sealed class LinuxSecretServiceStore : ISecretStore
 
         try
         {
-            using var process = CreateProcess(new[] { "search", "--all", AppAttributeName, ServiceName });
+            using var process = CreateProcess(new[]
+            {
+                "search",
+                "--all",
+                "--unlock",
+                AppAttributeName,
+                ServiceName
+            });
             process.Start();
-            var output = process.StandardOutput.ReadToEnd();
+            var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+            var standardErrorTask = process.StandardError.ReadToEndAsync();
             process.WaitForExit();
 
             if (process.ExitCode != 0)
@@ -59,7 +67,10 @@ internal sealed class LinuxSecretServiceStore : ISecretStore
                 return Array.Empty<string>();
             }
 
-            return ParseNames(output);
+            return ParseNames(
+                standardOutputTask.GetAwaiter().GetResult()
+                + "\n[stderr]\n"
+                + standardErrorTask.GetAwaiter().GetResult());
         }
         catch (Exception)
         {
@@ -78,7 +89,14 @@ internal sealed class LinuxSecretServiceStore : ISecretStore
 
         try
         {
-            using var process = CreateProcess(new[] { "search", "--all", AppAttributeName, ServiceName });
+            using var process = CreateProcess(new[]
+            {
+                "lookup",
+                AppAttributeName,
+                ServiceName,
+                SecretAttributeName,
+                name
+            });
             process.Start();
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
@@ -89,25 +107,8 @@ internal sealed class LinuxSecretServiceStore : ISecretStore
                 return false;
             }
 
-            foreach (var record in ParseSecretRecords(output))
-            {
-                if (!TryGetFieldValue(record, AppAttributeName, out var appValue)
-                    || !string.Equals(appValue, ServiceName, StringComparison.OrdinalIgnoreCase)
-                    || !TryGetFieldValue(record, SecretAttributeName, out var hiddenName)
-                    || !string.Equals(hiddenName, name, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (record.TryGetValue("secret", out var secretValue))
-                {
-                    value = NormalizeSecretValue(secretValue);
-                    return !string.IsNullOrEmpty(value);
-                }
-            }
-
-            value = string.Empty;
-            return false;
+            value = NormalizeSecretValue(output);
+            return !string.IsNullOrEmpty(value);
         }
         catch (Exception)
         {
@@ -345,6 +346,13 @@ internal sealed class LinuxSecretServiceStore : ISecretStore
             if (string.IsNullOrWhiteSpace(key))
             {
                 continue;
+            }
+
+            // secret-tool prints attributes to stderr without record headers; a repeated key starts a new record.
+            if (current.ContainsKey(key))
+            {
+                records.Add(current);
+                current = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
 
             current[key] = value;

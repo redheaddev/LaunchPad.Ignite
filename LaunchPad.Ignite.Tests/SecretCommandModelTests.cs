@@ -60,6 +60,97 @@ public class SecretCommandModelTests
     }
 
     [Fact]
+    public void LinuxSecretServiceStoreVerifiesStoredValueWithLookup()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var previous = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        var commands = new List<string[]>();
+        try
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/dbus-test");
+            var store = new LinuxSecretServiceStore(
+                (command, arguments) =>
+                {
+                    Assert.Equal("secret-tool", command);
+                    commands.Add(arguments);
+                    var startInfo = new ProcessStartInfo(arguments[0] == "store" ? "/bin/cat" : "/usr/bin/printf")
+                    {
+                        RedirectStandardInput = arguments[0] == "store",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    };
+                    if (arguments[0] == "lookup")
+                    {
+                        startInfo.ArgumentList.Add("%s");
+                        startInfo.ArgumentList.Add("stored-value");
+                    }
+
+                    return startInfo;
+                },
+                () => true);
+
+            store.Set("test", "stored-value");
+
+            Assert.Equal(
+                new[] { "store", "--label=LaunchPad.Ignite:test", "app", "LaunchPad.Ignite", "name", "test" },
+                commands[0]);
+            Assert.Equal(
+                new[] { "lookup", "app", "LaunchPad.Ignite", "name", "test" },
+                commands[1]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", previous);
+        }
+    }
+
+    [Fact]
+    public void LinuxSecretServiceStoreIncludesLockedNamesInSearch()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var previous = Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS");
+        try
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/dbus-test");
+            var store = new LinuxSecretServiceStore(
+                (command, arguments) =>
+                {
+                    Assert.Equal("secret-tool", command);
+                    Assert.Equal(
+                        new[] { "search", "--all", "--unlock", "app", "LaunchPad.Ignite" },
+                        arguments);
+                    var startInfo = new ProcessStartInfo("/bin/sh")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    };
+                    startInfo.ArgumentList.Add("-c");
+                    startInfo.ArgumentList.Add("printf '%s' \"$1\" >&2");
+                    startInfo.ArgumentList.Add("launchpad-test");
+                    startInfo.ArgumentList.Add("attribute.name = test\nattribute.app = LaunchPad.Ignite\n");
+                    return startInfo;
+                },
+                () => true);
+
+            Assert.Equal(["test"], store.GetNames());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS", previous);
+        }
+    }
+
+    [Fact]
     public async Task SetAndCopyEnvNeverReturnTheSecretInTheExecutionResult()
     {
         var store = new FakeSecretStore();

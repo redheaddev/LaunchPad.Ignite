@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
 using Avalonia.VisualTree;
 using LaunchPad.Ignite.App.ViewModels;
 using System.Linq;
@@ -8,6 +9,9 @@ namespace LaunchPad.Ignite.App.Views;
 
 public partial class HelpWindow : Window
 {
+    private void InitializeComponent()
+        => AvaloniaXamlLoader.Load(this);
+
     public HelpWindow(HelpViewModel viewModel)
     {
         InitializeComponent();

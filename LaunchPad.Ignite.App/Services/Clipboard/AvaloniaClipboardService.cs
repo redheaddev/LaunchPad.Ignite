@@ -186,5 +186,16 @@ internal sealed class AvaloniaClipboardAccess : IClipboardAccess
 
     public Task<string?> GetTextAsync() => _clipboard.TryGetTextAsync();
 
-    public Task ClearAsync() => _clipboard.ClearAsync();
+    public async Task ClearAsync()
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            // Clipboard managers such as KDE Klipper restore their newest entry when the clipboard
+            // is emptied, so replace the content with a non-empty blank value instead.
+            await _clipboard.SetTextAsync(" ");
+            return;
+        }
+
+        await _clipboard.ClearAsync();
+    }
 }
