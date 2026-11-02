@@ -65,12 +65,24 @@ public sealed record LoadedExtensions(
                 group => group.Key,
                 group => group.ToArray(),
                 StringComparer.OrdinalIgnoreCase);
+        var listsByNamespace = Schema.Lists
+            .GroupBy(list => list.Namespace ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyDictionary<string, IReadOnlyList<string>>)group.ToDictionary(
+                    list => list.Name,
+                    list => list.Values,
+                    StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
 
-        foreach (var executor in Executors.Values.Cast<object>().Concat(AsyncExecutors.Values))
+        foreach (var executor in Executors.Values.Cast<object>()
+            .Concat(AsyncExecutors.Values)
+            .Concat(FunctionExecutors.Values))
         {
             var extensionNamespace = executor switch
             {
                 IExtensionCommandContextAware contextAware => contextAware.Namespace,
+                IExtensionFunctionContextAware functionContextAware => functionContextAware.Namespace,
                 IExtensionSecretResolverAware secretResolverAware => secretResolverAware.Namespace,
                 _ => null
             };
@@ -81,24 +93,24 @@ public sealed record LoadedExtensions(
 
             if (executor is IExtensionCommandContextAware contextAwareExecutor)
             {
-                var settings = settingsByNamespace.TryGetValue(extensionNamespace, out var namespaceSettings)
-                    ? namespaceSettings
-                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (definitionsByNamespace.TryGetValue(extensionNamespace, out var settingDefinitions))
-                {
-                    var configuredSettings = settings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
-                    foreach (var setting in settingDefinitions)
-                    {
-                        configuredSettings[setting.Name] = profileValues.GetValueOrDefault(setting.QualifiedName, setting.DefaultValue);
-                    }
-
-                    settings = configuredSettings;
-                }
-
+                var settings = GetConfiguredSettings(
+                    extensionNamespace,
+                    settingsByNamespace,
+                    definitionsByNamespace,
+                    profileValues);
                 contextAwareExecutor.Configure(
                     settings,
                     name => tryGetSecret(extensionNamespace, name),
                     openUrl);
+            }
+
+            if (executor is IExtensionFunctionContextAware functionContextExecutor)
+            {
+                functionContextExecutor.Configure(
+                    GetConfiguredSettings(extensionNamespace, settingsByNamespace, definitionsByNamespace, profileValues),
+                    listsByNamespace.GetValueOrDefault(extensionNamespace)
+                        ?? new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
+                    name => tryGetSecret(extensionNamespace, name));
             }
 
             if (executor is IExtensionSecretResolverAware secretResolverExecutor)
@@ -107,6 +119,26 @@ public sealed record LoadedExtensions(
             }
 
         }
+    }
+
+    private static IReadOnlyDictionary<string, string> GetConfiguredSettings(
+        string extensionNamespace,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> settingsByNamespace,
+        IReadOnlyDictionary<string, CommandSettingDefinition[]> definitionsByNamespace,
+        IReadOnlyDictionary<string, string> profileValues)
+    {
+        var settings = settingsByNamespace.TryGetValue(extensionNamespace, out var namespaceSettings)
+            ? namespaceSettings.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (definitionsByNamespace.TryGetValue(extensionNamespace, out var settingDefinitions))
+        {
+            foreach (var setting in settingDefinitions)
+            {
+                settings[setting.Name] = profileValues.GetValueOrDefault(setting.QualifiedName, setting.DefaultValue);
+            }
+        }
+
+        return settings;
     }
 }
 

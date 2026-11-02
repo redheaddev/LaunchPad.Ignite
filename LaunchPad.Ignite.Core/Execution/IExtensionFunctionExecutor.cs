@@ -7,6 +7,16 @@ public interface IExtensionFunctionExecutor : ICommandFunctionExecutor
     string FunctionName { get; }
 }
 
+public interface IExtensionFunctionContextAware
+{
+    string Namespace { get; }
+
+    void Configure(
+        IReadOnlyDictionary<string, string> settings,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> lists,
+        Func<string, (bool Found, string Value)> tryGetSecret);
+}
+
 public interface IExtensionRootAware
 {
     void ConfigureExtensionRoot(string extensionRoot);
