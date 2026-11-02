@@ -34,6 +34,11 @@ public interface IAsyncCommandExecutor
     Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command);
 }
 
+public interface IAsyncCommandExecutorWithLaunchOptions : IAsyncCommandExecutor
+{
+    Task<CommandExecutionResult> ExecuteAsync(ParsedCommand command, bool newWindow);
+}
+
 public interface IExtensionCommandContextAware
 {
     string Namespace { get; }
@@ -42,6 +47,16 @@ public interface IExtensionCommandContextAware
         IReadOnlyDictionary<string, string> settings,
         Func<string, (bool Found, string Value)> tryGetSecret,
         Action<string> openUrl);
+}
+
+public interface IExtensionCommandContextAwareWithLaunchOptions
+{
+    string Namespace { get; }
+
+    void Configure(
+        IReadOnlyDictionary<string, string> settings,
+        Func<string, (bool Found, string Value)> tryGetSecret,
+        Action<IReadOnlyList<string>, bool> openUrls);
 }
 
 public interface IExtensionSecretResolverAware

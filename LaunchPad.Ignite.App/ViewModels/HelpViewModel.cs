@@ -52,7 +52,8 @@ public sealed class HelpViewModel
         var commandShortcuts = new List<HelpKeyboardShortcut>();
         var urlCommandShortcuts = new List<HelpKeyboardShortcut>
         {
-            new("Ctrl+Enter", "Runs the URL command in a new window where supported.")
+            new("Ctrl+Enter", "Runs the URL command in a new window where supported."),
+            new("Shift+Enter", "Runs the URL command in a new window where supported, unless a file path is selected.")
         };
         var extensionShortcuts = new Dictionary<string, List<HelpKeyboardShortcut>>(StringComparer.OrdinalIgnoreCase);
 

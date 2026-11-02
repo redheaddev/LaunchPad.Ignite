@@ -285,7 +285,7 @@ public partial class MainViewModel : ViewModelBase
             schema.Variables,
             profileSettings,
             (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
-            url => urlTargetOpener.Open([new UrlTarget(url)]),
+            (urls, newWindow) => urlTargetOpener.Open(urls.Select(url => new UrlTarget(url)), newWindow),
             resolveExtensionSecrets);
 
         var commands = schema.Commands
@@ -380,7 +380,7 @@ public partial class MainViewModel : ViewModelBase
                     effectiveVariables,
                     _profileSettingsStore.GetValues(),
                     (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
-                    url => urlTargetOpener.Open([new UrlTarget(url)]),
+                    (urls, newWindow) => urlTargetOpener.Open(urls.Select(url => new UrlTarget(url)), newWindow),
                     resolveExtensionSecrets);
                 ApplyCompletionState(_completionSession.UpdateVariables(effectiveVariables));
             },
@@ -2727,7 +2727,9 @@ public sealed record CompletionOptionViewModel(
         else if (_asyncCommandExecutors.TryGetValue(executionHandler, out var asyncCommandExecutor))
         {
             executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
-                () => asyncCommandExecutor.ExecuteAsync(parsedCommand));
+                () => asyncCommandExecutor is IAsyncCommandExecutorWithLaunchOptions launchOptionsExecutor
+                    ? launchOptionsExecutor.ExecuteAsync(parsedCommand, newWindow || parsedWithNewWindowOption)
+                    : asyncCommandExecutor.ExecuteAsync(parsedCommand));
             if (string.Equals(executionHandler, "snippet", StringComparison.OrdinalIgnoreCase))
             {
                 RefreshSecretAccessState();

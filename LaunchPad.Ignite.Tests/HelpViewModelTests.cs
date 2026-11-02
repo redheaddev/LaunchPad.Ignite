@@ -54,6 +54,8 @@ public class HelpViewModelTests
             shortcut.Shortcut == "Ctrl+Enter");
         Assert.Contains(helpViewModel.UrlCommandKeyboardShortcuts, shortcut =>
             shortcut.Shortcut == "Ctrl+Enter" && shortcut.Description.Contains("new window", StringComparison.Ordinal));
+        Assert.Contains(helpViewModel.UrlCommandKeyboardShortcuts, shortcut =>
+            shortcut.Shortcut == "Shift+Enter" && shortcut.Description.Contains("new window", StringComparison.Ordinal));
         Assert.Contains(helpViewModel.CommandKeyboardShortcuts, shortcut =>
             shortcut.Shortcut == "Ctrl+L" && shortcut.Description.Contains("secret toggle", StringComparison.Ordinal));
         var toolsExtensionShortcuts = helpViewModel.ExtensionShortcutGroups

@@ -46,7 +46,7 @@ public sealed record LoadedExtensions(
         IEnumerable<CommandVariableDefinition> variables,
         IReadOnlyDictionary<string, string> settingValues,
         Func<string, string, (bool Found, string Value)> tryGetSecret,
-        Action<string> openUrl,
+        Action<IReadOnlyList<string>, bool> openUrls,
         Func<string, IReadOnlyList<string>, Task<ExtensionSecretResolutionResult>> resolveSecrets)
     {
         var settingsByNamespace = variables
@@ -81,6 +81,7 @@ public sealed record LoadedExtensions(
         {
             var extensionNamespace = executor switch
             {
+                IExtensionCommandContextAwareWithLaunchOptions launchOptionsAware => launchOptionsAware.Namespace,
                 IExtensionCommandContextAware contextAware => contextAware.Namespace,
                 IExtensionFunctionContextAware functionContextAware => functionContextAware.Namespace,
                 IExtensionSecretResolverAware secretResolverAware => secretResolverAware.Namespace,
@@ -91,7 +92,19 @@ public sealed record LoadedExtensions(
                 continue;
             }
 
-            if (executor is IExtensionCommandContextAware contextAwareExecutor)
+            if (executor is IExtensionCommandContextAwareWithLaunchOptions launchOptionsContextAwareExecutor)
+            {
+                var settings = GetConfiguredSettings(
+                    extensionNamespace,
+                    settingsByNamespace,
+                    definitionsByNamespace,
+                    profileValues);
+                launchOptionsContextAwareExecutor.Configure(
+                    settings,
+                    name => tryGetSecret(extensionNamespace, name),
+                    openUrls);
+            }
+            else if (executor is IExtensionCommandContextAware contextAwareExecutor)
             {
                 var settings = GetConfiguredSettings(
                     extensionNamespace,
@@ -101,7 +114,7 @@ public sealed record LoadedExtensions(
                 contextAwareExecutor.Configure(
                     settings,
                     name => tryGetSecret(extensionNamespace, name),
-                    openUrl);
+                    url => openUrls([url], false));
             }
 
             if (executor is IExtensionFunctionContextAware functionContextExecutor)

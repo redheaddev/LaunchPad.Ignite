@@ -262,7 +262,7 @@
             <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="3,12,3,0"
                         IsVisible="{Binding IsMainMode}">
                 <TextBlock Text="Enter/Ctrl+Shift/Alt -> launch/elevated/other user" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
-				<TextBlock Text="Shift+Enter -> url: launch in new window" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
+                <TextBlock Text="Ctrl/Shift+Enter -> url: launch in new window" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Tab/Right-Arrow -> accept" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
 				<TextBlock Text="Esc -> close" Foreground="{DynamicResource ThemeMutedText}" FontSize="11" />
             </StackPanel>

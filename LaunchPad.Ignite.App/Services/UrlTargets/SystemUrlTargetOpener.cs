@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using Microsoft.Win32;
 using LaunchPad.Ignite.App.Services;
 using LaunchPad.Ignite.Core.Execution;
@@ -12,19 +13,27 @@ public sealed class SystemUrlTargetOpener : IUrlTargetOpener
 {
     public void Open(IEnumerable<UrlTarget> targets, bool newWindow = false)
     {
-        foreach (var target in targets)
+        var targetList = targets.ToArray();
+        if (targetList.Length == 0)
         {
-            if (!newWindow || !TryOpenInNewBrowserWindow(target.Value))
+            return;
+        }
+
+        if (newWindow && TryOpenInNewBrowserWindow(targetList))
+        {
+            return;
+        }
+
+        foreach (var target in targetList)
+        {
+            Process.Start(new ProcessStartInfo(target.Value)
             {
-                Process.Start(new ProcessStartInfo(target.Value)
-                {
-                    UseShellExecute = true
-                });
-            }
+                UseShellExecute = true
+            });
         }
     }
 
-    private static bool TryOpenInNewBrowserWindow(string url)
+    private static bool TryOpenInNewBrowserWindow(IReadOnlyList<UrlTarget> targets)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -69,7 +78,11 @@ public sealed class SystemUrlTargetOpener : IUrlTargetOpener
                 UseShellExecute = false
             };
             startInfo.ArgumentList.Add(newWindowArgument);
-            startInfo.ArgumentList.Add(url);
+            foreach (var target in targets)
+            {
+                startInfo.ArgumentList.Add(target.Value);
+            }
+
             Process.Start(startInfo);
             return true;
         }
