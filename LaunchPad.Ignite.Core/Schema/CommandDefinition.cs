@@ -26,14 +26,22 @@ public sealed record CommandFunctionDefinition(
     string? Interpreter = null,
     string? ScriptPath = null,
     int TimeoutSeconds = 10,
-    string? Namespace = null)
+    string? Namespace = null,
+    CommandFunctionReturnType ReturnType = CommandFunctionReturnType.Text)
 {
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
 }
 
+public enum CommandFunctionReturnType
+{
+    Text,
+    List
+}
+
 public sealed record CommandFunctionParameterDefinition(
     string Name,
-    bool Optional = false);
+    bool Optional = false,
+    string? ListFunction = null);
 
 public sealed record CommandListDefinition(
     string Type,
@@ -116,7 +124,8 @@ public sealed record CommandArgumentDefinition(
     string? InputType = null,
     ListSelectionMode ListMode = ListSelectionMode.Multiple,
     bool AllowCustomValues = false,
-    bool Sensitive = false);
+    bool Sensitive = false,
+    string? ListFunction = null);
 
 public sealed record CommandExecutionDefinition(
     CommandExecutionMode Mode,

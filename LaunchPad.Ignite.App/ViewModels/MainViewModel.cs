@@ -32,6 +32,7 @@ using System.IO;
 using System.Data;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace LaunchPad.Ignite.App.ViewModels;
@@ -45,6 +46,7 @@ public partial class MainViewModel : ViewModelBase
     public event Action<LauncherNavigationTarget>? NavigationRequested;
     public string AppVersion => typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     private CommandCompletionSession _completionSession = null!;
+    private CommandListFunctionValueProvider _commandListFunctionValueProvider = null!;
     private CommandCatalog _catalog = null!;
     private CommandLineParser _parser = null!;
     private ShortcutResolver _shortcutResolver = null!;
@@ -286,7 +288,8 @@ public partial class MainViewModel : ViewModelBase
             profileSettings,
             (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
             (urls, newWindow) => urlTargetOpener.Open(urls.Select(url => new UrlTarget(url)), newWindow),
-            resolveExtensionSecrets);
+            resolveExtensionSecrets,
+            directory => _terminalLauncher.OpenShell(new Dictionary<string, string>(), directory));
 
         var commands = schema.Commands
             .Where(command => !string.Equals(command.Name, SecretCommandDefinition.Definition.Name, StringComparison.OrdinalIgnoreCase)
@@ -339,6 +342,9 @@ public partial class MainViewModel : ViewModelBase
                 new ExtensionPackageNamesArgumentValueProvider(extensionPackageManager),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
                 new InstalledComponentIdsArgumentValueProvider(componentIds, _extensionStateStore)));
+        var commandListFunctionValueProvider = new CommandListFunctionValueProvider(
+            schema.Functions,
+            extensions.ListFunctionExecutors);
         _macroInvocationParser = new MacroInvocationParser(
             _macroStore,
             new MacroArgumentBinder(valueProvider));
@@ -357,7 +363,15 @@ public partial class MainViewModel : ViewModelBase
             catalog,
             valueProvider,
             schema.Variables,
-            schema.Functions);
+            schema.Functions,
+            commandListFunctionValueProvider);
+        commandListFunctionValueProvider.ValuesChanged += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_commandListFunctionValueProvider, commandListFunctionValueProvider))
+            {
+                ApplyCompletionState(_completionSession.RefreshListFunctionValues());
+            }
+        });
         var parser = new CommandLineParser(catalog, valueProvider);
         var urlCommandModel = new UrlCommandModel(urlTargetOpener, schema.Variables);
         var variableCommandModel = new VariableCommandModel(
@@ -381,7 +395,8 @@ public partial class MainViewModel : ViewModelBase
                     _profileSettingsStore.GetValues(),
                     (extensionNamespace, name) => extensionSecretAccessPolicy.TryGetSecret(extensionNamespace, name),
                     (urls, newWindow) => urlTargetOpener.Open(urls.Select(url => new UrlTarget(url)), newWindow),
-                    resolveExtensionSecrets);
+                    resolveExtensionSecrets,
+                    directory => _terminalLauncher.OpenShell(new Dictionary<string, string>(), directory));
                 ApplyCompletionState(_completionSession.UpdateVariables(effectiveVariables));
             },
             ConfirmVariableOverwrite);
@@ -447,6 +462,7 @@ public partial class MainViewModel : ViewModelBase
         _variableExpander = variableExpander;
         _shortcutResolver = shortcutResolver;
         _functionExpander = functionExpander;
+        _commandListFunctionValueProvider = commandListFunctionValueProvider;
         _completionSession = completionSession;
         _parser = parser;
         _urlCommandModel = urlCommandModel;
@@ -682,6 +698,7 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MiniUsageStatusText))]
+    [NotifyPropertyChangedFor(nameof(CompletionPositionText))]
     private IReadOnlyList<CompletionOptionViewModel> _completionItems = Array.Empty<CompletionOptionViewModel>();
 
     [NotifyPropertyChangedFor(nameof(HasUsageText))]
@@ -757,6 +774,44 @@ public partial class MainViewModel : ViewModelBase
     public bool IsChecklistActive => ActiveCompletionState.IsChecklistActive;
 
     public bool HasCompletionOptions => CompletionItems.Count > 0;
+
+    public string CompletionPositionText
+    {
+        get
+        {
+            if (CompletionItems.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var highlightedIndex = -1;
+            for (var index = 0; index < CompletionItems.Count; index++)
+            {
+                if (CompletionItems[index].IsHighlighted)
+                {
+                    highlightedIndex = index;
+                    break;
+                }
+            }
+
+            var selectedIndex = highlightedIndex < 0 ? 0 : highlightedIndex;
+            if (selectedIndex < CompletionItems.Count
+                && !string.IsNullOrEmpty(CompletionItems[selectedIndex].StatusText))
+            {
+                var historyIndex = CompletionItems
+                    .Take(selectedIndex)
+                    .Count(item => !string.IsNullOrEmpty(item.StatusText));
+                var (positionIndex, positionCount) = GetHistoryPosition(CommandText, historyIndex);
+                return positionCount > 0 ? $"{positionIndex + 1} / {positionCount}" : string.Empty;
+            }
+
+            var listIndex = CompletionItems
+                .Take(selectedIndex)
+                .Count(item => string.IsNullOrEmpty(item.StatusText));
+            var listCount = CompletionItems.Count(item => string.IsNullOrEmpty(item.StatusText));
+            return listCount > 0 ? $"{listIndex + 1} / {listCount}" : string.Empty;
+        }
+    }
 
     public bool HasUsageText => !string.IsNullOrEmpty(UsageText);
 
@@ -2586,6 +2641,38 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
+        var standaloneListExpression = isPrintCommand ? printExpression : CommandText;
+        if (TryParseStandaloneListFunction(standaloneListExpression, out var listFunction, out var listFunctionArguments))
+        {
+            var definition = _extensions.Schema.Functions.FirstOrDefault(function =>
+                function.ReturnType == CommandFunctionReturnType.List
+                && string.Equals(function.QualifiedName, listFunction, StringComparison.OrdinalIgnoreCase));
+            if (definition is null
+                || listFunctionArguments.Count < definition.Parameters.Count(parameter => !parameter.Optional)
+                || listFunctionArguments.Count > definition.Parameters.Count
+                || !_extensions.ListFunctionExecutors.TryGetValue(listFunction, out var listFunctionExecutor))
+            {
+                SetStatusMessage($"List function '{listFunction}' is not configured for standalone execution.");
+                return false;
+            }
+
+            try
+            {
+                var listItems = await listFunctionExecutor.ExecuteListAsync(
+                    definition,
+                    listFunctionArguments,
+                    CancellationToken.None);
+                SetStatusMessage(string.Join(Environment.NewLine, listItems.Select(item => item.Value)), isValueOutput: true);
+                CommandText = string.Empty;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                SetStatusMessage($"List function execution failed: {exception.Message}");
+                return false;
+            }
+        }
+
         var expansion = _variableExpander.Expand(isPrintCommand ? printExpression : CommandText);
         if (expansion.UnresolvedVariables.Count > 0)
         {
@@ -2748,6 +2835,23 @@ public sealed record CompletionOptionViewModel(
         }
 
         CommandText = string.Empty;
+        return true;
+    }
+
+    private static bool TryParseStandaloneListFunction(
+        string input,
+        out string functionName,
+        out IReadOnlyList<string> arguments)
+    {
+        functionName = string.Empty;
+        arguments = [];
+        if (!CommandListFunctionCall.TryParseInvocation(input, out var invocation))
+        {
+            return false;
+        }
+
+        functionName = invocation.FunctionName;
+        arguments = invocation.Arguments;
         return true;
     }
 

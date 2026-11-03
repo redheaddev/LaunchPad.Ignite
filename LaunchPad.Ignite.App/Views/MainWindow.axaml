@@ -170,7 +170,7 @@
             </Border>
 
             <Grid Grid.Row="2" Margin="3,12,3,0" IsVisible="{Binding IsMainMode}">
-                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,*">
                     <TextBlock x:Name="UsageTextBlock"
                                  Foreground="{DynamicResource ThemeSecondaryText}" FontFamily="Cascadia Mono, Consolas"
                                FontSize="12" TextWrapping="Wrap" VerticalAlignment="Top"
@@ -189,45 +189,51 @@
                         <TextBlock Text="{Binding CommandExpansionPreview}" Foreground="{DynamicResource ThemeAccent}"
                                    FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" />
                     </StackPanel>
-                    <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto"
-                                  IsVisible="{Binding HasCompletionOptions}">
-                        <ItemsControl x:Name="CompletionList" ItemsSource="{Binding CompletionItems}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
-                                            HorizontalAlignment="Stretch"
-                                            PointerPressed="CompletionItem_PointerPressed"
-                                            Classes.highlighted="{Binding IsHighlighted}">
-                                        <TextBlock Classes="completion-item-text"
-                                                   Classes.highlighted="{Binding IsHighlighted}"
-                                                   Classes.checked="{Binding IsSelected}"
-                                                   FontFamily="Cascadia Mono, Consolas" FontSize="13">
-                                            <TextBlock.Inlines>
-                                                <Run Text="{Binding DisplayText}" />
-                                                <Run Text="{Binding KindText}" Foreground="{DynamicResource ThemeMutedText}" />
-                                                <Run Text="{Binding CyanText}" Foreground="{DynamicResource ThemeAccent}" />
-                                            </TextBlock.Inlines>
-                                        </TextBlock>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                    <StackPanel Grid.Row="4" Spacing="6">
+                    <Grid Grid.Row="3" RowDefinitions="Auto,*" IsVisible="{Binding HasCompletionOptions}">
+                        <TextBlock Text="{Binding CompletionPositionText}" HorizontalAlignment="Right"
+                                   Foreground="{DynamicResource ThemeMutedText}" FontSize="11"
+                                   Margin="0,0,4,2" />
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="CompletionList" ItemsSource="{Binding CompletionItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Classes="completion-item" Padding="4,1" CornerRadius="4"
+                                                HorizontalAlignment="Stretch"
+                                                PointerPressed="CompletionItem_PointerPressed"
+                                                Classes.highlighted="{Binding IsHighlighted}">
+                                            <TextBlock Classes="completion-item-text"
+                                                       Classes.highlighted="{Binding IsHighlighted}"
+                                                       Classes.checked="{Binding IsSelected}"
+                                                       FontFamily="Cascadia Mono, Consolas" FontSize="13">
+                                                <TextBlock.Inlines>
+                                                    <Run Text="{Binding DisplayText}" />
+                                                    <Run Text="{Binding KindText}" Foreground="{DynamicResource ThemeMutedText}" />
+                                                    <Run Text="{Binding CyanText}" Foreground="{DynamicResource ThemeAccent}" />
+                                                </TextBlock.Inlines>
+                                            </TextBlock>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                    <Grid Grid.Row="4" RowDefinitions="Auto,*,Auto" RowSpacing="6">
                         <Border Height="1" Background="{DynamicResource ThemeBorder}" />
-                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                        <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="6">
                             <TextBlock Text="Result:" IsVisible="{Binding IsValueOutput}"
                                        Foreground="{DynamicResource ThemeAccent}" FontSize="14"
                                        VerticalAlignment="Top" />
                             <TextBox x:Name="ResultTextBlock" Grid.Column="1" Text="{Binding StatusMessage}"
                                      IsReadOnly="True" BorderThickness="0" Padding="0"
                                      Background="Transparent" Foreground="{Binding StatusMessageBrush}"
-                                     FontSize="14" TextWrapping="Wrap" VerticalAlignment="Top"
+                                     FontSize="14" TextWrapping="Wrap" VerticalAlignment="Stretch"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                      SelectionBrush="{DynamicResource ThemeTextSelection}"
                                      SelectionForegroundBrush="{DynamicResource ThemeTextSelectionForeground}"
                                      PointerPressed="ResultTextBox_PointerPressed" />
                         </Grid>
-                        <Button Classes="clipboard-expiry-action" IsVisible="{Binding IsClipboardExpiryActive}"
+                        <Button Grid.Row="2" Classes="clipboard-expiry-action" IsVisible="{Binding IsClipboardExpiryActive}"
                                 ToolTip.Tip="{Binding ClipboardExpiryTooltip}" Click="ClipboardExpiryButton_Click">
                             <StackPanel Spacing="3">
                                 <TextBlock Text="{Binding ClipboardExpiryStatus}"
@@ -237,7 +243,7 @@
                                              Foreground="{DynamicResource ThemeAccent}" />
                             </StackPanel>
                         </Button>
-                    </StackPanel>
+                    </Grid>
                 </Grid>
             </Grid>
 

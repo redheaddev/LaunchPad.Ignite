@@ -105,6 +105,60 @@ public sealed class CommandSchemaValidator
             }
         }
 
+        var functionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var function in schema.Functions)
+        {
+            if (string.IsNullOrWhiteSpace(function.Name)
+                || function.Name.Contains(':')
+                || !functionNames.Add(function.QualifiedName))
+            {
+                errors.Add($"Function name '{function.QualifiedName}' is empty or duplicated.");
+            }
+
+            if (!Enum.IsDefined(function.ReturnType))
+            {
+                errors.Add($"Function '{function.QualifiedName}' has an unsupported return type '{function.ReturnType}'.");
+            }
+
+            if (function.ReturnType == CommandFunctionReturnType.List && function.Kind is not null)
+            {
+                errors.Add($"List function '{function.QualifiedName}' must use an extension executor.");
+            }
+
+            var parameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var parameter in function.Parameters)
+            {
+                if (string.IsNullOrWhiteSpace(parameter.Name) || !parameterNames.Add(parameter.Name))
+                {
+                    errors.Add($"Parameter name '{parameter.Name}' in function '{function.QualifiedName}' is empty or duplicated.");
+                }
+
+                if (parameter.ListFunction is null)
+                {
+                    continue;
+                }
+
+                if (!CommandListFunctionCall.TryParse(parameter.ListFunction, out var listFunctionCall))
+                {
+                    errors.Add($"Parameter '{parameter.Name}' in function '{function.QualifiedName}' has an invalid list function source '{parameter.ListFunction}'.");
+                    continue;
+                }
+
+                var listFunction = schema.Functions.FirstOrDefault(candidate =>
+                    string.Equals(candidate.QualifiedName, listFunctionCall.FunctionName, StringComparison.OrdinalIgnoreCase));
+                if (listFunction is null || listFunction.ReturnType != CommandFunctionReturnType.List)
+                {
+                    errors.Add($"Parameter '{parameter.Name}' in function '{function.QualifiedName}' references an undefined list function '{listFunctionCall.FunctionName}'.");
+                    continue;
+                }
+
+                if (listFunctionCall.ArgumentNames.Count != listFunction.Parameters.Count)
+                {
+                    errors.Add($"List function source '{parameter.ListFunction}' must provide {listFunction.Parameters.Count} argument(s).");
+                }
+            }
+        }
+
         var commandNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var command in schema.Commands)
         {
@@ -220,11 +274,48 @@ public sealed class CommandSchemaValidator
 
             var supportsCustomValues = argument.Ref is not null
                 && (argument.Ref.StartsWith("enum:", StringComparison.OrdinalIgnoreCase)
-                    || argument.Ref.StartsWith("list:", StringComparison.OrdinalIgnoreCase));
+                    || argument.Ref.StartsWith("list:", StringComparison.OrdinalIgnoreCase))
+                || argument.ListFunction is not null;
             if (argument.AllowCustomValues
                 && !supportsCustomValues)
             {
                 errors.Add($"Argument '{argument.Name}' can allow custom values only when referencing an enum or list.");
+            }
+
+            if (argument.ListFunction is not null)
+            {
+                if (argument.Ref is not null)
+                {
+                    errors.Add($"Argument '{argument.Name}' cannot specify both a list reference and a list function.");
+                }
+
+                if (!CommandListFunctionCall.TryParse(argument.ListFunction, out var functionCall))
+                {
+                    errors.Add($"Argument '{argument.Name}' has an invalid list function source '{argument.ListFunction}'.");
+                    continue;
+                }
+
+                var listFunction = schema.Functions.FirstOrDefault(function =>
+                    string.Equals(function.QualifiedName, functionCall.FunctionName, StringComparison.OrdinalIgnoreCase));
+                if (listFunction is null || listFunction.ReturnType != CommandFunctionReturnType.List)
+                {
+                    errors.Add($"Argument '{argument.Name}' references an undefined list function '{functionCall.FunctionName}'.");
+                    continue;
+                }
+
+                if (functionCall.ArgumentNames.Count != listFunction.Parameters.Count)
+                {
+                    errors.Add($"List function source '{argument.ListFunction}' must provide {listFunction.Parameters.Count} argument(s).");
+                }
+
+                foreach (var argumentName in functionCall.ArgumentNames)
+                {
+                    if (!action.Arguments.Any(candidate =>
+                        string.Equals(candidate.Name, argumentName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        errors.Add($"List function source '{argument.ListFunction}' references unknown command argument '{argumentName}'.");
+                    }
+                }
             }
 
             if (argument.Ref is null)

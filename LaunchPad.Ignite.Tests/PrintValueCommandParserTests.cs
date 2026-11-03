@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Parsing;
+using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Tests;
 
@@ -30,5 +31,14 @@ public class PrintValueCommandParserTests
     {
         Assert.True(PrintValueCommandParser.TryParse("?", out var expression));
         Assert.Empty(expression);
+    }
+
+    [Fact]
+    public void TryParseCapturesStandaloneListFunctionExpression()
+    {
+        Assert.True(PrintValueCommandParser.TryParse("? @ado:repos(architecture)", out var expression));
+        Assert.True(CommandListFunctionCall.TryParseInvocation(expression, out var invocation));
+        Assert.Equal("ado:repos", invocation.FunctionName);
+        Assert.Equal("architecture", Assert.Single(invocation.Arguments));
     }
 }

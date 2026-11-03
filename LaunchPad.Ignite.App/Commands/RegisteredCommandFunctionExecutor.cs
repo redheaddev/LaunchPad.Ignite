@@ -34,6 +34,11 @@ public sealed class RegisteredCommandFunctionExecutor : ICommandFunctionExecutor
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
+        if (function.ReturnType != CommandFunctionReturnType.Text)
+        {
+            throw new InvalidOperationException($"Function '{function.QualifiedName}' does not return text.");
+        }
+
         if (_extensionFunctionExecutors.TryGetValue(function.QualifiedName, out var extensionExecutor))
         {
             return await extensionExecutor.ExecuteAsync(function, arguments, cancellationToken);

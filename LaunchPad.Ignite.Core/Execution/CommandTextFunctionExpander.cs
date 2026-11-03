@@ -52,6 +52,11 @@ public sealed class CommandTextFunctionExpander
                 throw new InvalidOperationException($"Function '{functionName}' is not registered.");
             }
 
+            if (function.ReturnType != CommandFunctionReturnType.Text)
+            {
+                throw new InvalidOperationException($"List function '{function.QualifiedName}' can only be used as a command argument list source.");
+            }
+
             var arguments = new string[rawArguments.Count];
             for (var argumentIndex = 0; argumentIndex < rawArguments.Count; argumentIndex++)
             {

@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Lists;
+using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.Core.Schema;
 
@@ -11,18 +12,21 @@ internal sealed class CommandCompletionResolver
     private readonly CommandLineTokenizer _tokenizer = new();
     private IReadOnlyList<CommandVariableDefinition> _variables;
     private readonly IReadOnlyList<CommandFunctionDefinition> _functions;
+    private readonly ICommandListFunctionValueProvider? _listFunctionValueProvider;
     private Func<CommandDefinition, bool>? _commandFilter;
 
     public CommandCompletionResolver(
         CommandCatalog catalog,
         IArgumentValueProvider valueProvider,
         IEnumerable<CommandVariableDefinition>? variables = null,
-        IEnumerable<CommandFunctionDefinition>? functions = null)
+        IEnumerable<CommandFunctionDefinition>? functions = null,
+        ICommandListFunctionValueProvider? listFunctionValueProvider = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
         _variables = (variables ?? []).ToArray();
         _functions = (functions ?? []).ToArray();
+        _listFunctionValueProvider = listFunctionValueProvider;
     }
 
     public void UpdateVariables(IEnumerable<CommandVariableDefinition> variables)
@@ -38,20 +42,30 @@ internal sealed class CommandCompletionResolver
 
         if (!trailingWhitespace && tokens.Count > 0)
         {
-            var currentToken = tokens[^1];
-            var variableStart = currentToken.Value.LastIndexOf('$');
-            var functionStart = currentToken.Value.LastIndexOf('@');
-            if (functionStart > variableStart
-                && currentToken.Value.IndexOf('(', functionStart + 1) < 0)
+            var completionToken = tokens[^1];
+            if (TryResolveStandaloneListFunction(input, out var standaloneListResolution))
             {
-                var prefix = currentToken.Value[functionStart..];
+                return standaloneListResolution;
+            }
+
+            if (TryResolveFunctionArgument(input, out var functionArgumentResolution))
+            {
+                return functionArgumentResolution;
+            }
+
+            var variableStart = completionToken.Value.LastIndexOf('$');
+            var functionStart = completionToken.Value.LastIndexOf('@');
+            if (functionStart > variableStart
+                && completionToken.Value.IndexOf('(', functionStart + 1) < 0)
+            {
+                var prefix = completionToken.Value[functionStart..];
                 var matchingFunctions = _functions
                     .Where(function => $"@{function.QualifiedName}".StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     .ToArray();
                 return CreateResolution(
                     CompletionKind.Function,
                     prefix,
-                    currentToken.Start + functionStart,
+                    completionToken.Start + functionStart,
                     matchingFunctions.Select(function => $"@{function.QualifiedName}(").ToArray()) with
                 {
                     CandidateDisplayValues = matchingFunctions
@@ -67,14 +81,14 @@ internal sealed class CommandCompletionResolver
 
             if (variableStart >= 0)
             {
-                var prefix = currentToken.Value[variableStart..];
+                var prefix = completionToken.Value[variableStart..];
                 var matchingVariables = _variables
                     .Where(variable => $"${variable.QualifiedName}".StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     .ToArray();
                 return CreateResolution(
                     CompletionKind.Variable,
                     prefix,
-                    currentToken.Start + variableStart,
+                    completionToken.Start + variableStart,
                     matchingVariables.Select(variable => $"${variable.QualifiedName}").ToArray()) with
                 {
                     CandidateDisplayValues = matchingVariables
@@ -190,21 +204,58 @@ internal sealed class CommandCompletionResolver
             return None(input.Length, awaitingSeparator: true);
         }
 
-        var argumentIndex = trailingWhitespace
-            ? argumentTokens.Length
-            : Math.Max(0, argumentTokens.Length - 1);
-        var currentPrefix = trailingWhitespace || argumentTokens.Length == 0
+        var currentArgumentToken = !trailingWhitespace && argumentTokens.Length > 0 ? argumentTokens[^1] : null;
+        var precedingTokenCount = currentArgumentToken is null ? argumentTokens.Length : argumentTokens.Length - 1;
+        var precedingArguments = GetArgumentValues(action, argumentTokens.Take(precedingTokenCount));
+        var currentNamedArgument = currentArgumentToken is null ? null : GetNamedArgument(action, currentArgumentToken.Value);
+        var argumentIndex = currentNamedArgument?.Index
+            ?? GetNextArgumentIndex(action, precedingArguments);
+        var currentPrefix = currentArgumentToken is null
             ? string.Empty
-            : argumentTokens[^1].Value;
-        var tokenStart = trailingWhitespace || argumentTokens.Length == 0
+            : currentNamedArgument is null
+                ? currentArgumentToken.Value
+                : currentArgumentToken.Value[(currentNamedArgument.Value.EqualsIndex + 1)..];
+        var tokenStart = currentArgumentToken is null
             ? input.Length
-            : argumentTokens[^1].Start;
+            : currentNamedArgument is null
+                ? currentArgumentToken.Start
+                : currentArgumentToken.Start + currentNamedArgument.Value.EqualsIndex + 1;
         if (argumentIndex >= action.Arguments.Count)
         {
             return None(tokenStart);
         }
 
         var argument = action.Arguments[argumentIndex];
+        if (argument.ListFunction is not null)
+        {
+            if (!CommandListFunctionCall.TryParse(argument.ListFunction, out var functionCall)
+                || _listFunctionValueProvider is null
+                || functionCall.ArgumentNames.Any(name => !precedingArguments.ContainsKey(name)))
+            {
+                return None(tokenStart);
+            }
+
+            var functionArguments = functionCall.ArgumentNames
+                .Select(name => precedingArguments[name])
+                .ToArray();
+            var listItems = _listFunctionValueProvider.GetOrStart(functionCall.FunctionName, functionArguments);
+            var listCandidates = listItems.Select(item => item.Value).ToArray();
+            return new CompletionResolution(
+                CompletionKind.Argument,
+                currentPrefix,
+                tokenStart,
+                listCandidates,
+                true,
+                argument.ListMode,
+                false,
+                argumentIndex + 1 < action.Arguments.Count,
+                argument,
+                argumentIndex)
+            {
+                CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+            };
+        }
+
         if (argument.Ref is null)
         {
             return None(tokenStart);
@@ -234,6 +285,299 @@ internal sealed class CommandCompletionResolver
             hasNextArgument,
             argument,
             argumentIndex);
+    }
+
+    private bool TryResolveStandaloneListFunction(string input, out CompletionResolution resolution)
+    {
+        resolution = None(input.Length);
+        if (_listFunctionValueProvider is null || !input.StartsWith('@') || input.Any(char.IsWhiteSpace))
+        {
+            return false;
+        }
+
+        var openParenthesis = input.IndexOf('(');
+        if (openParenthesis <= 1 || input[^1] != ')')
+        {
+            return false;
+        }
+
+        var functionName = input[1..openParenthesis];
+        var function = _functions.FirstOrDefault(candidate =>
+            string.Equals(candidate.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase));
+        if (function?.ReturnType != CommandFunctionReturnType.List
+            || !TryParseFunctionArguments(input[(openParenthesis + 1)..^1], out var arguments)
+            || arguments.Count < function.Parameters.Count(parameter => !parameter.Optional)
+            || arguments.Count > function.Parameters.Count)
+        {
+            return false;
+        }
+
+        var listItems = _listFunctionValueProvider.GetOrStart(function.QualifiedName, arguments);
+        resolution = new CompletionResolution(
+            CompletionKind.Function,
+            string.Empty,
+            0,
+            listItems.Select(item => item.Value).ToArray(),
+            true,
+            ListSelectionMode.Single,
+            false,
+            false)
+        {
+            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+        };
+        return true;
+    }
+
+    private static bool TryParseFunctionArguments(string rawArguments, out IReadOnlyList<string> arguments)
+    {
+        var parsedArguments = new List<string>();
+        if (string.IsNullOrWhiteSpace(rawArguments))
+        {
+            arguments = parsedArguments;
+            return true;
+        }
+
+        var argumentStart = 0;
+        var inQuotes = false;
+        var nesting = 0;
+        for (var index = 0; index < rawArguments.Length; index++)
+        {
+            var character = rawArguments[index];
+            if (character == '"' && (index == 0 || rawArguments[index - 1] != '\\'))
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (!inQuotes && character == '(')
+            {
+                nesting++;
+            }
+            else if (!inQuotes && character == ')')
+            {
+                if (nesting == 0)
+                {
+                    arguments = [];
+                    return false;
+                }
+
+                nesting--;
+            }
+            else if (!inQuotes && nesting == 0 && character == ',')
+            {
+                if (!TryAddFunctionArgument(rawArguments[argumentStart..index], parsedArguments))
+                {
+                    arguments = [];
+                    return false;
+                }
+
+                argumentStart = index + 1;
+            }
+        }
+
+        if (inQuotes || nesting != 0 || !TryAddFunctionArgument(rawArguments[argumentStart..], parsedArguments))
+        {
+            arguments = [];
+            return false;
+        }
+
+        arguments = parsedArguments;
+        return true;
+    }
+
+    private static bool TryAddFunctionArgument(string rawArgument, ICollection<string> arguments)
+    {
+        var value = rawArgument.Trim();
+        if (value.Length == 0)
+        {
+            return false;
+        }
+
+        if (value.StartsWith('"') && value.EndsWith('"') && value.Length >= 2)
+        {
+            value = value[1..^1]
+                .Replace("\\\"", "\"", StringComparison.Ordinal)
+                .Replace("\\\\", "\\", StringComparison.Ordinal);
+        }
+
+        arguments.Add(value);
+        return true;
+    }
+
+    private bool TryResolveFunctionArgument(string input, out CompletionResolution resolution)
+    {
+        resolution = None(input.Length);
+        var functionStart = input.LastIndexOf('@');
+        if (functionStart < 0)
+        {
+            return false;
+        }
+
+        var nameStart = functionStart + 1;
+        var openParenthesis = nameStart;
+        while (openParenthesis < input.Length && (char.IsLetterOrDigit(input[openParenthesis]) || input[openParenthesis] is '_' or ':' or '-'))
+        {
+            openParenthesis++;
+        }
+
+        if (openParenthesis == nameStart || openParenthesis >= input.Length || input[openParenthesis] != '(')
+        {
+            return false;
+        }
+
+        var functionName = input[nameStart..openParenthesis];
+        var function = _functions.FirstOrDefault(candidate =>
+            string.Equals(candidate.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase));
+        if (function is null || function.Parameters.Count == 0)
+        {
+            return false;
+        }
+
+        var argumentStart = openParenthesis + 1;
+        var argumentIndex = 0;
+        var inQuotes = false;
+        var nesting = 0;
+        for (var index = argumentStart; index < input.Length; index++)
+        {
+            var character = input[index];
+            if (character == '"')
+            {
+                inQuotes = !inQuotes;
+            }
+            else if (!inQuotes && character == '(')
+            {
+                nesting++;
+            }
+            else if (!inQuotes && character == ')')
+            {
+                if (nesting == 0)
+                {
+                    return false;
+                }
+
+                nesting--;
+            }
+            else if (!inQuotes && nesting == 0 && character == ',')
+            {
+                argumentIndex++;
+                argumentStart = index + 1;
+            }
+        }
+
+        if (argumentIndex >= function.Parameters.Count
+            || function.Parameters[argumentIndex].ListFunction is not { } listFunctionSource
+            || !CommandListFunctionCall.TryParse(listFunctionSource, out var listFunctionCall)
+            || _listFunctionValueProvider is null)
+        {
+            return false;
+        }
+
+        var rawPriorArguments = input[(openParenthesis + 1)..argumentStart];
+        var priorValues = rawPriorArguments.Length == 0
+            ? []
+            : rawPriorArguments.Split(',').Select(value => value.Trim().Trim('"')).ToArray();
+        var priorArguments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < Math.Min(argumentIndex, function.Parameters.Count); index++)
+        {
+            priorArguments[function.Parameters[index].Name] = priorValues[index];
+        }
+
+        if (listFunctionCall.ArgumentNames.Any(name => !priorArguments.ContainsKey(name)))
+        {
+            return false;
+        }
+
+        while (argumentStart < input.Length && char.IsWhiteSpace(input[argumentStart]))
+        {
+            argumentStart++;
+        }
+
+        var prefix = input[argumentStart..];
+        if (prefix.StartsWith('"'))
+        {
+            argumentStart++;
+            prefix = prefix[1..];
+        }
+
+        var functionArguments = listFunctionCall.ArgumentNames.Select(name => priorArguments[name]).ToArray();
+        var listItems = _listFunctionValueProvider.GetOrStart(listFunctionCall.FunctionName, functionArguments);
+        resolution = new CompletionResolution(
+            CompletionKind.Function,
+            prefix,
+            argumentStart,
+            listItems.Select(item => item.Value).ToArray(),
+            true,
+            ListSelectionMode.Single,
+            false,
+            false)
+        {
+            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+        };
+        return true;
+    }
+
+    private static Dictionary<string, string> GetArgumentValues(
+        CommandActionDefinition action,
+        IEnumerable<CommandLineToken> tokens)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nextPositionalIndex = 0;
+        foreach (var token in tokens)
+        {
+            var equalsIndex = token.Value.IndexOf('=');
+            if (equalsIndex > 0)
+            {
+                var namedArgument = action.Arguments.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Name, token.Value[..equalsIndex], StringComparison.OrdinalIgnoreCase));
+                if (namedArgument is not null)
+                {
+                    values[namedArgument.Name] = token.Value[(equalsIndex + 1)..];
+                    continue;
+                }
+            }
+
+            nextPositionalIndex = GetNextArgumentIndex(action, values, nextPositionalIndex);
+            if (nextPositionalIndex < action.Arguments.Count)
+            {
+                values[action.Arguments[nextPositionalIndex].Name] = token.Value;
+                nextPositionalIndex++;
+            }
+        }
+
+        return values;
+    }
+
+    private static (int Index, int EqualsIndex)? GetNamedArgument(CommandActionDefinition action, string token)
+    {
+        var equalsIndex = token.IndexOf('=');
+        if (equalsIndex <= 0)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < action.Arguments.Count; index++)
+        {
+            if (string.Equals(action.Arguments[index].Name, token[..equalsIndex], StringComparison.OrdinalIgnoreCase))
+            {
+                return (index, equalsIndex);
+            }
+        }
+
+        return null;
+    }
+
+    private static int GetNextArgumentIndex(CommandActionDefinition action, IReadOnlyDictionary<string, string> values)
+        => GetNextArgumentIndex(action, values, 0);
+
+    private static int GetNextArgumentIndex(
+        CommandActionDefinition action,
+        IReadOnlyDictionary<string, string> values,
+        int startIndex)
+    {
+        while (startIndex < action.Arguments.Count && values.ContainsKey(action.Arguments[startIndex].Name))
+        {
+            startIndex++;
+        }
+
+        return startIndex;
     }
 
     private CompletionResolution ResolveAction(

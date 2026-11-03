@@ -22,11 +22,12 @@ public sealed class CommandCompletionSession
         CommandCatalog catalog,
         IArgumentValueProvider valueProvider,
         IEnumerable<CommandVariableDefinition>? variables = null,
-        IEnumerable<CommandFunctionDefinition>? functions = null)
+        IEnumerable<CommandFunctionDefinition>? functions = null,
+        ICommandListFunctionValueProvider? listFunctionValueProvider = null)
     {
         _catalog = catalog;
         _valueProvider = valueProvider;
-        _resolver = new CommandCompletionResolver(catalog, valueProvider, variables, functions);
+        _resolver = new CommandCompletionResolver(catalog, valueProvider, variables, functions, listFunctionValueProvider);
         _resolution = _resolver.Resolve(_inputText);
         State = BuildState();
     }
@@ -37,6 +38,12 @@ public sealed class CommandCompletionSession
     {
         _resolver.UpdateVariables(variables);
         Recalculate(resetSelection: true);
+        return State;
+    }
+
+    public CommandCompletionState RefreshListFunctionValues()
+    {
+        Recalculate(resetSelection: false);
         return State;
     }
 
@@ -351,7 +358,7 @@ public sealed class CommandCompletionSession
             return;
         }
 
-        _selectedValues = _valueProvider.GetValues(_resolution.Argument!.Ref!)
+        _selectedValues = _resolution.Candidates
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         ReplaceCurrentArgument(string.Join(',', _selectedValues));
@@ -418,7 +425,10 @@ public sealed class CommandCompletionSession
     private void ReadListInput()
     {
         var token = _resolution.Prefix;
-        var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
+        var values = _resolution.Candidates;
+        var previouslySelectedSingleValue = _resolution.ListMode == ListSelectionMode.Single
+            ? _selectedValues.FirstOrDefault()
+            : null;
         var parts = token.Split(',');
         var rawArgumentEnd = FindArgumentEnd(_inputText, _resolution.TokenStart);
         var rawParts = _resolution.TokenStart < rawArgumentEnd
@@ -438,7 +448,20 @@ public sealed class CommandCompletionSession
         {
             var value = parts[index];
             var isLastPart = index == parts.Length - 1;
-            if (values.Contains(value, StringComparer.OrdinalIgnoreCase))
+            if (_resolution.ListMode == ListSelectionMode.Single)
+            {
+                if (previouslySelectedSingleValue is not null
+                    && string.Equals(value, previouslySelectedSingleValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    _selectedValues.Add(previouslySelectedSingleValue);
+                }
+                else
+                {
+                    _listFilter = value;
+                    _listFilterStart = _resolution.TokenStart + rawParts.Take(index).Sum(part => part.Length + 1);
+                }
+            }
+            else if (values.Contains(value, StringComparer.OrdinalIgnoreCase))
             {
                 _selectedValues.Add(value);
             }
@@ -472,7 +495,7 @@ public sealed class CommandCompletionSession
             return [];
         }
 
-        var values = _valueProvider.GetValues(_resolution.Argument!.Ref!);
+        var values = _resolution.Candidates;
         return values
             .Where(value => value.StartsWith(_listFilter, StringComparison.OrdinalIgnoreCase))
             .Where(value => _resolution.ListMode != ListSelectionMode.Single
@@ -485,10 +508,29 @@ public sealed class CommandCompletionSession
         if (_resolution.IsChecklist)
         {
             return GetVisibleListValues()
-                .Select((value, index) => new CompletionItem(
-                    value,
-                    _selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase),
-                    index == _highlightedIndex))
+                .Select((value, index) =>
+                {
+                    var candidateIndex = -1;
+                    for (var candidatePosition = 0; candidatePosition < _resolution.Candidates.Count; candidatePosition++)
+                    {
+                        if (string.Equals(_resolution.Candidates[candidatePosition], value, StringComparison.OrdinalIgnoreCase))
+                        {
+                            candidateIndex = candidatePosition;
+                            break;
+                        }
+                    }
+
+                    var displayText = _resolution.CandidateDisplayValues is { } displayValues
+                        && candidateIndex >= 0
+                        && candidateIndex < displayValues.Count
+                            ? displayValues[candidateIndex]
+                            : null;
+                    return new CompletionItem(
+                        value,
+                        _selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase),
+                        index == _highlightedIndex,
+                        displayText);
+                })
                 .ToList();
         }
 
@@ -508,14 +550,6 @@ public sealed class CommandCompletionSession
         var items = GetVisibleItems();
         var highlighted = items.FirstOrDefault(item => item.IsHighlighted);
         var prefix = _resolution.IsChecklist ? _listFilter : _resolution.Prefix;
-        if (_resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Single)
-        {
-            items = items
-                .Where(item => !string.Equals(item.Value, prefix, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            highlighted = items.FirstOrDefault(item => item.IsHighlighted)
-                ?? items.FirstOrDefault();
-        }
 
         var ghostText = string.Empty;
         var ghostCandidate = _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple

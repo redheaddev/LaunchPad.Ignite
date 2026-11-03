@@ -39,6 +39,9 @@ public sealed record LoadedExtensions(
     public IReadOnlyDictionary<string, IAsyncCommandExecutor> AsyncExecutors { get; init; }
         = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
 
+    public IReadOnlyDictionary<string, IExtensionListFunctionExecutor> ListFunctionExecutors { get; init; }
+        = new Dictionary<string, IExtensionListFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+
     public IReadOnlyDictionary<string, string> CommandSources { get; init; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -47,7 +50,8 @@ public sealed record LoadedExtensions(
         IReadOnlyDictionary<string, string> settingValues,
         Func<string, string, (bool Found, string Value)> tryGetSecret,
         Action<IReadOnlyList<string>, bool> openUrls,
-        Func<string, IReadOnlyList<string>, Task<ExtensionSecretResolutionResult>> resolveSecrets)
+        Func<string, IReadOnlyList<string>, Task<ExtensionSecretResolutionResult>> resolveSecrets,
+        Action<string> openTerminal)
     {
         var settingsByNamespace = variables
             .GroupBy(variable => variable.Namespace ?? string.Empty, StringComparer.OrdinalIgnoreCase)
@@ -77,12 +81,14 @@ public sealed record LoadedExtensions(
 
         foreach (var executor in Executors.Values.Cast<object>()
             .Concat(AsyncExecutors.Values)
-            .Concat(FunctionExecutors.Values))
+            .Concat(FunctionExecutors.Values)
+            .Concat(ListFunctionExecutors.Values))
         {
             var extensionNamespace = executor switch
             {
                 IExtensionCommandContextAwareWithLaunchOptions launchOptionsAware => launchOptionsAware.Namespace,
                 IExtensionCommandContextAware contextAware => contextAware.Namespace,
+                IExtensionTerminalContextAware terminalContextAware => terminalContextAware.Namespace,
                 IExtensionFunctionContextAware functionContextAware => functionContextAware.Namespace,
                 IExtensionSecretResolverAware secretResolverAware => secretResolverAware.Namespace,
                 _ => null
@@ -129,6 +135,11 @@ public sealed record LoadedExtensions(
             if (executor is IExtensionSecretResolverAware secretResolverExecutor)
             {
                 secretResolverExecutor.ConfigureSecretResolver(names => resolveSecrets(extensionNamespace, names));
+            }
+
+            if (executor is IExtensionTerminalContextAware terminalContextAwareExecutor)
+            {
+                terminalContextAwareExecutor.ConfigureTerminal(openTerminal);
             }
 
         }
@@ -277,6 +288,7 @@ public sealed class ExtensionLoader
         var executors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var asyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
         var functionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+        var listFunctionExecutors = new Dictionary<string, IExtensionListFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
         var extensionLoadErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var loadContexts = new List<AssemblyLoadContext>();
         foreach (var (manifest, extensionDirectory) in enabledManifests)
@@ -305,18 +317,36 @@ public sealed class ExtensionLoader
                 var extensionExecutors = new Dictionary<string, ICommandExecutor>(StringComparer.OrdinalIgnoreCase);
                 var extensionAsyncExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase);
                 var extensionFunctionExecutors = new Dictionary<string, ICommandFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+                var extensionListFunctionExecutors = new Dictionary<string, IExtensionListFunctionExecutor>(StringComparer.OrdinalIgnoreCase);
+                var registeredListFunctionNames = new List<string>();
                 var registeredFunctionNames = LoadExecutors(
                     manifest,
                     extensionDirectory,
                     extensionExecutors,
                     extensionAsyncExecutors,
                     extensionFunctionExecutors,
+                    extensionListFunctionExecutors,
+                    registeredListFunctionNames,
                     loadContexts);
                 var extensionFunctionNameSet = registeredFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var extensionListFunctionNameSet = registeredListFunctionNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var function in extensionFunctions)
                 {
                     var hasExtensionExecutor = extensionFunctionNameSet.Contains(function.QualifiedName);
-                    if (function.Kind is null && !hasExtensionExecutor)
+                    var hasListFunctionExecutor = extensionListFunctionNameSet.Contains(function.QualifiedName);
+                    if (function.ReturnType == CommandFunctionReturnType.List && !hasListFunctionExecutor)
+                    {
+                        throw new InvalidDataException($"List function '{function.QualifiedName}' has no matching list function executor.");
+                    }
+
+                    if (function.ReturnType == CommandFunctionReturnType.Text && hasListFunctionExecutor)
+                    {
+                        throw new InvalidDataException($"Text function '{function.QualifiedName}' is registered as a list function executor.");
+                    }
+
+                    if (function.Kind is null
+                        && function.ReturnType == CommandFunctionReturnType.Text
+                        && !hasExtensionExecutor)
                     {
                         throw new InvalidDataException($"Function '{function.QualifiedName}' has no matching extension function executor.");
                     }
@@ -327,7 +357,7 @@ public sealed class ExtensionLoader
                     }
                 }
 
-                foreach (var functionName in registeredFunctionNames)
+                foreach (var functionName in registeredFunctionNames.Concat(registeredListFunctionNames))
                 {
                     if (!extensionFunctions.Any(function =>
                         string.Equals(function.QualifiedName, functionName, StringComparison.OrdinalIgnoreCase)
@@ -359,6 +389,8 @@ public sealed class ExtensionLoader
                 EnsureNoDuplicates(extensionCommands.Select(command => command.QualifiedName), commandSources.Keys, "command");
                 EnsureNoDuplicates(extensionExecutors.Keys.Concat(extensionAsyncExecutors.Keys), executors.Keys.Concat(asyncExecutors.Keys), "command executor");
                 EnsureNoDuplicates(extensionFunctionExecutors.Keys, functionExecutors.Keys, "function executor");
+                EnsureNoDuplicates(extensionListFunctionExecutors.Keys, listFunctionExecutors.Keys, "list function executor");
+                EnsureNoDuplicates(extensionFunctionExecutors.Keys, extensionListFunctionExecutors.Keys, "function executor");
 
                 lists.AddRange(extensionLists);
                 commands.AddRange(extensionCommands);
@@ -383,6 +415,11 @@ public sealed class ExtensionLoader
                 foreach (var executor in extensionFunctionExecutors)
                 {
                     functionExecutors.Add(executor.Key, executor.Value);
+                }
+
+                foreach (var executor in extensionListFunctionExecutors)
+                {
+                    listFunctionExecutors.Add(executor.Key, executor.Value);
                 }
 
             }
@@ -411,10 +448,13 @@ public sealed class ExtensionLoader
             LoadContexts = loadContexts,
             CommandSources = commandSources,
             AsyncExecutors = asyncExecutors,
+            ListFunctionExecutors = listFunctionExecutors,
             Failures = failures,
             ShutdownAwareExecutors = executors.Values
                 .Cast<object>()
                 .Concat(asyncExecutors.Values)
+                .Concat(functionExecutors.Values)
+                .Concat(listFunctionExecutors.Values)
                 .OfType<IExtensionShutdownAware>()
                 .Distinct()
                 .ToArray()
@@ -582,6 +622,8 @@ public sealed class ExtensionLoader
         IDictionary<string, ICommandExecutor> executors,
         IDictionary<string, IAsyncCommandExecutor> asyncExecutors,
         IDictionary<string, ICommandFunctionExecutor> functionExecutors,
+        IDictionary<string, IExtensionListFunctionExecutor> listFunctionExecutors,
+        ICollection<string> registeredListFunctionNames,
         ICollection<AssemblyLoadContext> loadContexts)
     {
         if (string.IsNullOrWhiteSpace(manifest.Assembly))
@@ -629,7 +671,8 @@ public sealed class ExtensionLoader
                 && !type.IsInterface
                 && (typeof(ICommandExecutor).IsAssignableFrom(type)
                     || typeof(IAsyncCommandExecutor).IsAssignableFrom(type)
-                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)))
+                    || typeof(IExtensionFunctionExecutor).IsAssignableFrom(type)
+                    || typeof(IExtensionListFunctionExecutor).IsAssignableFrom(type)))
             .ToArray();
         if (executorTypes.Length == 0)
         {
@@ -675,6 +718,27 @@ public sealed class ExtensionLoader
                 }
 
                 registeredFunctionNames.Add(functionQualifiedName);
+            }
+
+            if (instance is IExtensionListFunctionExecutor listFunctionExecutor)
+            {
+                if (string.IsNullOrWhiteSpace(listFunctionExecutor.FunctionName)
+                    || listFunctionExecutor.FunctionName.Contains(':'))
+                {
+                    throw new InvalidDataException(
+                        $"Extension '{manifest.Id}' list function executor '{executorType.FullName}' must provide an unqualified function name.");
+                }
+
+                var functionQualifiedName = string.IsNullOrEmpty(manifest.Namespace)
+                    ? listFunctionExecutor.FunctionName
+                    : $"{manifest.Namespace}:{listFunctionExecutor.FunctionName}";
+                if (!listFunctionExecutors.TryAdd(functionQualifiedName, listFunctionExecutor))
+                {
+                    throw new InvalidDataException(
+                        $"Extension '{manifest.Id}' has a duplicate list function executor '{functionQualifiedName}'.");
+                }
+
+                registeredListFunctionNames.Add(functionQualifiedName);
             }
 
             if (instance is IExtensionRootAware extensionRootAware)

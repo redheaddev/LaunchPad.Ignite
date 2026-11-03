@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Parsing;
+using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Core.Execution;
 
@@ -6,6 +7,21 @@ public interface IExtensionFunctionExecutor : ICommandFunctionExecutor
 {
     string FunctionName { get; }
 }
+
+public interface ICommandListFunctionExecutor
+{
+    Task<IReadOnlyList<CommandListItem>> ExecuteListAsync(
+        CommandFunctionDefinition function,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken);
+}
+
+public interface IExtensionListFunctionExecutor : ICommandListFunctionExecutor
+{
+    string FunctionName { get; }
+}
+
+public sealed record CommandListItem(string Value, string? DisplayText = null);
 
 public interface IExtensionFunctionContextAware
 {
@@ -57,6 +73,13 @@ public interface IExtensionCommandContextAwareWithLaunchOptions
         IReadOnlyDictionary<string, string> settings,
         Func<string, (bool Found, string Value)> tryGetSecret,
         Action<IReadOnlyList<string>, bool> openUrls);
+}
+
+public interface IExtensionTerminalContextAware
+{
+    string Namespace { get; }
+
+    void ConfigureTerminal(Action<string> openTerminal);
 }
 
 public interface IExtensionSecretResolverAware
