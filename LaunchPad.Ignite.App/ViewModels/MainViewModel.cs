@@ -2745,7 +2745,7 @@ public sealed record CompletionOptionViewModel(
         {
             var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
             if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.ExecutionHandler, "url", StringComparison.OrdinalIgnoreCase))
+                && SupportsNewWindowOption(optionFreeParseResult.ParsedCommand!))
             {
                 parseResult = optionFreeParseResult;
                 parsedWithNewWindowOption = true;
@@ -2989,7 +2989,7 @@ public sealed record CompletionOptionViewModel(
         {
             var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
             if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && string.Equals(optionFreeParseResult.ParsedCommand!.Definition.ExecutionHandler, "url", StringComparison.OrdinalIgnoreCase))
+                && SupportsNewWindowOption(optionFreeParseResult.ParsedCommand!))
             {
                 parseResult = optionFreeParseResult;
                 parsedWithNewWindowOption = true;
@@ -3045,7 +3045,9 @@ public sealed record CompletionOptionViewModel(
         else if (_asyncCommandExecutors.TryGetValue(executionHandler, out var asyncCommandExecutor))
         {
             executionResult = await _secretCommandModel.ExecuteWithSecretRelockAsync(
-                () => asyncCommandExecutor.ExecuteAsync(parsedCommand));
+                () => asyncCommandExecutor is IAsyncCommandExecutorWithLaunchOptions launchOptionsExecutor
+                    ? launchOptionsExecutor.ExecuteAsync(parsedCommand, newWindow || parsedWithNewWindowOption)
+                    : asyncCommandExecutor.ExecuteAsync(parsedCommand));
         }
         else
         {
@@ -3061,6 +3063,14 @@ public sealed record CompletionOptionViewModel(
 
         CommandText = string.Empty;
         return true;
+    }
+
+    private bool SupportsNewWindowOption(ParsedCommand command)
+    {
+        var executionHandler = command.Definition.ExecutionHandler;
+        return string.Equals(executionHandler, "url", StringComparison.OrdinalIgnoreCase)
+            || (_asyncCommandExecutors.TryGetValue(executionHandler, out var executor)
+                && executor is IAsyncCommandExecutorWithLaunchOptions);
     }
 
 }
