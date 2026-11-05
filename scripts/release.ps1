@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+Write-Host "Checking repository and release prerequisites..."
 $repoRoot = & git -C $PSScriptRoot rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0) {
 	throw "Could not find the Git repository from '$PSScriptRoot'."
@@ -33,14 +34,20 @@ $branch = (Invoke-Git -GitArguments @("branch", "--show-current") | Select-Objec
 if (-not $branch) {
 	throw "Release must be run from a named branch, not a detached HEAD."
 }
+Write-Host "Using branch '$branch'."
 
+Write-Host "Verifying the working tree is clean..."
 $status = @(Invoke-Git -GitArguments @("status", "--porcelain"))
 if ($status.Count -gt 0) {
 	throw "Working tree is not clean. Commit, stash, or discard changes before releasing."
 }
+Write-Host "Working tree is clean."
 
-$null = Invoke-Git -GitArguments @("remote", "get-url", "origin")
+Write-Host "Checking the origin remote..."
+$origin = (Invoke-Git -GitArguments @("remote", "get-url", "origin") | Select-Object -First 1).Trim()
+Write-Host "Using origin '$origin'."
 
+Write-Host "Reading the app version from '$projectRelativePath'..."
 $projectContent = [System.IO.File]::ReadAllText($projectPath)
 $versionPattern = '(<Version>\s*)(\d+\.\d+\.\d+)(\s*</Version>)'
 $versionMatch = [regex]::Match($projectContent, $versionPattern)
@@ -60,8 +67,10 @@ $targetVersion = [version]::Parse($Version)
 if ($targetVersion -le $currentVersion) {
 	throw "Version '$Version' must be greater than the current version '$currentVersion'."
 }
+Write-Host "Preparing release $Version from current version $currentVersion."
 
 $tag = "v$Version"
+Write-Host "Checking that tag '$tag' does not already exist..."
 if (@(Invoke-Git -GitArguments @("tag", "--list", $tag)) -contains $tag) {
 	throw "Tag '$tag' already exists locally."
 }
