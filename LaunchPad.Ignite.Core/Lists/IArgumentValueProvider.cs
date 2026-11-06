@@ -7,6 +7,11 @@ public interface IArgumentValueProvider
     IReadOnlyList<string> GetValues(string reference);
 }
 
+public interface IArgumentValueDisplayProvider
+{
+    IReadOnlyList<string> GetDisplayValues(string reference);
+}
+
 public interface ICommandListFunctionValueProvider
 {
     event EventHandler? ValuesChanged;

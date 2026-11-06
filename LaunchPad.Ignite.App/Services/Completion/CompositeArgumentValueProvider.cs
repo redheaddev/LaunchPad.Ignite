@@ -3,7 +3,7 @@ using LaunchPad.Ignite.Core.Lists;
 
 namespace LaunchPad.Ignite.App.Services.Completion;
 
-public sealed class CompositeArgumentValueProvider : IArgumentValueProvider
+public sealed class CompositeArgumentValueProvider : IArgumentValueProvider, IArgumentValueDisplayProvider
 {
     private readonly IReadOnlyList<IArgumentValueProvider> _providers;
 
@@ -20,6 +20,21 @@ public sealed class CompositeArgumentValueProvider : IArgumentValueProvider
             if (values.Count > 0)
             {
                 return values;
+            }
+        }
+
+        return [];
+    }
+
+    public IReadOnlyList<string> GetDisplayValues(string reference)
+    {
+        foreach (var provider in _providers)
+        {
+            if (provider.GetValues(reference).Count > 0)
+            {
+                return provider is IArgumentValueDisplayProvider displayProvider
+                    ? displayProvider.GetDisplayValues(reference)
+                    : [];
             }
         }
 

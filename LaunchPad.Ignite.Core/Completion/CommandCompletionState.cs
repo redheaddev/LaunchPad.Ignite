@@ -31,4 +31,8 @@ public sealed record CommandCompletionState(
     bool IsChecklistActive,
     string? Message = null,
     bool CanComplete = false,
-    int? CaretIndex = null);
+    int? CaretIndex = null)
+{
+    public bool IsListSelectionActive { get; init; }
+    public bool IsMultiActionCommandActive { get; init; }
+}

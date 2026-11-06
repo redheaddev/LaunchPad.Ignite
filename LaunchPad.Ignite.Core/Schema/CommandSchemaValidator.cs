@@ -19,6 +19,11 @@ public sealed class CommandSchemaValidator
 
         foreach (var list in schema.Lists)
         {
+            if (!Enum.IsDefined(list.MatchMode))
+            {
+                errors.Add($"List '{list.Name}' has unsupported match mode '{list.MatchMode}'.");
+            }
+
             if (!string.Equals(list.Type, "enum", StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add($"List '{list.Name}' has unsupported type '{list.Type}'.");
@@ -118,6 +123,13 @@ public sealed class CommandSchemaValidator
             if (!Enum.IsDefined(function.ReturnType))
             {
                 errors.Add($"Function '{function.QualifiedName}' has an unsupported return type '{function.ReturnType}'.");
+            }
+
+            if (!Enum.IsDefined(function.MatchMode)
+                || (function.ReturnType != CommandFunctionReturnType.List
+                    && function.MatchMode != ListMatchMode.StartsWith))
+            {
+                errors.Add($"Function '{function.QualifiedName}' has an invalid list match mode '{function.MatchMode}'.");
             }
 
             if (function.ReturnType == CommandFunctionReturnType.List && function.Kind is not null)

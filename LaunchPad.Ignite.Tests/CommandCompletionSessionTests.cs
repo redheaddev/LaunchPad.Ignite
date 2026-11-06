@@ -1,4 +1,5 @@
 using LaunchPad.Ignite.Core.Completion;
+using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
 using LaunchPad.Ignite.Core.Schema;
 using LaunchPad.Ignite.App.Commands;
@@ -29,6 +30,57 @@ public class CommandCompletionSessionTests
 
         Assert.Equal("pipeline claims", projectState.InputText);
         Assert.False(projectState.InputText.EndsWith(' '));
+    }
+
+    [Fact]
+    public void CommandsWithDefaultActionsSuggestNamedActions()
+    {
+        var schema = new CommandSchema(
+            [],
+            [new CommandDefinition(
+                "control-panel",
+                "url",
+                string.Empty,
+                [
+                    new CommandActionDefinition("default", string.Empty, string.Empty, "https://example.test", []),
+                    new CommandActionDefinition("programs", string.Empty, string.Empty, "https://example.test/programs", []),
+                    new CommandActionDefinition("network", string.Empty, string.Empty, "https://example.test/network", [])
+                ],
+                "windows")]);
+        var session = new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new CommandSchemaValueProvider(schema));
+
+        var allActions = session.UpdateInputText("windows:control-panel ");
+        Assert.True(allActions.IsMultiActionCommandActive);
+        Assert.Equal(["programs", "network"], allActions.Items.Select(item => item.Value));
+
+        var commandPrefix = session.UpdateInputText("control");
+        Assert.True(commandPrefix.IsMultiActionCommandActive);
+        var acceptedPrefix = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("windows:control-panel ", acceptedPrefix.InputText);
+        Assert.Equal(["programs", "network"], acceptedPrefix.Items.Select(item => item.Value));
+
+        var matchingActions = session.UpdateInputText("windows:control-panel p");
+        Assert.Equal(["programs"], matchingActions.Items.Select(item => item.Value));
+
+        session.UpdateInputText("windows:control-panel");
+        var acceptedCommand = session.HandleKey(CommandInputKey.Tab);
+        Assert.Equal("windows:control-panel ", acceptedCommand.InputText);
+        Assert.Equal(["programs", "network"], acceptedCommand.Items.Select(item => item.Value));
+    }
+
+    [Fact]
+    public void ListFunctionUsesContainsOnlyWhenConfigured()
+    {
+        var prefixSession = CreateAppListSession(ListMatchMode.StartsWith);
+        var containsSession = CreateAppListSession(ListMatchMode.Contains);
+
+        Assert.Empty(prefixSession.UpdateInputText("windows:app count").Items);
+        var containsState = containsSession.UpdateInputText("windows:app count");
+
+        Assert.Equal(["Accountable2You"], containsState.Items.Select(item => item.Value));
+        Assert.Equal("windows:app Accountable2You", containsSession.HandleKey(CommandInputKey.Tab).InputText);
     }
 
     [Fact]
@@ -697,10 +749,27 @@ public class CommandCompletionSessionTests
         var state = session.UpdateInputText("theme ");
 
         Assert.False(state.IsChecklistActive);
+        Assert.True(state.IsListSelectionActive);
         Assert.Equal("Default", state.GhostText);
         state = session.HandleKey(CommandInputKey.Tab);
         Assert.Equal("theme Default", state.InputText);
         Assert.False(state.IsChecklistActive);
+        Assert.True(state.IsListSelectionActive);
+    }
+
+    [Fact]
+    public async Task SingleSelectListTabDoesNotAcceptHistorySuggestion()
+    {
+        var viewModel = new LaunchPad.Ignite.App.ViewModels.MainViewModel();
+        viewModel.CommandInputText = "theme ";
+
+        Assert.DoesNotContain(viewModel.CompletionItems, item => item.DisplayText.StartsWith("↶ ", StringComparison.Ordinal));
+
+        await viewModel.HandleInputKeyAsync(CommandInputKey.Tab);
+
+        Assert.StartsWith("theme ", viewModel.CommandInputText, StringComparison.Ordinal);
+        Assert.NotEqual("theme ", viewModel.CommandInputText);
+        Assert.DoesNotContain(viewModel.CompletionItems, item => item.DisplayText.StartsWith("↶ ", StringComparison.Ordinal));
     }
 
     private sealed class TemporaryDirectory : IDisposable
@@ -779,6 +848,43 @@ public class CommandCompletionSessionTests
             new CommandCatalog(TestCommandSchemas.SecretList()),
             TestCommandSchemas.CreateSecretListProvider());
 
+    private static CommandCompletionSession CreateAppListSession(ListMatchMode matchMode)
+    {
+        var appsFunction = new CommandFunctionDefinition(
+            "apps",
+            null,
+            [],
+            Namespace: "windows",
+            ReturnType: CommandFunctionReturnType.List)
+        {
+            MatchMode = matchMode
+        };
+        var schema = new CommandSchema(
+            [],
+            [new CommandDefinition(
+                "app",
+                "url",
+                string.Empty,
+                [new CommandActionDefinition(
+                    "default",
+                    string.Empty,
+                    "windows:app <app>",
+                    "https://example.test",
+                    [new CommandArgumentDefinition(
+                        "app",
+                        ListMode: ListSelectionMode.Single,
+                        ListFunction: "@windows:apps()")])],
+                "windows")])
+        {
+            Functions = [appsFunction]
+        };
+        return new CommandCompletionSession(
+            new CommandCatalog(schema),
+            new CommandSchemaValueProvider(schema),
+            functions: schema.Functions,
+            listFunctionValueProvider: new SingleAppListFunctionValueProvider());
+    }
+
     private static CommandCompletionSession CreateListSession(ListSelectionMode mode, IReadOnlyList<string> values)
     {
         var schema = new CommandSchema(
@@ -791,5 +897,17 @@ public class CommandCompletionSessionTests
             {
                 ["list:values"] = values
             }));
+    }
+
+    private sealed class SingleAppListFunctionValueProvider : ICommandListFunctionValueProvider
+    {
+        public event EventHandler? ValuesChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public IReadOnlyList<CommandListItem> GetOrStart(string functionName, IReadOnlyList<string> arguments)
+            => [new CommandListItem("Accountable2You")];
     }
 }

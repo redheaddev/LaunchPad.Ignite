@@ -25,6 +25,7 @@ Schema basics
 Command definitions are held in a schema with `lists`, `variables`, and `commands` arrays. App definitions are combined with extension definitions, then `%LocalAppData%/LaunchPad.Ignite/user-commands.json` is merged over them. A user command replaces one with the same qualified name; a user list replaces one with the same type and name; a user variable replaces one with the same qualified name. Comparisons are case-insensitive. The user schema file is created empty on first run.
 
 Lists currently support only `type: "enum"`; each list needs a name and non-empty, case-insensitively unique values. Reference it with `ref: "enum:listName"`.
+Lists and list-returning functions may set `matchMode` to `startsWith` (the default) or `contains` to control how typed input filters their values.
 
 Each command must declare at least one action, and every action must define a non-empty `targetTemplate`. Variables require a non-empty value and may be unqualified or use a namespace; refer to them as `$variable` or `$namespace:variable`. Use `variable set <name> <value>` to create or update a persistent user variable and `variable remove <name>` to remove one.
 Use `settings` to open Settings, `import-export` to open profile import/export, and `help` to open the help screen. `Ctrl+.` opens Settings, `Ctrl+I` opens Import/Export, and `Ctrl+H` opens Help.

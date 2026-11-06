@@ -897,6 +897,49 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task<bool> ConfirmCommandActionAsync(string prompt)
+    {
+        var dialog = new Window
+        {
+            Title = "Confirm action",
+            Width = 440,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(20),
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Spacing = 8,
+                        Children =
+                        {
+                            CreateDialogButton("Cancel", false),
+                            CreateDialogButton("Confirm", true)
+                        }
+                    }
+                }
+            }
+        };
+
+        EscapeToClose.Attach(dialog);
+        _secretDialogIsOpen = true;
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            _secretDialogIsOpen = false;
+        }
+    }
+
     private async Task<bool> ConfirmClearHistoryAsync()
     {
         var dialog = new Window

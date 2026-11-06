@@ -2,7 +2,7 @@ using LaunchPad.Ignite.Core.Schema;
 
 namespace LaunchPad.Ignite.Core.Lists;
 
-public sealed class CommandSchemaValueProvider : IArgumentValueProvider
+public sealed class CommandSchemaValueProvider : IArgumentValueProvider, IArgumentValueDisplayProvider
 {
     private readonly CommandSchema _schema;
     private readonly IArgumentValueProvider? _dynamicProvider;
@@ -43,4 +43,9 @@ public sealed class CommandSchemaValueProvider : IArgumentValueProvider
             ? _dynamicProvider?.GetValues(reference) ?? Array.Empty<string>()
             : Array.Empty<string>();
     }
+
+    public IReadOnlyList<string> GetDisplayValues(string reference)
+        => _dynamicProvider is IArgumentValueDisplayProvider displayProvider
+            ? displayProvider.GetDisplayValues(reference)
+            : Array.Empty<string>();
 }

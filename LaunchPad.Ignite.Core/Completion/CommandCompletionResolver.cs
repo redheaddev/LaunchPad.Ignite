@@ -144,9 +144,8 @@ internal sealed class CommandCompletionResolver
 
         var hasDefault = _catalog.TryGetDefaultAction(command, out var defaultAction);
         if (!trailingWhitespace && tokens.Count == 1
-            && (hasDefault
-                ? defaultAction.Arguments.Count > 0
-                : command.Actions.Any(action => !string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase))))
+            && (command.Actions.Any(action => !string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase))
+                || (hasDefault && defaultAction.Arguments.Count > 0)))
         {
             return None(input.Length, awaitingSeparator: true);
         }
@@ -186,6 +185,21 @@ internal sealed class CommandCompletionResolver
         {
             action = foundAction;
             argumentStart = 2;
+        }
+        else if (defaultAction.Arguments.Count == 0
+            && command.Actions.Any(candidate => !string.Equals(candidate.Name, "default", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (tokens.Count == 1 || (tokens.Count == 2 && trailingWhitespace))
+            {
+                return ResolveAction(input, tokens, command, string.Empty, input.Length);
+            }
+
+            if (tokens.Count == 2)
+            {
+                return ResolveAction(input, tokens, command, tokens[1].Value, tokens[1].Start);
+            }
+
+            action = defaultAction;
         }
         else
         {
@@ -238,6 +252,8 @@ internal sealed class CommandCompletionResolver
             var functionArguments = functionCall.ArgumentNames
                 .Select(name => precedingArguments[name])
                 .ToArray();
+            var listFunction = _functions.FirstOrDefault(candidate =>
+                string.Equals(candidate.QualifiedName, functionCall.FunctionName, StringComparison.OrdinalIgnoreCase));
             var listItems = _listFunctionValueProvider.GetOrStart(functionCall.FunctionName, functionArguments);
             var listCandidates = listItems.Select(item => item.Value).ToArray();
             return new CompletionResolution(
@@ -252,7 +268,8 @@ internal sealed class CommandCompletionResolver
                 argument,
                 argumentIndex)
             {
-                CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+                CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray(),
+                MatchMode = listFunction?.MatchMode ?? ListMatchMode.StartsWith
             };
         }
 
@@ -263,12 +280,20 @@ internal sealed class CommandCompletionResolver
 
         var separator = argument.Ref.IndexOf(':');
         var refType = argument.Ref[..separator];
+        var refName = argument.Ref[(separator + 1)..];
         var candidates = _valueProvider.GetValues(argument.Ref);
         var isList = string.Equals(refType, "list", StringComparison.OrdinalIgnoreCase);
+        var matchMode = string.Equals(refType, "enum", StringComparison.OrdinalIgnoreCase)
+            ? _catalog.Schema.Lists.FirstOrDefault(list =>
+                string.Equals(list.Type, refType, StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(list.Name, refName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(list.QualifiedName, refName, StringComparison.OrdinalIgnoreCase)))?.MatchMode
+                ?? ListMatchMode.StartsWith
+            : ListMatchMode.StartsWith;
         if (!isList)
         {
             candidates = candidates
-                .Where(value => value.StartsWith(currentPrefix, StringComparison.OrdinalIgnoreCase))
+                .Where(value => MatchesListPrefix(value, currentPrefix, matchMode))
                 .ToArray();
         }
 
@@ -284,7 +309,13 @@ internal sealed class CommandCompletionResolver
             !isList && nextArgumentRequired,
             hasNextArgument,
             argument,
-            argumentIndex);
+            argumentIndex)
+        {
+            CandidateDisplayValues = isList && _valueProvider is IArgumentValueDisplayProvider displayProvider
+                ? displayProvider.GetDisplayValues(argument.Ref)
+                : null,
+            MatchMode = matchMode
+        };
     }
 
     private bool TryResolveStandaloneListFunction(string input, out CompletionResolution resolution)
@@ -323,7 +354,8 @@ internal sealed class CommandCompletionResolver
             false,
             false)
         {
-            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray(),
+            MatchMode = function.MatchMode
         };
         return true;
     }
@@ -498,6 +530,8 @@ internal sealed class CommandCompletionResolver
         }
 
         var functionArguments = listFunctionCall.ArgumentNames.Select(name => priorArguments[name]).ToArray();
+        var listFunction = _functions.FirstOrDefault(candidate =>
+            string.Equals(candidate.QualifiedName, listFunctionCall.FunctionName, StringComparison.OrdinalIgnoreCase));
         var listItems = _listFunctionValueProvider.GetOrStart(listFunctionCall.FunctionName, functionArguments);
         resolution = new CompletionResolution(
             CompletionKind.Function,
@@ -509,7 +543,8 @@ internal sealed class CommandCompletionResolver
             false,
             false)
         {
-            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray()
+            CandidateDisplayValues = listItems.Select(item => item.DisplayText ?? item.Value).ToArray(),
+            MatchMode = listFunction?.MatchMode ?? ListMatchMode.StartsWith
         };
         return true;
     }
@@ -616,6 +651,11 @@ internal sealed class CommandCompletionResolver
         => command.QualifiedName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
             || command.Namespace?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool MatchesListPrefix(string value, string prefix, ListMatchMode matchMode)
+        => matchMode == ListMatchMode.Contains
+            ? value.Contains(prefix, StringComparison.OrdinalIgnoreCase)
+            : value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 
     private bool IsCommandAllowed(CommandDefinition command)
         => _commandFilter?.Invoke(command) != false;
