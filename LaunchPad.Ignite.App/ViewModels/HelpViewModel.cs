@@ -15,8 +15,8 @@ public sealed class HelpViewModel
     public IReadOnlyList<HelpKeyboardShortcut> CommandInputKeyboardShortcuts { get; } =
     [
         new("Right Arrow", "Accepts the highlighted completion or advances to the next segment when selecting a file path."),
-        new("Ctrl+Shift+Left", "Selects the previous file-path segment."),
-        new("Ctrl+Shift+Right", "Selects the next file-path segment."),
+        new("Ctrl+Shift+Left", "Selects the previous input section."),
+        new("Ctrl+Shift+Right", "Selects the next input section."),
         new("Tab", "Accepts the highlighted completion; accepts a single list value or toggles a checklist value."),
         new("Shift+Tab", "Uses the same completion behavior as Tab."),
         new("Ctrl+A", "Selects all values in a multiple-selection checklist."),

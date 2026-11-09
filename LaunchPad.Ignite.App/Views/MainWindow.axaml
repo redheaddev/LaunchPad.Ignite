@@ -120,10 +120,14 @@
                                Foreground="{DynamicResource ThemeSecondaryText}" VerticalAlignment="Center" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="{Binding SecretLockIcon}"
-                               Foreground="{Binding SecretLockBrush}"
-                               ToolTip.Tip="{Binding SecretLockTooltip}"
-                               FontSize="16" VerticalAlignment="Center" Margin="4,0,8,0" />
+                    <Button Classes="header-action" Content="{Binding SecretLockIcon}"
+                            Foreground="{Binding SecretLockBrush}"
+                            ToolTip.Tip="{Binding SecretLockTooltip}"
+                            Click="SecretLockButton_Click" />
+                    <Button Classes="header-action" Content="{Binding HistorySuggestionsIcon}"
+                            Foreground="{Binding HistorySuggestionsBrush}"
+                            ToolTip.Tip="{Binding HistorySuggestionsTooltip}"
+                            Click="HistorySuggestionsButton_Click" />
                     <Button Classes="header-action" Content="?" ToolTip.Tip="Help" Click="HelpButton_Click" />
                     <Button Classes="header-action" Content="⇅" ToolTip.Tip="Import / Export"
                             Click="ImportExportButton_Click" />
@@ -144,6 +148,10 @@
                                 Foreground="{Binding SecretLockBrush}"
                                 ToolTip.Tip="{Binding SecretLockTooltip}"
                                 Click="SecretLockButton_Click" />
+                        <Button Classes="mini-action" Content="{Binding HistorySuggestionsIcon}"
+                                Foreground="{Binding HistorySuggestionsBrush}"
+                                ToolTip.Tip="{Binding HistorySuggestionsTooltip}"
+                                Click="HistorySuggestionsButton_Click" />
                     </StackPanel>
                     <TextBox x:Name="CommandBox" Grid.Column="1" Classes="command-text" Classes.mini="{Binding IsMiniMode}" Text="{Binding CommandInputText}"
                              FontFamily="Cascadia Mono, Consolas"

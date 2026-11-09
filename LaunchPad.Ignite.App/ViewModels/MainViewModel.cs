@@ -78,6 +78,7 @@ public partial class MainViewModel : ViewModelBase
     private AvaloniaClipboardService? _clipboardService;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
+    private readonly HistorySuggestionPreferenceStore _historySuggestionPreferenceStore;
     private readonly HistorySuggestionCycler _historySuggestionCycler = new();
     private readonly CommandInputUndoHistory _commandInputUndoHistory = new();
     private IReadOnlyList<CommandHistoryEntry> _historyCommands = Array.Empty<CommandHistoryEntry>();
@@ -152,6 +153,7 @@ public partial class MainViewModel : ViewModelBase
         _historyCommands = _commandLogger.ReadHistoryEntries();
         _extensionStateStore = new ExtensionStateStore();
         _profileSettingsStore = new ProfileSettingsStore();
+        _historySuggestionPreferenceStore = new HistorySuggestionPreferenceStore(_profileSettingsStore);
         VerboseLogging.Configure(VerboseLoggingEnabled);
         _secretStore = new SecretActivityTrackingStore(PlatformSecretStore.Create(), _profileSettingsStore);
         _launcherWindowStateStore = new LauncherWindowStateStore(_profileSettingsStore);
@@ -175,6 +177,26 @@ public partial class MainViewModel : ViewModelBase
         };
         _secretAccessStateTimer.Start();
         RefreshSecretAccessState();
+    }
+
+    public void ToggleHistorySuggestions()
+    {
+        var action = HistorySuggestionCommandModel.Definition.Actions
+            .First(candidate => string.Equals(candidate.Name, "toggle", StringComparison.OrdinalIgnoreCase));
+        var parsedCommand = new ParsedCommand(
+            HistorySuggestionCommandModel.Definition,
+            action,
+            new Dictionary<string, string>());
+        var result = _commandExecutors["historySuggestions"].Execute(parsedCommand);
+        SetStatusMessage(result.Message);
+        ApplyCompletionState(_completionSession.UpdateInputText(CommandText));
+    }
+
+    private void OnHistorySuggestionPreferenceChanged()
+    {
+        OnPropertyChanged(nameof(HistorySuggestionsEnabled));
+        OnPropertyChanged(nameof(HistorySuggestionsBrush));
+        OnPropertyChanged(nameof(HistorySuggestionsTooltip));
     }
 
     public void ToggleWindowMode()
@@ -258,6 +280,7 @@ public partial class MainViewModel : ViewModelBase
             Commands = commandPacks.Schema.Commands
                 .Append(LauncherModeCommandModel.Definition)
                 .Concat(NavigationCommandModel.Definitions)
+                .Append(HistorySuggestionCommandModel.Definition)
                 .ToArray()
         };
         var commandSources = extensions.CommandSources;
@@ -318,7 +341,7 @@ public partial class MainViewModel : ViewModelBase
         {
             Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement", "mode", "navigation" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement", "mode", "navigation", "historySuggestions" };
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
@@ -405,6 +428,9 @@ public partial class MainViewModel : ViewModelBase
             ["edit"] = new EditCommandModel(name => CommandEditorRequested?.Invoke(name)),
             ["mode"] = new LauncherModeCommandModel(() => CurrentWindowMode, SetWindowMode),
             ["navigation"] = new NavigationCommandModel(target => NavigationRequested?.Invoke(target)),
+            ["historySuggestions"] = new HistorySuggestionCommandModel(
+                _historySuggestionPreferenceStore,
+                OnHistorySuggestionPreferenceChanged),
             ["url"] = urlCommandModel,
             ["shell"] = new ShellCommandModel(_processStarter),
             ["secretList"] = new SecretListCommandModel(_secretStore),
@@ -621,7 +647,8 @@ public partial class MainViewModel : ViewModelBase
                 new ExtensionPackageManager(),
                 GetCommandOwnerLabel,
                 _macroStore),
-            InitializeCommandRuntime);
+            InitializeCommandRuntime,
+            _secretStore);
     }
 
     private string? GetCommandOwnerLabel(string qualifiedName)
@@ -749,6 +776,16 @@ public partial class MainViewModel : ViewModelBase
             : "Secret access is unlocked; no master password is set";
 
     public IBrush SecretLockBrush => SecretAccessLocked ? Brushes.Gold : Brushes.Gray;
+
+    public bool HistorySuggestionsEnabled => _historySuggestionPreferenceStore.IsEnabled;
+
+    public string HistorySuggestionsIcon => HistoryIcon;
+
+    public IBrush HistorySuggestionsBrush => HistorySuggestionsEnabled ? Brushes.Cyan : Brushes.Gray;
+
+    public string HistorySuggestionsTooltip => HistorySuggestionsEnabled
+        ? "History suggestions enabled; click to disable (Ctrl+Shift+H)"
+        : "History suggestions disabled; click to enable (Ctrl+Shift+H)";
 
     public IBrush StatusMessageBrush => Application.Current?.Resources[
         IsValueOutput ? "ThemeAccent" : "ThemeStatus"] as IBrush ?? Brushes.Gray;
@@ -904,7 +941,8 @@ public partial class MainViewModel : ViewModelBase
         || IsCommandMetadataFilterCompletionActive
         || (_isDirectPathCompletionActive
             ? _directPathSuggestions.Count > 0
-                || _historySuggestionCycler.TryGetSuggestions(CommandText, out _)
+                || (_historySuggestionPreferenceStore.IsEnabled
+                    && _historySuggestionCycler.TryGetSuggestions(CommandText, out _))
             : ActiveCompletionState.CanComplete
                 || (!IsCommandMetadataFilterMode
                     && (GetHistorySuggestions(CommandText).Count > 0
@@ -1463,22 +1501,8 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
-            var boundary = _tokenizer.FindTokenBoundary(remaining, start);
-            acceptedLength = boundary;
-            if (boundary >= 0 && boundary < remaining.Length)
-            {
-                if (!skipLeadingWhitespace && remaining[boundary] == ' ')
-                {
-                    acceptedLength++;
-                }
-                else if (skipLeadingWhitespace)
-                {
-                    while (acceptedLength < remaining.Length && char.IsWhiteSpace(remaining[acceptedLength]))
-                    {
-                        acceptedLength++;
-                    }
-                }
-            }
+            var sectionEnd = CommandCompletionSectionParser.FindNextSectionEnd(suggestion, input.Length + start);
+            acceptedLength = sectionEnd - input.Length;
         }
 
         var updatedText = input + remaining[..acceptedLength];
@@ -2096,6 +2120,11 @@ public partial class MainViewModel : ViewModelBase
             return Array.Empty<CommandHistoryEntry>();
         }
 
+        if (!_historySuggestionPreferenceStore.ShouldSuggestForInput(inputText))
+        {
+            return Array.Empty<CommandHistoryEntry>();
+        }
+
         if (_historySuggestionCycler.TryGetSuggestions(inputText, out var cycledSuggestions))
         {
             return cycledSuggestions;
@@ -2268,8 +2297,13 @@ public partial class MainViewModel : ViewModelBase
             _directPathHighlightedIndex = 0;
         }
 
-        var hasRetainedHistory = _historySuggestionCycler.TryGetSuggestions(CommandText, out var retainedHistory)
-            && retainedHistory.Count > 0;
+        IReadOnlyList<CommandHistoryEntry> retainedHistory = Array.Empty<CommandHistoryEntry>();
+        var hasRetainedHistory = false;
+        if (_historySuggestionPreferenceStore.IsEnabled)
+        {
+            hasRetainedHistory = _historySuggestionCycler.TryGetSuggestions(CommandText, out retainedHistory)
+                && retainedHistory.Count > 0;
+        }
         CompletionGhostText = _isHistoryPathStepping
             && hasRetainedHistory
             && _directFilePathHandler.TryGetCompletionPath(retainedHistory[0].CommandText, out var historyPath)

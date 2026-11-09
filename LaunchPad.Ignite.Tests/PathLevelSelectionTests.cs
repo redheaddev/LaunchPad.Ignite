@@ -18,6 +18,59 @@ public class PathLevelSelectionTests
         Assert.Equal(expected, boundary);
     }
 
+    [Theory]
+    [InlineData("root/dir/file", 0, true, 5)]
+    [InlineData(@"root\dir\file", 0, true, 5)]
+    [InlineData("one two", 0, true, 4)]
+    [InlineData("root/dir/file", 13, false, 9)]
+    [InlineData("one two", 7, false, 4)]
+    public void CtrlShiftMovesBySection(string input, int caret, bool moveRight, int expected)
+    {
+        var found = PathLevelSelection.TryGetSectionBoundary(input, caret, moveRight, out var boundary);
+
+        Assert.True(found);
+        Assert.Equal(expected, boundary);
+    }
+
+    [Fact]
+    public void CtrlShiftKeepsQuotedSectionsTogether()
+    {
+        const string input = "copy \"My Documents/Draft\" next";
+        var quotedSectionStart = input.IndexOf('"');
+
+        Assert.True(PathLevelSelection.TryGetSectionBoundary(input, quotedSectionStart, true, out var forwardBoundary));
+        Assert.Equal(input.IndexOf("next", StringComparison.Ordinal), forwardBoundary);
+
+        Assert.True(PathLevelSelection.TryGetSectionBoundary(input, input.Length, false, out var reverseBoundary));
+        Assert.Equal(input.IndexOf("next", StringComparison.Ordinal), reverseBoundary);
+    }
+
+    [Theory]
+    [InlineData(true, 5, 13, 5)]
+    [InlineData(false, 0, 9, 9)]
+    public void CtrlShiftContractsSelectionBySection(
+        bool moveRight,
+        int expectedStart,
+        int expectedEnd,
+        int expectedCaret)
+    {
+        const string input = "root/dir/file";
+        var adjusted = PathLevelSelection.TryAdjustSectionSelection(
+            input,
+            input.Length,
+            0,
+            input.Length,
+            moveRight,
+            out var start,
+            out var end,
+            out var caret);
+
+        Assert.True(adjusted);
+        Assert.Equal(expectedStart, start);
+        Assert.Equal(expectedEnd, end);
+        Assert.Equal(expectedCaret, caret);
+    }
+
     [Fact]
     public void CtrlShiftRightShrinksSelectAllPathFromDriveToNextDirectory()
     {

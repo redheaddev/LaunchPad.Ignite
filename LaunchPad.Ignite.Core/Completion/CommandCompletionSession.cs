@@ -222,6 +222,7 @@ public sealed class CommandCompletionSession
         var replacementStart = _resolution.TokenStart;
         var tokenEnd = FindTokenEnd(_inputText, replacementStart);
         var replacement = selectedItem;
+        var isPartialSection = false;
         if (_resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple)
         {
             var argumentEnd = FindArgumentEnd(_inputText, _resolution.TokenStart);
@@ -250,8 +251,24 @@ public sealed class CommandCompletionSession
 
         }
 
+        if ((!_resolution.IsChecklist || _resolution.ListMode == ListSelectionMode.Single)
+            && replacementStart <= tokenEnd
+            && string.Equals(
+                _inputText[replacementStart..tokenEnd],
+                _resolution.Prefix,
+                StringComparison.OrdinalIgnoreCase)
+            && selectedItem.StartsWith(_resolution.Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var sectionEnd = CommandCompletionSectionParser.FindNextSectionEnd(selectedItem, _resolution.Prefix.Length);
+            if (sectionEnd < selectedItem.Length)
+            {
+                replacement = selectedItem[..sectionEnd];
+                isPartialSection = true;
+            }
+        }
+
         var suffix = _inputText[tokenEnd..];
-        if (suffix.Length == 0 && !_resolution.IsChecklist && ShouldAppendSpace(selectedValue))
+        if (suffix.Length == 0 && !_resolution.IsChecklist && !isPartialSection && ShouldAppendSpace(selectedValue))
         {
             suffix = " ";
         }
@@ -263,7 +280,7 @@ public sealed class CommandCompletionSession
             acceptedEnd++;
         }
 
-        _preferredHighlightValue = null;
+        _preferredHighlightValue = isPartialSection ? selectedValue : null;
         Recalculate(resetSelection: true);
         _caretIndex = acceptedEnd;
         State = BuildState();

@@ -87,6 +87,36 @@ public partial class ImportExportWindow : Window
         }
     }
 
+    private async void BrowseSecretExport_Click(object? sender, RoutedEventArgs e)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export encrypted secrets",
+            SuggestedFileName = "LaunchPad-secrets.lpsecrets",
+            DefaultExtension = "lpsecrets",
+            FileTypeChoices = [new FilePickerFileType("Encrypted LaunchPad secrets") { Patterns = ["*.lpsecrets"] }]
+        });
+        var path = file?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            _viewModel.SecretExportPath = path;
+        }
+    }
+
+    private async void BrowseSecretImport_Click(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import encrypted secrets",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Encrypted LaunchPad secrets") { Patterns = ["*.lpsecrets"] }]
+        });
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
+        {
+            _viewModel.SecretImportPath = path;
+        }
+    }
+
     private void Close_Click(object? sender, RoutedEventArgs e)
         => Close();
 

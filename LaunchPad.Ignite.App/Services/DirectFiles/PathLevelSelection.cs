@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Parsing;
 
 namespace LaunchPad.Ignite.App.Services.DirectFiles;
@@ -89,6 +90,64 @@ public static class PathLevelSelection
         adjustedEnd = Math.Max(caretIndex, boundary);
         nextCaretIndex = boundary;
         return true;
+    }
+
+    public static bool TryAdjustSectionSelection(
+        string inputText,
+        int caretIndex,
+        int selectionStart,
+        int selectionEnd,
+        bool moveRight,
+        out int adjustedStart,
+        out int adjustedEnd,
+        out int nextCaretIndex)
+    {
+        var normalizedSelectionStart = Math.Min(selectionStart, selectionEnd);
+        var normalizedSelectionEnd = Math.Max(selectionStart, selectionEnd);
+        adjustedStart = normalizedSelectionStart;
+        adjustedEnd = normalizedSelectionEnd;
+        nextCaretIndex = caretIndex;
+        if (normalizedSelectionStart < normalizedSelectionEnd)
+        {
+            if (moveRight)
+            {
+                if (!TryGetSectionBoundary(inputText, normalizedSelectionStart, moveRight: true, out var nextStart))
+                {
+                    return false;
+                }
+
+                adjustedStart = Math.Min(nextStart, normalizedSelectionEnd);
+                nextCaretIndex = adjustedStart;
+                return true;
+            }
+
+            if (!TryGetSectionBoundary(inputText, normalizedSelectionEnd, moveRight: false, out var previousEnd))
+            {
+                return false;
+            }
+
+            adjustedEnd = Math.Max(previousEnd, normalizedSelectionStart);
+            nextCaretIndex = adjustedEnd;
+            return true;
+        }
+
+        if (!TryGetSectionBoundary(inputText, caretIndex, moveRight, out var boundary))
+        {
+            return false;
+        }
+
+        adjustedStart = Math.Min(caretIndex, boundary);
+        adjustedEnd = Math.Max(caretIndex, boundary);
+        nextCaretIndex = boundary;
+        return true;
+    }
+
+    public static bool TryGetSectionBoundary(string inputText, int caretIndex, bool moveRight, out int boundary)
+    {
+        boundary = moveRight
+            ? CommandCompletionSectionParser.FindNextSectionEnd(inputText, caretIndex)
+            : CommandCompletionSectionParser.FindPreviousSectionStart(inputText, caretIndex);
+        return boundary != caretIndex;
     }
 
     public static bool TryGetBoundary(string inputText, int caretIndex, bool moveRight, out int boundary)

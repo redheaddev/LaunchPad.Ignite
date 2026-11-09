@@ -1128,6 +1128,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void HistorySuggestionsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.ToggleHistorySuggestions();
+        }
+    }
+
     private void ClipboardExpiryButton_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
@@ -1642,7 +1650,7 @@ public partial class MainWindow : Window
             && e.KeyModifiers.HasFlag(KeyModifiers.Shift)
             && !viewModel.IsCommandMetadataFilterMode
             && e.Key is Key.Left or Key.Right
-            && TrySelectPathLevel(e.Key == Key.Right))
+            && TrySelectPathLevel(e.Key == Key.Right, bySection: true))
         {
             e.Handled = true;
             return;
@@ -1783,7 +1791,42 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool TrySelectPathLevel(bool moveRight, bool adjustUntrackedSelection = false)
+    private static bool TryAdjustSelection(
+        string text,
+        int caretIndex,
+        int selectionStart,
+        int selectionEnd,
+        bool moveRight,
+        bool bySection,
+        out int adjustedStart,
+        out int adjustedEnd,
+        out int adjustedCaret)
+    {
+        return bySection
+            ? PathLevelSelection.TryAdjustSectionSelection(
+                text,
+                caretIndex,
+                selectionStart,
+                selectionEnd,
+                moveRight,
+                out adjustedStart,
+                out adjustedEnd,
+                out adjustedCaret)
+            : PathLevelSelection.TryAdjustSelection(
+                text,
+                caretIndex,
+                selectionStart,
+                selectionEnd,
+                moveRight,
+                out adjustedStart,
+                out adjustedEnd,
+                out adjustedCaret);
+    }
+
+    private bool TrySelectPathLevel(
+        bool moveRight,
+        bool adjustUntrackedSelection = false,
+        bool bySection = false)
     {
         var text = _commandBox.Text ?? string.Empty;
         var selectionStart = Math.Min(_commandBox.SelectionStart, _commandBox.SelectionEnd);
@@ -1795,12 +1838,13 @@ public partial class MainWindow : Window
         if (!hasTrackedSelection && selectionStart < selectionEnd)
         {
             if (adjustUntrackedSelection
-                && PathLevelSelection.TryAdjustSelection(
+                && TryAdjustSelection(
                     text,
                     _commandBox.CaretIndex,
                     selectionStart,
                     selectionEnd,
                     moveRight,
+                    bySection,
                     out var adjustedSelectionStart,
                     out var adjustedSelectionEnd,
                     out var adjustedSelectionCaret))
@@ -1831,7 +1875,10 @@ public partial class MainWindow : Window
                 ? _commandBox.CaretIndex
                 : moveRight ? selectionStart : selectionEnd;
 
-        if (!PathLevelSelection.TryGetBoundary(text, caret, moveRight, out var nextCaret))
+        var hasNextBoundary = bySection
+            ? PathLevelSelection.TryGetSectionBoundary(text, caret, moveRight, out var nextCaret)
+            : PathLevelSelection.TryGetBoundary(text, caret, moveRight, out nextCaret);
+        if (!hasNextBoundary)
         {
             if (hasTrackedSelection)
             {

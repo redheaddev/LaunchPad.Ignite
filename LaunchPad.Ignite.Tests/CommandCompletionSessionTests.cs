@@ -57,6 +57,36 @@ public class CommandCompletionSessionTests
         Assert.Equal("extension ", viewModel.CommandText);
     }
 
+    [Theory]
+    [InlineData(@"list C:\Us", @"C:\Users\Alice", @"list C:\Users\", "Alice")]
+    [InlineData("list usr/lo", "usr/local/bin", "list usr/local/", "bin")]
+    public void RightAcceptsOnePathSectionAndKeepsTheRemainderGhosted(
+        string input,
+        string candidate,
+        string expectedInput,
+        string expectedGhost)
+    {
+        var session = CreateListSession(ListSelectionMode.Single, [candidate]);
+        session.UpdateInputText(input);
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal(expectedInput, state.InputText);
+        Assert.Equal(expectedGhost, state.GhostText);
+    }
+
+    [Fact]
+    public void RightAcceptsQuotedValueWithSpacesAsOneSection()
+    {
+        var session = CreateListSession(ListSelectionMode.Single, ["My Documents/reports"]);
+        session.UpdateInputText("list My");
+
+        var state = session.HandleKey(CommandInputKey.Right);
+
+        Assert.Equal("list \"My Documents/reports\"", state.InputText);
+        Assert.Empty(state.GhostText);
+    }
+
     [Fact]
     public async Task TabCompletionCanBeUndoneToThePreviousInput()
     {

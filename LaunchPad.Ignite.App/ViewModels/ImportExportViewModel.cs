@@ -3,12 +3,14 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Secrets;
 using LaunchPad.Ignite.Core.Execution;
 
 namespace LaunchPad.Ignite.App.ViewModels;
@@ -21,6 +23,8 @@ public sealed class ImportExportViewModel : ViewModelBase
     private readonly Action _close;
     private readonly AddonPackageService _addonPackageService;
     private readonly Action _runtimeRefresh;
+    private readonly ISecretStore _secretStore;
+    private readonly EncryptedSecretFileService _secretFileService = new();
     private readonly ObservableCollection<CommandSourceViewModel> _sources = [];
     private CommandDestinationViewModel _selectedDestination;
     private string _importPath = string.Empty;
@@ -55,6 +59,13 @@ public sealed class ImportExportViewModel : ViewModelBase
     private string _addonName = "My Add-on";
     private string _addonVersion = "1.0.0";
     private string _createAddonStatus = string.Empty;
+    private string _secretExportPath = string.Empty;
+    private string _secretExportPassword = string.Empty;
+    private string _secretExportPasswordConfirmation = string.Empty;
+    private string _secretImportPath = string.Empty;
+    private string _secretImportPassword = string.Empty;
+    private string _secretExportStatus = string.Empty;
+    private string _secretImportStatus = string.Empty;
 
     public ObservableCollection<CommandSourceViewModel> Sources => _sources;
     public IReadOnlyList<CommandDestinationViewModel> Destinations { get; }
@@ -177,11 +188,23 @@ public sealed class ImportExportViewModel : ViewModelBase
             if (SetProperty(ref _isWorking, value))
             {
                 ImportCommand.NotifyCanExecuteChanged();
+                ImportAddonCommand.NotifyCanExecuteChanged();
+                ExportSecretsCommand.NotifyCanExecuteChanged();
+                ImportSecretsCommand.NotifyCanExecuteChanged();
             }
         }
     }
     public IAsyncRelayCommand ImportCommand { get; }
     public IAsyncRelayCommand ImportAddonCommand { get; }
+    public IAsyncRelayCommand ExportSecretsCommand { get; }
+    public IAsyncRelayCommand ImportSecretsCommand { get; }
+    public string SecretExportPath { get => _secretExportPath; set => SetProperty(ref _secretExportPath, value); }
+    public string SecretExportPassword { get => _secretExportPassword; set => SetProperty(ref _secretExportPassword, value); }
+    public string SecretExportPasswordConfirmation { get => _secretExportPasswordConfirmation; set => SetProperty(ref _secretExportPasswordConfirmation, value); }
+    public string SecretImportPath { get => _secretImportPath; set => SetProperty(ref _secretImportPath, value); }
+    public string SecretImportPassword { get => _secretImportPassword; set => SetProperty(ref _secretImportPassword, value); }
+    public string SecretExportStatus { get => _secretExportStatus; private set => SetProperty(ref _secretExportStatus, value); }
+    public string SecretImportStatus { get => _secretImportStatus; private set => SetProperty(ref _secretImportStatus, value); }
     public string AddonPath
     {
         get => _addonPath;
@@ -238,7 +261,8 @@ public sealed class ImportExportViewModel : ViewModelBase
         Func<string, CommandPackPreview> previewPack,
         Action close,
         AddonPackageService addonPackageService,
-        Action runtimeRefresh)
+        Action runtimeRefresh,
+        ISecretStore secretStore)
     {
         _ownershipManager = ownershipManager;
         _importPack = importPack;
@@ -246,8 +270,11 @@ public sealed class ImportExportViewModel : ViewModelBase
         _close = close;
         _addonPackageService = addonPackageService;
         _runtimeRefresh = runtimeRefresh;
+        _secretStore = secretStore;
         ImportCommand = new AsyncRelayCommand(ImportPackFromPathAsync, () => !IsWorking);
         ImportAddonCommand = new AsyncRelayCommand(ImportAddonAsync, () => !IsWorking && _addonImportPreview is not null);
+        ExportSecretsCommand = new AsyncRelayCommand(ExportSecretsAsync, () => !IsWorking);
+        ImportSecretsCommand = new AsyncRelayCommand(ImportSecretsAsync, () => !IsWorking);
         MoveCommand = new RelayCommand(MoveSelectedCommands);
         RefreshAddonComponentsCommand = new RelayCommand(RefreshAddonComponents);
         Destinations = new[] { new CommandDestinationViewModel(CommandOwnershipManager.UserOwnerId, "User commands", null) }
@@ -257,6 +284,153 @@ public sealed class ImportExportViewModel : ViewModelBase
         _selectedDestination = Destinations[0];
         RefreshAddonComponents();
         RefreshInventory();
+    }
+
+    private async Task ExportSecretsAsync()
+    {
+        if (SecretExportPassword.Length < 12)
+        {
+            SecretExportStatus = "Use an export password with at least 12 characters.";
+            return;
+        }
+
+        if (!string.Equals(SecretExportPassword, SecretExportPasswordConfirmation, StringComparison.Ordinal))
+        {
+            SecretExportStatus = "The export password confirmation does not match.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SecretExportPath))
+        {
+            SecretExportStatus = "Choose a destination file first.";
+            return;
+        }
+
+        if (!_secretStore.IsAvailable)
+        {
+            SecretExportStatus = _secretStore.UnavailableReason ?? "Secret storage is unavailable.";
+            return;
+        }
+
+        IsWorking = true;
+        try
+        {
+            var secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in _secretStore.GetNames())
+            {
+                if (!_secretStore.TryGet(name, out var value))
+                {
+                    throw new InvalidOperationException($"Could not read secret '{name}' from secure storage.");
+                }
+
+                secrets.Add(name, value);
+            }
+
+            var path = SecretExportPath.Trim();
+            var password = SecretExportPassword;
+            await Task.Run(() => _secretFileService.WriteFile(path, secrets, password));
+            SecretExportStatus = $"Exported {secrets.Count} secret(s) to '{Path.GetFileName(path)}'. Keep the file and password secure.";
+        }
+        catch (Exception exception)
+        {
+            SecretExportStatus = $"Could not export secrets: {exception.Message}";
+        }
+        finally
+        {
+            SecretExportPassword = string.Empty;
+            SecretExportPasswordConfirmation = string.Empty;
+            IsWorking = false;
+        }
+    }
+
+    private async Task ImportSecretsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SecretImportPath))
+        {
+            SecretImportStatus = "Choose a secrets file first.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SecretImportPassword))
+        {
+            SecretImportStatus = "Enter the password used to encrypt the secrets file.";
+            return;
+        }
+
+        if (!_secretStore.IsAvailable)
+        {
+            SecretImportStatus = _secretStore.UnavailableReason ?? "Secret storage is unavailable.";
+            return;
+        }
+
+        IsWorking = true;
+        try
+        {
+            var path = SecretImportPath.Trim();
+            var password = SecretImportPassword;
+            var secrets = await Task.Run(() => _secretFileService.ReadFile(path, password));
+            var result = await Task.Run(() => ImportSecretsWithoutReplacingExisting(secrets));
+            if (result.ImportedCount > 0)
+            {
+                _runtimeRefresh();
+            }
+
+            SecretImportStatus = $"Imported {result.ImportedCount} secret(s); skipped {result.SkippedCount} existing secret(s).";
+        }
+        catch (Exception exception)
+        {
+            SecretImportStatus = $"Could not import secrets: {exception.Message}";
+        }
+        finally
+        {
+            SecretImportPassword = string.Empty;
+            IsWorking = false;
+        }
+    }
+
+    private (int ImportedCount, int SkippedCount) ImportSecretsWithoutReplacingExisting(IReadOnlyDictionary<string, string> secrets)
+    {
+        var existingNames = new HashSet<string>(_secretStore.GetNames(), StringComparer.OrdinalIgnoreCase);
+        var importedNames = new List<string>();
+        var skippedCount = 0;
+        try
+        {
+            foreach (var (name, value) in secrets)
+            {
+                if (!existingNames.Add(name))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                _secretStore.Set(name, value);
+                importedNames.Add(name);
+            }
+        }
+        catch (Exception exception)
+        {
+            var rollbackFailed = false;
+            foreach (var name in importedNames)
+            {
+                try
+                {
+                    _secretStore.Remove(name);
+                }
+                catch
+                {
+                    rollbackFailed = true;
+                }
+            }
+
+            if (rollbackFailed)
+            {
+                throw new InvalidOperationException("Import failed and some newly imported secrets could not be removed.", exception);
+            }
+
+            throw;
+        }
+
+        return (importedNames.Count, skippedCount);
     }
 
     public void RefreshAddonComponents()
