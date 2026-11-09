@@ -8,6 +8,7 @@ LaunchPad.Ignite is a keyboard-driven command launcher built with .NET 8 and Ava
 - Switch between main and mini launcher modes.
 - Manage command packs and add-ons through the app.
 - Store secrets and copy selected secret values to the clipboard with automatic expiration. The clipboard is cleared only if its contents have not changed; the countdown can be clicked to add 30 seconds.
+- Optionally collect a session-only, text-only clipboard history with search, copy, and clear controls.
 - Track command history and configure launcher settings.
 
 ## Install
@@ -24,6 +25,8 @@ Run the installer for a per-user installation. The installer can optionally crea
 Launch the app and start typing to search available commands. Press **Enter** to run the highlighted command. Use **Tab** or **Right Arrow** to accept a completion, and **Esc** to close the launcher. The default activation shortcut is **Alt+Space**.
 
 Use the settings and help buttons in the main window for configuration and command guidance. Secret commands prompt for secret names and values as needed. Secret values are not included in command result messages. Avoid copying other sensitive content to the clipboard while a secret countdown is active, since expiration only clears the clipboard when it still contains the copied secret.
+
+Enable clipboard history under **Settings > Clipboard**. Run `clipboard list` to show recent entries and their IDs, `clipboard copy <id>` to restore one to the clipboard, or `clipboard clear` to clear the session history after confirmation. History is off by default, held in memory only, and cleared when LaunchPad exits. LaunchPad's expiring secret copies are excluded; disable history before copying other sensitive content.
 
 ## Build and test
 

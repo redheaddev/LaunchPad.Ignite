@@ -314,7 +314,8 @@ public sealed class CommandCompletionSession
         {
             if (_catalog.TryGetDefaultAction(command, out var defaultAction))
             {
-                return defaultAction.Arguments.Any(argument => !argument.Optional);
+                return defaultAction.Arguments.Any(argument => !argument.Optional)
+                    || command.Actions.Any(action => !string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase));
             }
 
             return command.Actions.Count > 0;
@@ -514,7 +515,9 @@ public sealed class CommandCompletionSession
 
         var values = _resolution.Candidates;
         return values
-            .Where(value => value.StartsWith(_listFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(value => _resolution.MatchMode == ListMatchMode.Contains
+                ? value.Contains(_listFilter, StringComparison.OrdinalIgnoreCase)
+                : value.StartsWith(_listFilter, StringComparison.OrdinalIgnoreCase))
             .Where(value => _resolution.ListMode != ListSelectionMode.Single
                 || !_selectedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
             .ToList();
@@ -562,6 +565,29 @@ public sealed class CommandCompletionSession
             .ToList();
     }
 
+    private bool IsWithinMultiActionCommand()
+    {
+        var tokens = new LaunchPad.Ignite.Core.Parsing.CommandLineTokenizer().Tokenize(_inputText);
+        if (tokens.Count == 0)
+        {
+            return false;
+        }
+
+        if (_catalog.TryGetCommand(tokens[0].Value, out var command))
+        {
+            return HasNamedActions(command);
+        }
+
+        return tokens.Count == 1
+            && _resolution.Kind == CompletionKind.Command
+            && _resolution.Candidates.Any(candidate =>
+                _catalog.TryGetCommand(candidate, out var candidateCommand)
+                && HasNamedActions(candidateCommand));
+    }
+
+    private static bool HasNamedActions(CommandDefinition command)
+        => command.Actions.Any(action => !string.Equals(action.Name, "default", StringComparison.OrdinalIgnoreCase));
+
     private CommandCompletionState BuildState()
     {
         var items = GetVisibleItems();
@@ -591,7 +617,11 @@ public sealed class CommandCompletionSession
             items,
             _resolution.IsChecklist && _resolution.ListMode == ListSelectionMode.Multiple,
             CanComplete: _resolution.AwaitingSeparator || items.Count > 0,
-            CaretIndex: _caretIndex);
+            CaretIndex: _caretIndex)
+        {
+            IsListSelectionActive = _resolution.IsChecklist,
+            IsMultiActionCommandActive = IsWithinMultiActionCommand()
+        };
     }
 
     private bool TryGetGhostSuffix(string candidate, string prefix, out string suffix)

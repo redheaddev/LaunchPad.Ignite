@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using LaunchPad.Ignite.App.Commands;
 using LaunchPad.Ignite.App.Models;
 using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.Clipboard;
 using LaunchPad.Ignite.App.Services.Hotkeys;
 using LaunchPad.Ignite.App.Services.Profiles;
 using LaunchPad.Ignite.App.Services.Themes;
@@ -58,6 +59,7 @@ public partial class SettingsViewModel : ViewModelBase
     private SettingsNavigationItem? _selectedNavigationItem;
     public IReadOnlyList<SettingsNavigationItem> NavigationItems { get; }
     public IReadOnlyList<SettingEditorViewModel> Settings { get; private set; } = [];
+    public ClipboardHistorySettingsViewModel? ClipboardHistory { get; }
     public IReadOnlyList<ExtensionSecretPermissionViewModel> ExtensionSecretPermissions => _extensionSecretPermissions;
     public ObjectMetadataEditorViewModel MetadataEditor => _metadataEditor;
     public IReadOnlyList<MetadataObjectType> MetadataObjectTypes { get; } = [MetadataObjectType.Secret, MetadataObjectType.Snippet, MetadataObjectType.Macro, MetadataObjectType.Shortcut, MetadataObjectType.Command, MetadataObjectType.Function, MetadataObjectType.List, MetadataObjectType.Variable];
@@ -166,6 +168,7 @@ public partial class SettingsViewModel : ViewModelBase
     public bool IsListsSelected => SelectedNavigationItem?.Category == "lists";
     public bool IsMetadataSelected => SelectedNavigationItem?.Category == "metadata";
     public bool IsApplicationSelected => SelectedNavigationItem?.Category == "application";
+    public bool IsClipboardSelected => SelectedNavigationItem?.Category == "clipboard";
     public bool IsMediaExtensionSelected => SelectedNavigationItem is { Category: "extension" } selected
         && string.Equals(selected.Namespace, MediaShortcutSettings.Namespace, StringComparison.OrdinalIgnoreCase);
     public GlobalActivationHotkey ActivationHotkey
@@ -207,7 +210,7 @@ public partial class SettingsViewModel : ViewModelBase
         GlobalActivationHotkeyStatus = status;
     }
 
-    public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsMetadataSelected && !IsCommandsSelected && !IsListsSelected;
+    public bool IsSettingsListVisible => !IsExtensionSelected && !IsExtensionsSelected && !IsPacksSelected && !IsThemeSelected && !IsMetadataSelected && !IsCommandsSelected && !IsListsSelected && !IsClipboardSelected;
     public IReadOnlyList<ColorTheme> ColorThemes => _colorThemes;
     public string NewThemeName
     {
@@ -270,9 +273,11 @@ public partial class SettingsViewModel : ViewModelBase
         IReadOnlyList<SnippetDefinition>? availableSnippetsForMetadata = null,
         IReadOnlyList<MacroDefinition>? availableMacrosForMetadata = null,
         IReadOnlyList<CommandFunctionDefinition>? availableFunctionsForMetadata = null,
-        IReadOnlyList<CommandVariableDefinition>? availableVariablesForMetadata = null)
+        IReadOnlyList<CommandVariableDefinition>? availableVariablesForMetadata = null,
+        ClipboardHistorySettingsViewModel? clipboardHistory = null)
     {
         _settingsStore = settingsStore;
+        ClipboardHistory = clipboardHistory;
         ActivationHotkey = GlobalActivationHotkey.TryParse(
             settingsStore.GetValue("app:globalActivationHotkey", GlobalActivationHotkey.DefaultValue),
             out var activationHotkey)
@@ -443,6 +448,7 @@ public partial class SettingsViewModel : ViewModelBase
         var navigation = new List<SettingsNavigationItem>
         {
             new("General", "application", "") { AvailableSettings = applicationSettings },
+            new("Clipboard", "clipboard", ""),
             new("Commands", "commands", ""),
             new("Packs", "packs", ""),
             new("Lists", "lists", ""),
@@ -661,6 +667,11 @@ public partial class SettingsViewModel : ViewModelBase
             Subheader = "Application settings";
             Settings = _applicationSettings.Select(CreateEditor).ToArray();
         }
+        else if (value.Category == "clipboard")
+        {
+            Subheader = "Manage clipboard history.";
+            Settings = [];
+        }
         else if (value.Category == "theme")
         {
             Subheader = "Choose the color palette used throughout LaunchPad.";
@@ -701,6 +712,7 @@ public partial class SettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsCommandsSelected));
         OnPropertyChanged(nameof(IsListsSelected));
         OnPropertyChanged(nameof(IsApplicationSelected));
+        OnPropertyChanged(nameof(IsClipboardSelected));
         OnPropertyChanged(nameof(IsExtensionSelected));
         OnPropertyChanged(nameof(IsMetadataSelected));
         OnPropertyChanged(nameof(ExtensionSecretPermissions));

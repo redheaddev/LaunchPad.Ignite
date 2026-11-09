@@ -26,4 +26,5 @@ internal sealed record CompletionResolution(
     bool AwaitingSeparator = false)
 {
     public IReadOnlyList<string>? CandidateDisplayValues { get; init; }
+    public ListMatchMode MatchMode { get; init; } = ListMatchMode.StartsWith;
 }

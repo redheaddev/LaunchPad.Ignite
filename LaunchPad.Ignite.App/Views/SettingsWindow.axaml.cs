@@ -24,7 +24,11 @@ public partial class SettingsWindow : Window
         DataContext = viewModel;
         AddHandler(KeyDownEvent, CaptureGlobalActivationHotkey, RoutingStrategies.Tunnel);
         EscapeToClose.Attach(this);
-        Closed += (_, _) => ColorThemeService.ThemeChanged -= RefreshThemeResources;
+        Closed += (_, _) =>
+        {
+            ColorThemeService.ThemeChanged -= RefreshThemeResources;
+            viewModel.ClipboardHistory?.Dispose();
+        };
         ColorThemeService.ThemeChanged += RefreshThemeResources;
     }
 

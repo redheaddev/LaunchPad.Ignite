@@ -29,6 +29,8 @@ public sealed record CommandFunctionDefinition(
     string? Namespace = null,
     CommandFunctionReturnType ReturnType = CommandFunctionReturnType.Text)
 {
+    public ListMatchMode MatchMode { get; init; } = ListMatchMode.StartsWith;
+
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
 }
 
@@ -36,6 +38,12 @@ public enum CommandFunctionReturnType
 {
     Text,
     List
+}
+
+public enum ListMatchMode
+{
+    StartsWith,
+    Contains
 }
 
 public sealed record CommandFunctionParameterDefinition(
@@ -50,6 +58,8 @@ public sealed record CommandListDefinition(
     string? Default = null,
     string? Namespace = null)
 {
+    public ListMatchMode MatchMode { get; init; } = ListMatchMode.StartsWith;
+
     public string QualifiedName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}:{Name}";
 }
 
@@ -112,6 +122,7 @@ public sealed record CommandActionDefinition(
 {
     public IReadOnlyList<string> ArgumentTemplates { get; init; } = [];
     public string? WorkingDirectoryTemplate { get; init; }
+    public string? ConfirmationPrompt { get; init; }
     public string? KeyboardShortcut { get; init; }
     public bool ExecuteOnKeyboardShortcut { get; init; }
     public bool AllowAdditionalNamedArguments { get; init; }

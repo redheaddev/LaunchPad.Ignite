@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Threading;
 using LaunchPad.Ignite.App.Commands;
@@ -76,6 +77,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly SecretAccessGate _secretAccessGate;
     private readonly DispatcherTimer _secretAccessStateTimer;
     private AvaloniaClipboardService? _clipboardService;
+    private ClipboardHistoryService _clipboardHistoryService = null!;
     private readonly ExtensionStateStore _extensionStateStore;
     private readonly ProfileCommandLogger _commandLogger;
     private readonly HistorySuggestionPreferenceStore _historySuggestionPreferenceStore;
@@ -154,6 +156,14 @@ public partial class MainViewModel : ViewModelBase
         _extensionStateStore = new ExtensionStateStore();
         _profileSettingsStore = new ProfileSettingsStore();
         _historySuggestionPreferenceStore = new HistorySuggestionPreferenceStore(_profileSettingsStore);
+        _clipboardHistoryService = new ClipboardHistoryService(
+            async () => GetSystemClipboard() is { } clipboard ? await clipboard.TryGetTextAsync() : null,
+            text => GetSystemClipboard()?.SetTextAsync(text) ?? Task.CompletedTask,
+            () => _clipboardService?.ExpirationTime is not null);
+        _clipboardHistoryService.IsEnabled = string.Equals(
+            _profileSettingsStore.GetValue("app:clipboardHistoryEnabled", "Off"),
+            "On",
+            StringComparison.OrdinalIgnoreCase);
         VerboseLogging.Configure(VerboseLoggingEnabled);
         _secretStore = new SecretActivityTrackingStore(PlatformSecretStore.Create(), _profileSettingsStore);
         _launcherWindowStateStore = new LauncherWindowStateStore(_profileSettingsStore);
@@ -170,10 +180,11 @@ public partial class MainViewModel : ViewModelBase
         _argumentPathCompletion = new CommandArgumentPathCompletion(_directFilePathHandler);
         InitializeCommandRuntime();
         _secretAccessStateTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _secretAccessStateTimer.Tick += (_, _) =>
+        _secretAccessStateTimer.Tick += async (_, _) =>
         {
             RefreshSecretAccessState();
             RefreshClipboardExpiry();
+            await _clipboardHistoryService.CaptureCurrentClipboardAsync();
         };
         _secretAccessStateTimer.Start();
         RefreshSecretAccessState();
@@ -328,6 +339,7 @@ public partial class MainViewModel : ViewModelBase
             Commands = commands.Append(SecretCommandDefinition.Definition)
                 .Append(DefinitionManagementCommandModel.Definition)
                 .Append(SecretListCommandDefinition.Definition)
+                .Append(ClipboardCommandModel.Definition)
                 .Append(ThemeCommandDefinition.Definition)
                 .Append(EditCommandDefinition.Definition)
                 .Append(ProfileBackupCommandDefinitions.Backup)
@@ -341,7 +353,7 @@ public partial class MainViewModel : ViewModelBase
         {
             Lists = new ListDefaultOverrideStore(_profileSettingsStore).ApplyOverrides(schema.Lists)
         };
-        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement", "mode", "navigation", "historySuggestions" };
+        var builtInKinds = new[] { "shell", "variable", "secret", "secretList", "clipboard", "theme", "edit", "exit", "profileBackup", "profileRestore", "snippet", "macro", "extension", "shortcut", "definitionManagement", "mode", "navigation", "historySuggestions" };
 
         var catalog = new CommandCatalog(schema, extensions.Executors.Keys.Concat(extensions.AsyncExecutors.Keys).Concat(builtInKinds));
         var variableExpander = new CommandTextVariableExpander(schema.Variables);
@@ -361,6 +373,7 @@ public partial class MainViewModel : ViewModelBase
                 new SecretNamesArgumentValueProvider(_secretStore),
                 new ThemeNamesArgumentValueProvider(_profileSettingsStore),
                 new CommandNamesArgumentValueProvider(() => _catalog?.Commands.ToArray() ?? []),
+                new ClipboardHistoryArgumentValueProvider(_clipboardHistoryService),
                 new ProfileBackupFilesArgumentValueProvider(profileBackupService),
                 new ExtensionPackageNamesArgumentValueProvider(extensionPackageManager),
                 new ExtensionIdsArgumentValueProvider(extensionIds),
@@ -441,6 +454,7 @@ public partial class MainViewModel : ViewModelBase
         };
         var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
+            ["clipboard"] = new ClipboardCommandModel(_clipboardHistoryService),
             ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore),
             ["macro"] = new MacroCommandModel(_macroStore, new AvaloniaMacroDialogService(), InitializeCommandRuntime),
             ["snippet"] = new SnippetCommandModel(
@@ -560,7 +574,8 @@ public partial class MainViewModel : ViewModelBase
             _snippetStore.GetAll(),
             _macroStore.GetAll(),
             _catalog.Schema.Functions,
-            _catalog.Schema.Variables);
+            _catalog.Schema.Variables,
+            clipboardHistory: new ClipboardHistorySettingsViewModel(_profileSettingsStore, _clipboardHistoryService));
     }
 
     private bool SaveOwnedCommandDefinition(string? packId, CommandDefinition command, CommandDefinition original)
@@ -703,6 +718,12 @@ public partial class MainViewModel : ViewModelBase
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow
                 ? mainWindow.ConfirmProfileRestoreAsync(fileName)
+                : Task.FromResult(false);
+
+    private static Task<bool> ConfirmCommandActionAsync(string prompt)
+        => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is MainWindow mainWindow
+                ? mainWindow.ConfirmCommandActionAsync(prompt)
                 : Task.FromResult(false);
 
     private static Task<bool> ConfirmVariableOverwrite(string name)
@@ -2115,7 +2136,9 @@ public partial class MainViewModel : ViewModelBase
 
     private IReadOnlyList<CommandHistoryEntry> GetHistorySuggestions(string inputText)
     {
-        if (IsCommandMetadataFilterMode || ActiveCompletionState.IsChecklistActive)
+        if (IsCommandMetadataFilterMode
+            || ActiveCompletionState.IsListSelectionActive
+            || ActiveCompletionState.IsMultiActionCommandActive)
         {
             return Array.Empty<CommandHistoryEntry>();
         }
@@ -2812,6 +2835,13 @@ public sealed record CompletionOptionViewModel(
         }
 
         var parsedCommand = parseResult.ParsedCommand!;
+        if (!string.IsNullOrWhiteSpace(parsedCommand.Action.ConfirmationPrompt)
+            && !await ConfirmCommandActionAsync(parsedCommand.Action.ConfirmationPrompt))
+        {
+            SetStatusMessage("Command canceled.");
+            return false;
+        }
+
         var executionHandler = parsedCommand.Definition.ExecutionHandler;
         if (launchMode == CommandLaunchMode.Normal
             && string.Equals(executionHandler, "shell", StringComparison.OrdinalIgnoreCase))
