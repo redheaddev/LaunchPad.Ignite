@@ -30,6 +30,11 @@ public partial class SnippetEditorWindow : Window
     private void InitializeComponent()
         => AvaloniaXamlLoader.Load(this);
 
+    public SnippetEditorWindow()
+        : this(string.Empty, null, [])
+    {
+    }
+
     public SnippetEditorWindow(
         string name,
         SnippetDefinition? snippet,

@@ -13,7 +13,6 @@ using LaunchPad.Ignite.App.Services.Secrets;
 using LaunchPad.Ignite.App.Services.Secrets.Linux;
 using LaunchPad.Ignite.App.Services.Terminals;
 using LaunchPad.Ignite.App.Services.Themes;
-using LaunchPad.Ignite.App.Services.Secrets;
 using LaunchPad.Ignite.Core.Completion;
 using LaunchPad.Ignite.Core.Execution;
 using LaunchPad.Ignite.Core.Lists;
