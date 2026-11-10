@@ -88,6 +88,18 @@ public sealed class SecretAccessGate : ISecretAccessGate
 
     public bool TryUnlock(string password)
     {
+        if (!TryVerifyPassword(password))
+        {
+            _unlockedUntil = null;
+            return false;
+        }
+
+        _unlockedUntil = _timeProvider.GetUtcNow().Add(UnlockDuration);
+        return true;
+    }
+
+    public bool TryVerifyPassword(string password)
+    {
         if (_state is null || string.IsNullOrEmpty(password))
         {
             return false;
@@ -98,9 +110,7 @@ public sealed class SecretAccessGate : ISecretAccessGate
         var actualVerifier = DeriveVerifier(password, salt, _state.Iterations);
         try
         {
-            var unlocked = CryptographicOperations.FixedTimeEquals(expectedVerifier, actualVerifier);
-            _unlockedUntil = unlocked ? _timeProvider.GetUtcNow().Add(UnlockDuration) : null;
-            return unlocked;
+            return CryptographicOperations.FixedTimeEquals(expectedVerifier, actualVerifier);
         }
         finally
         {

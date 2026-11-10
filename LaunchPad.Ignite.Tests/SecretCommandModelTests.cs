@@ -544,7 +544,7 @@ public class SecretCommandModelTests
     }
 
     [Fact]
-    public async Task MasterPasswordSetupUsesSingleEntryAndLeavesSecretAccessLocked()
+    public async Task MasterPasswordSetupRequiresConfirmationAndLeavesSecretAccessLocked()
     {
         var gate = new FakeSecretAccessGate();
         var dialog = new FakeDialogService("master-password");
@@ -556,7 +556,27 @@ public class SecretCommandModelTests
         Assert.True(gate.HasMasterPassword);
         Assert.False(gate.IsUnlocked);
         Assert.Equal(["Set master password"], dialog.Titles);
-        Assert.Equal([false], dialog.ConfirmationRequests);
+        Assert.Equal([true], dialog.ConfirmationRequests);
+    }
+
+    [Fact]
+    public async Task ReplacingMasterPasswordPromptsForTheOldPasswordFirst()
+    {
+        using var directory = new TemporaryDirectory();
+        var gate = new SecretAccessGate(Path.Combine(directory.Path, "master.json"));
+        Assert.True(gate.TrySetMasterPassword("old-master-password"));
+        gate.Lock();
+        var dialog = new FakeDialogService("old-master-password", "new-master-password");
+        var model = CreateModel(gate: gate, dialog: dialog);
+
+        var result = await ExecuteAsync(model, "secret master set");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(["Enter current master password", "Set master password"], dialog.Titles);
+        Assert.Equal([false, true], dialog.ConfirmationRequests);
+        Assert.False(gate.IsUnlocked);
+        Assert.False(gate.TryVerifyPassword("old-master-password"));
+        Assert.True(gate.TryVerifyPassword("new-master-password"));
     }
 
     [Fact]
@@ -823,14 +843,32 @@ public class SecretCommandModelTests
         var restartedGate = new SecretAccessGate(statePath, timeProvider);
         Assert.True(restartedGate.HasMasterPassword);
         Assert.False(restartedGate.IsUnlocked);
+        Assert.True(restartedGate.TryVerifyPassword("master-password"));
+        Assert.False(restartedGate.IsUnlocked);
+        Assert.False(restartedGate.TryVerifyPassword("wrong-password"));
+        Assert.False(restartedGate.IsUnlocked);
         Assert.False(restartedGate.TryUnlock("wrong-password"));
         Assert.True(restartedGate.TryUnlock("master-password"));
         Assert.True(restartedGate.IsUnlocked);
     }
 
+    [Fact]
+    public void MasterPasswordCannotBeReplacedWhileLockedWithoutAuthenticating()
+    {
+        using var directory = new TemporaryDirectory();
+        var statePath = Path.Combine(directory.Path, "master.json");
+        var gate = new SecretAccessGate(statePath);
+        Assert.True(gate.TrySetMasterPassword("old-master-password"));
+        gate.Lock();
+
+        Assert.False(gate.IsUnlocked);
+        Assert.False(gate.TrySetMasterPassword("new-master-password"));
+        Assert.True(gate.TryVerifyPassword("old-master-password"));
+    }
+
     private static SecretCommandModel CreateModel(
         FakeSecretStore? store = null,
-        FakeSecretAccessGate? gate = null,
+        ISecretAccessGate? gate = null,
         FakeClipboardService? clipboard = null,
         FakeTerminalLauncher? terminal = null,
         FakeDialogService? dialog = null,
@@ -935,16 +973,25 @@ public class SecretCommandModelTests
             return IsUnlocked;
         }
 
+        public bool TryVerifyPassword(string password)
+            => HasMasterPassword && password == "master-password";
+
         public void Lock() => IsUnlocked = false;
     }
 
     private sealed class FakeDialogService : ISecretEntryDialogService
     {
-        private readonly string? _value;
+        private readonly string?[] _values;
+        private int _nextValueIndex;
 
         public FakeDialogService(string? value)
         {
-            _value = value;
+            _values = [value];
+        }
+
+        public FakeDialogService(string? firstValue, string? secondValue)
+        {
+            _values = [firstValue, secondValue];
         }
 
         public string? DisplayedSecret { get; private set; }
@@ -959,7 +1006,8 @@ public class SecretCommandModelTests
         {
             Titles.Add(title);
             ConfirmationRequests.Add(requireConfirmation);
-            return Task.FromResult(_value);
+            var value = _values.Length == 0 ? null : _values[Math.Min(_nextValueIndex++, _values.Length - 1)];
+            return Task.FromResult(value);
         }
 
         public Task ShowSecretAsync(string title, string value)

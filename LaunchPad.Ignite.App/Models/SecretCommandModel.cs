@@ -187,24 +187,54 @@ public sealed class SecretCommandModel
             return new CommandExecutionResult(false, "Usage: secret master set");
         }
 
-        var password = await _dialogService.ShowAsync("Set master password", requireConfirmation: false);
-        if (password is null)
+        var wasUnlocked = _accessGate.IsUnlocked;
+        if (_accessGate.HasMasterPassword)
         {
-            return new CommandExecutionResult(false, "Master-password setup canceled.");
+            var oldPassword = await _dialogService.ShowAsync("Enter current master password", requireConfirmation: false);
+            if (oldPassword is null)
+            {
+                return new CommandExecutionResult(false, "Master-password change canceled.");
+            }
+
+            if (!_accessGate.TryVerifyPassword(oldPassword))
+            {
+                return new CommandExecutionResult(false, "The current master password is incorrect.");
+            }
+
+            if (!wasUnlocked && !_accessGate.TryUnlock(oldPassword))
+            {
+                return new CommandExecutionResult(false, "The current master password is incorrect.");
+            }
         }
 
-        if (password.Length == 0)
+        try
         {
-            return new CommandExecutionResult(false, "The master password cannot be empty.");
-        }
+            var password = await _dialogService.ShowAsync("Set master password", requireConfirmation: true);
+            if (password is null)
+            {
+                return new CommandExecutionResult(false, "Master-password setup canceled.");
+            }
 
-        if (!_accessGate.TrySetMasterPassword(password))
+            if (password.Length == 0)
+            {
+                return new CommandExecutionResult(false, "The master password cannot be empty.");
+            }
+
+            if (!_accessGate.TrySetMasterPassword(password))
+            {
+                return new CommandExecutionResult(false, "Unable to set the master password.");
+            }
+
+            _accessGate.Lock();
+            return new CommandExecutionResult(true, "Master password set. Secret access is locked.");
+        }
+        finally
         {
-            return new CommandExecutionResult(false, "Unable to set the master password.");
+            if (!wasUnlocked)
+            {
+                _accessGate.Lock();
+            }
         }
-
-        _accessGate.Lock();
-        return new CommandExecutionResult(true, "Master password set. Secret access is locked.");
     }
 
     private async Task<CommandExecutionResult> UnlockAsync()

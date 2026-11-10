@@ -448,14 +448,23 @@ public partial class MainViewModel : ViewModelBase
             ["shell"] = new ShellCommandModel(_processStarter),
             ["secretList"] = new SecretListCommandModel(_secretStore),
             ["theme"] = new ThemeCommandModel(_profileSettingsStore, ColorThemeService.Apply),
-            ["profileBackup"] = new ProfileBackupCommandModel(profileBackupService),
             ["exit"] = new ExitCommandModel(ShutdownApplication),
             ["variable"] = variableCommandModel
         };
         var asyncCommandExecutors = new Dictionary<string, IAsyncCommandExecutor>(StringComparer.OrdinalIgnoreCase)
         {
             ["clipboard"] = new ClipboardCommandModel(_clipboardHistoryService),
-            ["profileRestore"] = new ProfileRestoreCommandModel(profileBackupService, ConfirmProfileRestore),
+            ["profileBackup"] = new ProfileBackupCommandModel(
+                profileBackupService,
+                _secretStore,
+                _secretAccessGate,
+                new AvaloniaSecretEntryDialogService()),
+            ["profileRestore"] = new ProfileRestoreCommandModel(
+                profileBackupService,
+                ConfirmProfileRestore,
+                _secretStore,
+                _secretAccessGate,
+                new AvaloniaSecretEntryDialogService()),
             ["macro"] = new MacroCommandModel(_macroStore, new AvaloniaMacroDialogService(), InitializeCommandRuntime),
             ["snippet"] = new SnippetCommandModel(
                 _snippetStore,
@@ -714,11 +723,11 @@ public partial class MainViewModel : ViewModelBase
                 ? mainWindow.ConfirmAddonReplacementAsync(preview)
                 : Task.FromResult(false);
 
-    private static Task<bool> ConfirmProfileRestore(string fileName)
+    private static Task<ProfileRestoreChoice> ConfirmProfileRestore(string fileName)
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
             && desktop.MainWindow is MainWindow mainWindow
                 ? mainWindow.ConfirmProfileRestoreAsync(fileName)
-                : Task.FromResult(false);
+                : Task.FromResult(ProfileRestoreChoice.Cancel);
 
     private static Task<bool> ConfirmCommandActionAsync(string prompt)
         => Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop

@@ -9,13 +9,21 @@ public static class ProfileBackupCommandDefinitions
     public static CommandDefinition Backup { get; } = new(
         "backup",
         "system",
-        "Create a ZIP backup of the LaunchPad profile",
-        [new CommandActionDefinition(
-            "default",
-            "Back up profile files",
-            "backup [name]",
-            "backup",
-            [new CommandArgumentDefinition("name", Optional: true)])]) { Handler = "profileBackup" };
+        "Create a ZIP backup of the LaunchPad profile, optionally including encrypted secrets",
+        [
+            new CommandActionDefinition(
+                "default",
+                "Back up profile files",
+                "backup [name]",
+                "backup",
+                [new CommandArgumentDefinition("name", Optional: true)]),
+            new CommandActionDefinition(
+                "secrets",
+                "Back up profile files and encrypted saved secrets",
+                "backup secrets [name]",
+                "backup",
+                [new CommandArgumentDefinition("name", Optional: true)])
+        ]) { Handler = "profileBackup" };
 
     public static CommandDefinition Restore { get; } = new(
         "restore",

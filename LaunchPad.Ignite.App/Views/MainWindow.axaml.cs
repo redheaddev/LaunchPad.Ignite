@@ -850,13 +850,13 @@ public partial class MainWindow : Window
         }
     }
 
-    internal async Task<bool> ConfirmProfileRestoreAsync(string fileName)
+    internal async Task<ProfileRestoreChoice> ConfirmProfileRestoreAsync(string fileName)
     {
         var dialog = new Window
         {
             Title = "Restore profile?",
-            Width = 460,
-            Height = 190,
+            Width = 560,
+            Height = 210,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
             Content = new StackPanel
@@ -867,7 +867,7 @@ public partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = $"Restore '{fileName}'? Current profile files will first be saved to a backup, then overwritten.",
+                        Text = $"Restore '{fileName}'? Current profile files will be overwritten. Would you like to create a safety backup first?",
                         TextWrapping = TextWrapping.Wrap
                     },
                     new StackPanel
@@ -877,8 +877,9 @@ public partial class MainWindow : Window
                         Spacing = 8,
                         Children =
                         {
-                            CreateDialogButton("Cancel", false),
-                            CreateDialogButton("Back up and restore", true)
+                            CreateProfileRestoreButton("Cancel", ProfileRestoreChoice.Cancel),
+                            CreateProfileRestoreButton("Restore without backup", ProfileRestoreChoice.RestoreWithoutBackup),
+                            CreateProfileRestoreButton("Back up and restore", ProfileRestoreChoice.BackupAndRestore)
                         }
                     }
                 }
@@ -889,7 +890,7 @@ public partial class MainWindow : Window
         _secretDialogIsOpen = true;
         try
         {
-            return await dialog.ShowDialog<bool>(this);
+            return await dialog.ShowDialog<ProfileRestoreChoice>(this);
         }
         finally
         {
@@ -1199,6 +1200,20 @@ public partial class MainWindow : Window
     }
 
     private static Button CreateDialogButton(string label, bool result)
+    {
+        var button = new Button { Content = label, MinWidth = 80 };
+        button.Click += (_, _) =>
+        {
+            if (TopLevel.GetTopLevel(button) is Window window)
+            {
+                window.Close(result);
+            }
+        };
+
+        return button;
+    }
+
+    private static Button CreateProfileRestoreButton(string label, ProfileRestoreChoice result)
     {
         var button = new Button { Content = label, MinWidth = 80 };
         button.Click += (_, _) =>

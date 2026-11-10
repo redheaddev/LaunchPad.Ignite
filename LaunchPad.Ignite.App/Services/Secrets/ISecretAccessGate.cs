@@ -10,5 +10,7 @@ public interface ISecretAccessGate
 
     bool TryUnlock(string password);
 
+    bool TryVerifyPassword(string password);
+
     void Lock();
 }

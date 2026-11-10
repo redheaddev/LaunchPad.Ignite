@@ -336,6 +336,12 @@ public sealed class SnippetSupportTests
             return IsUnlocked;
         }
 
+        public bool TryVerifyPassword(string password)
+        {
+            LastPassword = password;
+            return password == "correct";
+        }
+
         public void Lock() => IsUnlocked = false;
     }
 

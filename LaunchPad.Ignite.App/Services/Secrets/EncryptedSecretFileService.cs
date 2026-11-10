@@ -23,9 +23,21 @@ public sealed class EncryptedSecretFileService
     public void WriteFile(string path, IReadOnlyDictionary<string, string> secrets, string password)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var fileContents = Encrypt(secrets, password);
+        try
+        {
+            WriteAtomically(path, fileContents);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(fileContents);
+        }
+    }
+
+    public byte[] Encrypt(IReadOnlyDictionary<string, string> secrets, string password)
+    {
         ArgumentNullException.ThrowIfNull(secrets);
         ValidatePassword(password);
-
         if (secrets.Count > MaximumSecretCount)
         {
             throw new InvalidDataException($"A secrets file cannot contain more than {MaximumSecretCount} secrets.");
@@ -65,11 +77,11 @@ public sealed class EncryptedSecretFileService
             var fileContents = JsonSerializer.SerializeToUtf8Bytes(envelope);
             if (fileContents.Length > MaximumFileSize)
             {
+                CryptographicOperations.ZeroMemory(fileContents);
                 throw new InvalidDataException("The encrypted secrets file is too large to export.");
             }
 
-            WriteAtomically(path, fileContents);
-            CryptographicOperations.ZeroMemory(fileContents);
+            return fileContents;
         }
         finally
         {
@@ -81,15 +93,26 @@ public sealed class EncryptedSecretFileService
     public IReadOnlyDictionary<string, string> ReadFile(string path, string password)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        ValidatePassword(password);
-
         var fileContents = File.ReadAllBytes(path);
-        if (fileContents.Length == 0 || fileContents.Length > MaximumFileSize)
+        try
+        {
+            return Decrypt(fileContents, password);
+        }
+        finally
         {
             CryptographicOperations.ZeroMemory(fileContents);
+        }
+    }
+
+    public IReadOnlyDictionary<string, string> Decrypt(ReadOnlySpan<byte> encryptedContents, string password)
+    {
+        ValidatePassword(password);
+        if (encryptedContents.Length == 0 || encryptedContents.Length > MaximumFileSize)
+        {
             throw new InvalidDataException("The secrets file is empty or too large.");
         }
 
+        var fileContents = encryptedContents.ToArray();
         byte[]? plaintext = null;
         byte[]? key = null;
         try
