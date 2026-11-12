@@ -71,6 +71,7 @@ public partial class MainViewModel : ViewModelBase
     private IReadOnlyList<CommandVariableDefinition> _macroVariables = [];
     private UrlCommandModel _urlCommandModel = null!;
     private DirectFilePathHandler _directFilePathHandler = null!;
+    private CommandInputRouter _commandInputRouter = null!;
     private CommandArgumentPathCompletion _argumentPathCompletion = null!;
     private CommandArgumentPathContext? _activeArgumentPathContext;
     private SecretCommandModel _secretCommandModel = null!;
@@ -515,6 +516,7 @@ public partial class MainViewModel : ViewModelBase
         _completionSession = completionSession;
         _parser = parser;
         _urlCommandModel = urlCommandModel;
+        _commandInputRouter = new CommandInputRouter(parser, _directFilePathHandler, urlCommandModel);
         _commandExecutors = commandExecutors;
         _asyncCommandExecutors = asyncCommandExecutors;
         _commandSources = commandSources;
@@ -2764,11 +2766,15 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
-        if (launchMode == CommandLaunchMode.Normal
-            && _directFilePathHandler.TryOpen(expandedText, out var directFileResult))
+        var routing = _commandInputRouter.Route(
+            expandedText,
+            allowDirectExecution: launchMode == CommandLaunchMode.Normal,
+            newWindow,
+            SupportsNewWindowOption);
+        if (routing.ExecutionResult is { } directExecutionResult)
         {
-            SetStatusMessage(directFileResult.Message);
-            if (!directFileResult.Succeeded)
+            SetStatusMessage(directExecutionResult.Message);
+            if (!directExecutionResult.Succeeded)
             {
                 return false;
             }
@@ -2777,46 +2783,8 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
-        var hasNewWindowOption = UrlCommandModel.TryRemoveNewWindowOption(expandedText, out var textWithoutNewWindowOption);
-        if (launchMode == CommandLaunchMode.Normal
-            && _urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult, newWindow))
-        {
-            SetStatusMessage(directUrlResult.Message);
-            if (!directUrlResult.Succeeded)
-            {
-                return false;
-            }
-
-            CommandText = string.Empty;
-            return true;
-        }
-
-        if (launchMode == CommandLaunchMode.Normal
-            && hasNewWindowOption
-            && _urlCommandModel.TryExecuteDirectUrl(textWithoutNewWindowOption, out directUrlResult, newWindow: true))
-        {
-            SetStatusMessage(directUrlResult.Message);
-            if (!directUrlResult.Succeeded)
-            {
-                return false;
-            }
-
-            CommandText = string.Empty;
-            return true;
-        }
-
-        var parseResult = _parser.Parse(expandedText);
-        var parsedWithNewWindowOption = false;
-        if (hasNewWindowOption)
-        {
-            var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
-            if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && SupportsNewWindowOption(optionFreeParseResult.ParsedCommand!))
-            {
-                parseResult = optionFreeParseResult;
-                parsedWithNewWindowOption = true;
-            }
-        }
+        var parseResult = routing.ParseResult;
+        var parsedWithNewWindowOption = routing.ParsedWithNewWindowOption;
 
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {
@@ -3028,12 +2996,15 @@ public sealed record CompletionOptionViewModel(
         CommandLaunchMode launchMode,
         string expandedText)
     {
-        var hasNewWindowOption = UrlCommandModel.TryRemoveNewWindowOption(expandedText, out var textWithoutNewWindowOption);
-        if (launchMode == CommandLaunchMode.Normal
-            && _urlCommandModel.TryExecuteDirectUrl(expandedText, out var directUrlResult, newWindow))
+        var routing = _commandInputRouter.Route(
+            expandedText,
+            allowDirectExecution: launchMode == CommandLaunchMode.Normal,
+            newWindow,
+            SupportsNewWindowOption);
+        if (routing.ExecutionResult is { } directExecutionResult)
         {
-            SetStatusMessage(directUrlResult.Message);
-            if (!directUrlResult.Succeeded)
+            SetStatusMessage(directExecutionResult.Message);
+            if (!directExecutionResult.Succeeded)
             {
                 return false;
             }
@@ -3042,32 +3013,8 @@ public sealed record CompletionOptionViewModel(
             return true;
         }
 
-        if (launchMode == CommandLaunchMode.Normal
-            && hasNewWindowOption
-            && _urlCommandModel.TryExecuteDirectUrl(textWithoutNewWindowOption, out directUrlResult, newWindow: true))
-        {
-            SetStatusMessage(directUrlResult.Message);
-            if (!directUrlResult.Succeeded)
-            {
-                return false;
-            }
-
-            CommandText = string.Empty;
-            return true;
-        }
-
-        var parseResult = _parser.Parse(expandedText);
-        var parsedWithNewWindowOption = false;
-        if (hasNewWindowOption)
-        {
-            var optionFreeParseResult = _parser.Parse(textWithoutNewWindowOption);
-            if (optionFreeParseResult.Status == CommandParseStatus.Valid
-                && SupportsNewWindowOption(optionFreeParseResult.ParsedCommand!))
-            {
-                parseResult = optionFreeParseResult;
-                parsedWithNewWindowOption = true;
-            }
-        }
+        var parseResult = routing.ParseResult;
+        var parsedWithNewWindowOption = routing.ParsedWithNewWindowOption;
 
         if (parseResult.Status == CommandParseStatus.Incomplete)
         {

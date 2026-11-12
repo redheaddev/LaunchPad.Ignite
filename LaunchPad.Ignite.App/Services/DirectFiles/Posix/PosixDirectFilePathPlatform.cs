@@ -12,13 +12,19 @@ public abstract class PosixDirectFilePathPlatform : IDirectFilePathPlatform
 
     private readonly Func<string, IEnumerable<string>> _enumerateEntries;
     private readonly Func<string, bool> _directoryExists;
+    private readonly Func<string?> _pathProvider;
+    private readonly Func<string, bool> _isExecutableFile;
 
     protected PosixDirectFilePathPlatform(
         Func<string, IEnumerable<string>>? enumerateEntries = null,
-        Func<string, bool>? directoryExists = null)
+        Func<string, bool>? directoryExists = null,
+        Func<string?>? pathProvider = null,
+        Func<string, bool>? isExecutableFile = null)
     {
         _enumerateEntries = enumerateEntries ?? Directory.EnumerateFileSystemEntries;
         _directoryExists = directoryExists ?? Directory.Exists;
+        _pathProvider = pathProvider ?? (() => Environment.GetEnvironmentVariable("PATH"));
+        _isExecutableFile = isExecutableFile ?? IsExecutableFile;
     }
 
     public bool IsDirectPath(string text)
@@ -100,4 +106,61 @@ public abstract class PosixDirectFilePathPlatform : IDirectFilePathPlatform
 
     public bool IsPathPrefix(string path, string prefix)
         => path.StartsWith(prefix, StringComparison.Ordinal);
+
+    public virtual bool TryCreateLaunchApplicationStartInfo(
+        string path,
+        bool isDirectory,
+        IReadOnlyList<string> arguments,
+        out ProcessStartInfo? startInfo)
+    {
+        startInfo = null;
+        if (isDirectory || !_isExecutableFile(path))
+        {
+            return false;
+        }
+
+        startInfo = new ProcessStartInfo(path) { UseShellExecute = false };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return true;
+    }
+
+    public bool TryResolveApplicationCommand(string command, out string executablePath)
+    {
+        executablePath = string.Empty;
+        if (string.IsNullOrWhiteSpace(command)
+            || command.Contains(Path.DirectorySeparatorChar)
+            || command.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return false;
+        }
+
+        foreach (var directory in (_pathProvider() ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory, command);
+            if (_isExecutableFile(candidate))
+            {
+                executablePath = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExecutableFile(string path)
+    {
+        try
+        {
+            var mode = File.GetUnixFileMode(path);
+            return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
 }

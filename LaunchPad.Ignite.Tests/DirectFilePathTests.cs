@@ -254,6 +254,48 @@ public class DirectFilePathTests
         Assert.Equal("/select,C:\\work\\file.txt", Assert.Single(starter.StartInfo!.ArgumentList));
     }
 
+    [Theory]
+    [InlineData(@"C:\work\tool.exe", false)]
+    [InlineData(@"C:\work\tool.bat", true)]
+    [InlineData(@"C:\work\tool.cmd", true)]
+    public void TryOpenLaunchesWindowsApplicationsAndPassesArguments(string path, bool useShellExecute)
+    {
+        var starter = new RecordingProcessStarter();
+        var handler = new DirectFilePathHandler(
+            starter,
+            new WindowsDirectFilePathPlatform(),
+            fileExists: candidate => candidate == path,
+            directoryExists: _ => false);
+
+        var handled = handler.TryOpen($"\"{path}\" --flag \"value with spaces\"", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal(path, starter.StartInfo!.FileName);
+        Assert.Equal(useShellExecute, starter.StartInfo.UseShellExecute);
+        Assert.Equal(["--flag", "value with spaces"], starter.StartInfo.ArgumentList);
+    }
+
+    [Fact]
+    public void TryLaunchCommandResolvesWindowsPathAndPassesArguments()
+    {
+        var starter = new RecordingProcessStarter();
+        var executable = Path.Combine("tools", "tool.CMD");
+        var platform = new WindowsDirectFilePathPlatform(
+            pathProvider: () => "tools",
+            pathExtensionsProvider: () => ".EXE;.CMD",
+            fileExists: candidate => candidate == executable);
+        var handler = new DirectFilePathHandler(starter, platform);
+
+        var handled = handler.TryLaunchCommand("tool --help", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal(executable, starter.StartInfo!.FileName);
+        Assert.True(starter.StartInfo.UseShellExecute);
+        Assert.Equal(["--help"], starter.StartInfo.ArgumentList);
+    }
+
     [Fact]
     public void TryOpenOpensQuotedUncPathWithSpaces()
     {

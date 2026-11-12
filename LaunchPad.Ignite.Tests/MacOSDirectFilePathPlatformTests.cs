@@ -117,6 +117,23 @@ public class MacOSDirectFilePathPlatformTests
         Assert.Equal(["-R", "/Users/dev/file.txt"], starter.StartInfo.ArgumentList);
     }
 
+    [Fact]
+    public void HandlerLaunchesApplicationBundles()
+    {
+        var starter = new RecordingProcessStarter();
+        var handler = new DirectFilePathHandler(
+            starter,
+            new MacOSDirectFilePathPlatform(),
+            directoryExists: path => path == "/Applications/Demo.app");
+
+        var handled = handler.TryOpen("/Applications/Demo.app", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal("/usr/bin/open", starter.StartInfo!.FileName);
+        Assert.Equal(["-a", "/Applications/Demo.app"], starter.StartInfo.ArgumentList);
+    }
+
     private sealed class RecordingProcessStarter : IProcessStarter
     {
         public ProcessStartInfo? StartInfo { get; private set; }

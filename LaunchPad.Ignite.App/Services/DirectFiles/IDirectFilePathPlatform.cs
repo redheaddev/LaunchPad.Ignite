@@ -16,4 +16,12 @@ public interface IDirectFilePathPlatform
     bool IsPathPrefix(string path, string prefix);
 
     ProcessStartInfo CreateOpenPathStartInfo(string path, bool isDirectory);
+
+    bool TryCreateLaunchApplicationStartInfo(
+        string path,
+        bool isDirectory,
+        IReadOnlyList<string> arguments,
+        out ProcessStartInfo? startInfo);
+
+    bool TryResolveApplicationCommand(string command, out string executablePath);
 }

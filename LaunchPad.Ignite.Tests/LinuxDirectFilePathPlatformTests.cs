@@ -1,4 +1,7 @@
 using System;
+using System.Diagnostics;
+using LaunchPad.Ignite.App.Services;
+using LaunchPad.Ignite.App.Services.DirectFiles;
 using LaunchPad.Ignite.App.Services.DirectFiles.Linux;
 
 namespace LaunchPad.Ignite.Tests;
@@ -39,5 +42,33 @@ public sealed class LinuxDirectFilePathPlatformTests
         Assert.False(fileStartInfo.UseShellExecute);
         Assert.Equal(["/home/dev/file.txt"], fileStartInfo.ArgumentList);
         Assert.Equal(["/home/dev"], directoryStartInfo.ArgumentList);
+    }
+
+    [Fact]
+    public void HandlerLaunchesExecutableFilesInsteadOfOpeningThem()
+    {
+        var starter = new RecordingProcessStarter();
+        var platform = new LinuxDirectFilePathPlatform(
+            pathProvider: () => "/usr/bin",
+            isExecutableFile: path => path == "/usr/bin/tool");
+        var handler = new DirectFilePathHandler(
+            starter,
+            platform,
+            fileExists: path => path == "/usr/bin/tool",
+            directoryExists: _ => false);
+
+        var handled = handler.TryOpen("/usr/bin/tool --version", out var result);
+
+        Assert.True(handled);
+        Assert.True(result.Succeeded);
+        Assert.Equal("/usr/bin/tool", starter.StartInfo!.FileName);
+        Assert.Equal(["--version"], starter.StartInfo.ArgumentList);
+    }
+
+    private sealed class RecordingProcessStarter : IProcessStarter
+    {
+        public ProcessStartInfo? StartInfo { get; private set; }
+
+        public void Start(ProcessStartInfo startInfo) => StartInfo = startInfo;
     }
 }

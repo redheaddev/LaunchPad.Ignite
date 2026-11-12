@@ -24,6 +24,8 @@ Run the installer for a per-user installation. The installer can optionally crea
 
 Launch the app and start typing to search available commands. Press **Enter** to run the highlighted command. Use **Tab** or **Right Arrow** to accept a completion, and **Esc** to close the launcher. The default activation shortcut is **Alt+Space**.
 
+You can also type an executable path to launch it directly. Windows supports `.exe`, `.com`, `.bat`, and `.cmd` files, and resolves command names from `PATH`; macOS supports executable files and `.app` bundles, while Linux supports executable files.
+
 Use the settings and help buttons in the main window for configuration and command guidance. Secret commands prompt for secret names and values as needed. Secret values are not included in command result messages. Avoid copying other sensitive content to the clipboard while a secret countdown is active, since expiration only clears the clipboard when it still contains the copied secret.
 
 Enable clipboard history under **Settings > Clipboard**. Run `clipboard list` to show recent entries and their IDs, `clipboard copy <id>` to restore one to the clipboard, or `clipboard clear` to clear the session history after confirmation. History is off by default, held in memory only, and cleared when LaunchPad exits. LaunchPad's expiring secret copies are excluded; disable history before copying other sensitive content.

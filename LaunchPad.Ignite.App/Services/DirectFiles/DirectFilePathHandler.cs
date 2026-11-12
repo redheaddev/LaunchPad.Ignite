@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using LaunchPad.Ignite.Core.Execution;
+using LaunchPad.Ignite.Core.Parsing;
 using LaunchPad.Ignite.App.Services.Terminals;
 
 namespace LaunchPad.Ignite.App.Services.DirectFiles;
@@ -49,7 +51,14 @@ public sealed class DirectFilePathHandler
 
     public bool TryOpen(string text, out CommandExecutionResult result)
     {
-        if (!_platform.TryGetCompletionPath(text, out var path))
+        var (path, arguments) = ParseTargetAndArguments(text);
+        if (path.Length == 0)
+        {
+            result = new CommandExecutionResult(false, string.Empty);
+            return false;
+        }
+
+        if (!_platform.IsDirectPath(path))
         {
             result = new CommandExecutionResult(false, string.Empty);
             return false;
@@ -62,6 +71,60 @@ public sealed class DirectFilePathHandler
             return true;
         }
 
+        if (_platform.TryCreateLaunchApplicationStartInfo(path, isDirectory, arguments, out var launchInfo))
+        {
+            return TryStart(launchInfo!, $"Launched {Path.GetFileName(path)}.", "Unable to launch application:", out result);
+        }
+
+        if (arguments.Length > 0)
+        {
+            result = new CommandExecutionResult(false, string.Empty);
+            return false;
+        }
+
+        return TryOpenPath(path, isDirectory, out result);
+    }
+
+    public bool TryLaunchCommand(string text, out CommandExecutionResult result)
+    {
+        var (command, arguments) = ParseTargetAndArguments(text);
+        if (command.Length == 0
+            || !_platform.TryResolveApplicationCommand(command, out var executablePath)
+            || !_platform.TryCreateLaunchApplicationStartInfo(
+                executablePath,
+                isDirectory: false,
+                arguments,
+                out var startInfo))
+        {
+            result = new CommandExecutionResult(false, string.Empty);
+            return false;
+        }
+
+        return TryStart(startInfo!, $"Launched {Path.GetFileName(executablePath)}.", "Unable to launch application:", out result);
+    }
+
+    private static (string Target, string[] Arguments) ParseTargetAndArguments(string text)
+    {
+        var tokenizer = new CommandLineTokenizer();
+        if (text.StartsWith('"'))
+        {
+            var closingQuote = text.IndexOf('"', 1);
+            if (closingQuote > 0)
+            {
+                return (
+                    text[1..closingQuote],
+                    tokenizer.Tokenize(text[(closingQuote + 1)..]).Select(token => token.Value).ToArray());
+            }
+        }
+
+        var tokens = tokenizer.Tokenize(text);
+        return tokens.Count == 0
+            ? (string.Empty, Array.Empty<string>())
+            : (tokens[0].Value, tokens.Skip(1).Select(token => token.Value).ToArray());
+    }
+
+    private bool TryOpenPath(string path, bool isDirectory, out CommandExecutionResult result)
+    {
         try
         {
             _processStarter.Start(_platform.CreateOpenPathStartInfo(path, isDirectory));
@@ -70,6 +133,25 @@ public sealed class DirectFilePathHandler
         catch (Exception exception)
         {
             result = new CommandExecutionResult(false, $"Unable to open path: {exception.Message}");
+        }
+
+        return true;
+    }
+
+    private bool TryStart(
+        ProcessStartInfo startInfo,
+        string successMessage,
+        string failurePrefix,
+        out CommandExecutionResult result)
+    {
+        try
+        {
+            _processStarter.Start(startInfo);
+            result = new CommandExecutionResult(true, successMessage);
+        }
+        catch (Exception exception)
+        {
+            result = new CommandExecutionResult(false, $"{failurePrefix} {exception.Message}");
         }
 
         return true;

@@ -14,15 +14,24 @@ public sealed class WindowsDirectFilePathPlatform : IDirectFilePathPlatform
     private readonly Func<string, IEnumerable<string>> _enumerateEntries;
     private readonly Func<string, bool> _directoryExists;
     private readonly Func<string, IEnumerable<string>> _enumerateUncShares;
+    private readonly Func<string?> _pathProvider;
+    private readonly Func<string?> _pathExtensionsProvider;
+    private readonly Func<string, bool> _fileExists;
 
     public WindowsDirectFilePathPlatform(
         Func<string, IEnumerable<string>>? enumerateEntries = null,
         Func<string, bool>? directoryExists = null,
-        Func<string, IEnumerable<string>>? enumerateUncShares = null)
+        Func<string, IEnumerable<string>>? enumerateUncShares = null,
+        Func<string?>? pathProvider = null,
+        Func<string?>? pathExtensionsProvider = null,
+        Func<string, bool>? fileExists = null)
     {
         _enumerateEntries = enumerateEntries ?? Directory.EnumerateFileSystemEntries;
         _directoryExists = directoryExists ?? Directory.Exists;
         _enumerateUncShares = enumerateUncShares ?? WindowsUncShareEnumerator.EnumerateShares;
+        _pathProvider = pathProvider ?? (() => Environment.GetEnvironmentVariable("PATH"));
+        _pathExtensionsProvider = pathExtensionsProvider ?? (() => Environment.GetEnvironmentVariable("PATHEXT"));
+        _fileExists = fileExists ?? File.Exists;
     }
 
     public bool IsDirectPath(string text)
@@ -144,6 +153,87 @@ public sealed class WindowsDirectFilePathPlatform : IDirectFilePathPlatform
 
     public bool IsPathPrefix(string path, string prefix)
         => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+
+    public bool TryCreateLaunchApplicationStartInfo(
+        string path,
+        bool isDirectory,
+        IReadOnlyList<string> arguments,
+        out ProcessStartInfo? startInfo)
+    {
+        startInfo = null;
+        if (isDirectory)
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(path);
+        if (!IsRunnableExtension(extension))
+        {
+            return false;
+        }
+
+        startInfo = new ProcessStartInfo(path)
+        {
+            UseShellExecute = string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase)
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return true;
+    }
+
+    public bool TryResolveApplicationCommand(string command, out string executablePath)
+    {
+        executablePath = string.Empty;
+        if (string.IsNullOrWhiteSpace(command)
+            || command.Contains('\\')
+            || command.Contains('/')
+            || command.Contains(':'))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(command);
+        var extensions = string.IsNullOrEmpty(extension)
+            ? GetPathExtensions()
+            : IsRunnableExtension(extension) ? [extension] : Array.Empty<string>();
+        foreach (var directory in (_pathProvider() ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var searchDirectory = directory.Trim().Trim('"');
+            foreach (var candidateExtension in extensions)
+            {
+                var candidateName = string.IsNullOrEmpty(extension) ? command + candidateExtension : command;
+                var candidate = Path.Combine(searchDirectory, candidateName);
+                if (_fileExists(candidate))
+                {
+                    executablePath = candidate;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private IReadOnlyList<string> GetPathExtensions()
+    {
+        const string defaultExtensions = ".COM;.EXE;.BAT;.CMD";
+        var extensions = (_pathExtensionsProvider() ?? defaultExtensions)
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(IsRunnableExtension)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return extensions.Length > 0 ? extensions : [".COM", ".EXE", ".BAT", ".CMD"];
+    }
+
+    private static bool IsRunnableExtension(string extension)
+        => extension.Equals(".exe", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".com", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase);
 
     private bool TryGetUncShareSuggestions(string path, out IReadOnlyList<string> suggestions)
     {

@@ -9,8 +9,10 @@ public sealed class LinuxDirectFilePathPlatform : PosixDirectFilePathPlatform
 {
     public LinuxDirectFilePathPlatform(
         Func<string, IEnumerable<string>>? enumerateEntries = null,
-        Func<string, bool>? directoryExists = null)
-        : base(enumerateEntries, directoryExists)
+        Func<string, bool>? directoryExists = null,
+        Func<string?>? pathProvider = null,
+        Func<string, bool>? isExecutableFile = null)
+        : base(enumerateEntries, directoryExists, pathProvider, isExecutableFile)
     {
     }
 
