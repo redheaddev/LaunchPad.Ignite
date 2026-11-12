@@ -77,6 +77,46 @@ public class CommandLineParserTests
     }
 
     [Fact]
+    public void ParseResolvesUnqualifiedNameWhenOnlyOneNamespacedCommandMatches()
+    {
+        var schema = TestCommandSchemas.Pipeline;
+        var namespacedSchema = schema with
+        {
+            Commands = [schema.Commands[0] with { Namespace = "ns" }]
+        };
+        var parser = new CommandLineParser(
+            new CommandCatalog(namespacedSchema),
+            new CommandSchemaValueProvider(namespacedSchema));
+
+        var result = parser.Parse("pipeline claims");
+
+        Assert.Equal(CommandParseStatus.Valid, result.Status);
+        Assert.Equal("ns:pipeline", result.ParsedCommand!.Definition.QualifiedName);
+    }
+
+    [Fact]
+    public void ParseDoesNotResolveUnqualifiedNameWhenMultipleCommandsMatch()
+    {
+        var schema = TestCommandSchemas.Pipeline;
+        var command = schema.Commands[0];
+        var ambiguousSchema = schema with
+        {
+            Commands =
+            [
+                command with { Namespace = "first" },
+                command with { Namespace = "second" }
+            ]
+        };
+        var parser = new CommandLineParser(
+            new CommandCatalog(ambiguousSchema),
+            new CommandSchemaValueProvider(ambiguousSchema));
+
+        var result = parser.Parse("pipeline claims");
+
+        Assert.Equal(CommandParseStatus.Invalid, result.Status);
+    }
+
+    [Fact]
     public void ParseReturnsIncompleteForMissingRequiredProject()
     {
         var result = _parser.Parse("pipeline");

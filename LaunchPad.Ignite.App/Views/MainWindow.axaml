@@ -10,7 +10,7 @@
         Title="LaunchPad.Ignite"
         Width="760" Height="360" MinWidth="640" MinHeight="300"
         WindowDecorations="None" CanResize="False"
-        Background="Transparent" ShowInTaskbar="False" Topmost="True"
+        Background="Transparent" ShowInTaskbar="True" Topmost="True"
         WindowStartupLocation="CenterScreen">
 
     <Design.DataContext>

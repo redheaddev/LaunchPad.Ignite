@@ -21,7 +21,25 @@ public sealed class CommandCatalog
     public IReadOnlyCollection<CommandDefinition> Commands => _commands.Values;
 
     public bool TryGetCommand(string name, out CommandDefinition command)
-        => _commands.TryGetValue(name, out command!);
+    {
+        if (_commands.TryGetValue(name, out command!))
+        {
+            return true;
+        }
+
+        var matches = Schema.Commands
+            .Where(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Take(2)
+            .ToArray();
+        if (matches.Length == 1)
+        {
+            command = matches[0];
+            return true;
+        }
+
+        command = null!;
+        return false;
+    }
 
     public bool TryGetAction(CommandDefinition command, string name, out CommandActionDefinition action)
     {
